@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Users can read/update/delete their own document
+      allow read, update, delete: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Anyone authenticated can create a user document
+      allow create: if isAuthenticated();
+      
+      // Manager-level Employees collection
+      match /employees/{employeeId} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      }
+      
+      // Manager-level Tasks collection
+      match /tasks/{taskId} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      }
+      
+      // Locations subcollection - only the user can access their own locations
+      match /locations/{locationId} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+        
+        // Employees subcollection
+        match /employees/{employeeId} {
+          allow read, write: if isAuthenticated() && request.auth.uid == userId;
+        }
+        
+        // Tasks subcollection
+        match /tasks/{taskId} {
+          allow read, write: if isAuthenticated() && request.auth.uid == userId;
+        }
+        
+        // Shifts subcollection
+        match /shifts/{shiftId} {
+          allow read, write: if isAuthenticated() && request.auth.uid == userId;
+        }
+        
+        // Lottery Forms subcollection
+        match /lotteryForms/{formId} {
+          allow read, write: if isAuthenticated() && request.auth.uid == userId;
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Task images: task_images/{managerUserId}/{locationId}/{taskId}
+    match /task_images/{managerUserId}/{locationId}/{taskId} {
+      // Allow read for authenticated users (managers and employees can view)
+      allow read: if isAuthenticated();
+      
+      // Allow write (upload) for authenticated users
+      // Employees can upload images for tasks at their location
+      // Managers can upload/delete images for their locations
+      allow write: if isAuthenticated();
+    }
+    
+    // Allow all other paths for authenticated users (for future use)
+    match /{allPaths=**} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}
+
