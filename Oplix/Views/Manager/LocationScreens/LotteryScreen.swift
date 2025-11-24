@@ -32,7 +32,7 @@ struct LotteryScreen: View {
                                 .fontWeight(.bold)
                                 .foregroundColor(.black)
                             
-                            Text("Configure lottery form columns and rows")
+                            Text("Configure lottery form template")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }

@@ -472,3 +472,4 @@ struct ImagePickerView: UIViewControllerRepresentable {
         DocumentsScreen(viewModel: LocationDetailViewModel(userId: "test-user", locationId: "test-location"))
     }
 }
+

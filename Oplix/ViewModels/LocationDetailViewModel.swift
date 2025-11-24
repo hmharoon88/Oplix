@@ -15,7 +15,6 @@ class LocationDetailViewModel: ObservableObject {
     @Published var shifts: [Shift] = []
     @Published var lotteryForms: [LotteryForm] = []
     @Published var documents: [Document] = []
-    @Published var lotteryFormTemplate: LotteryFormTemplate?
     @Published var isLoading = true
     @Published var errorMessage: String?
     @Published var selectedTab: LocationTab = .employees
@@ -26,7 +25,7 @@ class LocationDetailViewModel: ObservableObject {
     
     private let firebaseService = FirebaseService.shared
     let userId: String
-    let locationId: String
+    private let locationId: String
     
     init(userId: String, locationId: String) {
         self.userId = userId
@@ -60,13 +59,6 @@ class LocationDetailViewModel: ObservableObject {
             print("🟢 Lottery forms fetched: \(lotteryForms.count)")
             documents = try await documentsTask
             print("🟢 Documents fetched: \(documents.count)")
-            
-            // Load lottery form template
-            lotteryFormTemplate = try? await firebaseService.fetchLotteryFormTemplate(userId: userId, locationId: locationId)
-            if lotteryFormTemplate == nil {
-                // Create default template if none exists
-                lotteryFormTemplate = LotteryFormTemplate(locationId: locationId)
-            }
         } catch {
             print("🔴 Error loading data: \(error.localizedDescription)")
             print("🔴 Error type: \(type(of: error))")
@@ -417,15 +409,6 @@ class LocationDetailViewModel: ObservableObject {
         }
     }
     
-    func saveLotteryFormTemplate(_ template: LotteryFormTemplate) async {
-        do {
-            try await firebaseService.saveLotteryFormTemplate(userId: userId, locationId: locationId, template: template)
-            lotteryFormTemplate = template
-        } catch {
-            errorMessage = "Failed to save lottery form template: \(error.localizedDescription)"
-        }
-    }
-    
     func startObserving() {
         firebaseService.observeTasks(userId: userId, locationId: locationId) { [weak self] tasks in
             guard let self = self else { return }
@@ -436,6 +419,22 @@ class LocationDetailViewModel: ObservableObject {
             guard let self = self else { return }
             self.lotteryForms = forms
         }
+    }
+    
+    func loadLotteryFormTemplate() async -> [LotteryFormTemplateRow] {
+        do {
+            if let template = try await firebaseService.fetchLotteryFormTemplate(userId: userId, locationId: locationId) {
+                return template.rows
+            }
+        } catch {
+            print("🔴 Failed to load lottery form template: \(error.localizedDescription)")
+        }
+        return []
+    }
+    
+    func saveLotteryFormTemplate(rows: [LotteryFormTemplateRow]) async throws {
+        let template = LotteryFormTemplate(locationId: locationId, rows: rows)
+        try await firebaseService.saveLotteryFormTemplate(userId: userId, locationId: locationId, template: template)
     }
 }
 

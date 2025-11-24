@@ -811,6 +811,36 @@ class FirebaseService: ObservableObject {
         listeners["lottery_\(userId)_\(locationId)"] = listener
     }
     
+    // MARK: - Lottery Form Template
+    
+    func saveLotteryFormTemplate(userId: String, locationId: String, template: LotteryFormTemplate) async throws {
+        var updatedTemplate = template
+        updatedTemplate = LotteryFormTemplate(locationId: locationId, rows: template.rows, lastUpdated: Date())
+        try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryFormTemplate")
+            .document("template")
+            .setData(from: updatedTemplate)
+    }
+    
+    func fetchLotteryFormTemplate(userId: String, locationId: String) async throws -> LotteryFormTemplate? {
+        let document = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryFormTemplate")
+            .document("template")
+            .getDocument()
+        
+        guard document.exists else {
+            return nil
+        }
+        
+        return try document.data(as: LotteryFormTemplate.self)
+    }
+    
     // MARK: - Firebase Storage
     
     func uploadTaskImage(imageData: Data, taskId: String, userId: String, locationId: String) async throws -> String {
@@ -944,33 +974,6 @@ class FirebaseService: ObservableObject {
         }
         
         return allDocuments
-    }
-    
-    // MARK: - Lottery Form Template
-    
-    func fetchLotteryFormTemplate(userId: String, locationId: String) async throws -> LotteryFormTemplate? {
-        let document = try await db.collection("users")
-            .document(userId)
-            .collection("locations")
-            .document(locationId)
-            .collection("lotteryFormTemplate")
-            .document("template")
-            .getDocument()
-        
-        if document.exists {
-            return try? document.data(as: LotteryFormTemplate.self)
-        }
-        return nil
-    }
-    
-    func saveLotteryFormTemplate(userId: String, locationId: String, template: LotteryFormTemplate) async throws {
-        try await db.collection("users")
-            .document(userId)
-            .collection("locations")
-            .document(locationId)
-            .collection("lotteryFormTemplate")
-            .document("template")
-            .setData(from: template)
     }
     
     // MARK: - Cleanup
