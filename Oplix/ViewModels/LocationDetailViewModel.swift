@@ -14,6 +14,8 @@ class LocationDetailViewModel: ObservableObject {
     @Published var tasks: [WorkTask] = []
     @Published var shifts: [Shift] = []
     @Published var lotteryForms: [LotteryForm] = []
+    @Published var documents: [Document] = []
+    @Published var lotteryFormTemplate: LotteryFormTemplate?
     @Published var isLoading = true
     @Published var errorMessage: String?
     @Published var selectedTab: LocationTab = .employees
@@ -23,8 +25,8 @@ class LocationDetailViewModel: ObservableObject {
     }
     
     private let firebaseService = FirebaseService.shared
-    private let userId: String
-    private let locationId: String
+    let userId: String
+    let locationId: String
     
     init(userId: String, locationId: String) {
         self.userId = userId
@@ -44,6 +46,7 @@ class LocationDetailViewModel: ObservableObject {
             async let tasksTask = firebaseService.fetchTasks(userId: userId, locationId: locationId)
             async let shiftsTask = firebaseService.fetchShifts(userId: userId, locationId: locationId)
             async let lotteryTask = firebaseService.fetchLotteryForms(userId: userId, locationId: locationId)
+            async let documentsTask = firebaseService.fetchDocuments(userId: userId, locationId: locationId)
             
             location = try await locationTask
             print("🟢 Location fetched: \(location?.name ?? "nil")")
@@ -55,6 +58,15 @@ class LocationDetailViewModel: ObservableObject {
             print("🟢 Shifts fetched: \(shifts.count)")
             lotteryForms = try await lotteryTask
             print("🟢 Lottery forms fetched: \(lotteryForms.count)")
+            documents = try await documentsTask
+            print("🟢 Documents fetched: \(documents.count)")
+            
+            // Load lottery form template
+            lotteryFormTemplate = try? await firebaseService.fetchLotteryFormTemplate(userId: userId, locationId: locationId)
+            if lotteryFormTemplate == nil {
+                // Create default template if none exists
+                lotteryFormTemplate = LotteryFormTemplate(locationId: locationId)
+            }
         } catch {
             print("🔴 Error loading data: \(error.localizedDescription)")
             print("🔴 Error type: \(type(of: error))")
@@ -367,6 +379,50 @@ class LocationDetailViewModel: ObservableObject {
             await loadData()
         } catch {
             errorMessage = "Failed to update shift: \(error.localizedDescription)"
+        }
+    }
+    
+    func createDocument(name: String, fileData: Data, fileName: String, fileType: String, expiryDate: Date?, uploadedBy: String) async throws {
+        // Upload file to Firebase Storage
+        let fileURL = try await firebaseService.uploadDocument(
+            fileData: fileData,
+            fileName: fileName,
+            fileType: fileType,
+            userId: userId,
+            locationId: locationId
+        )
+        
+        // Create document record
+        let document = Document(
+            id: UUID().uuidString,
+            locationId: locationId,
+            name: name,
+            fileURL: fileURL,
+            fileType: fileType,
+            uploadedAt: Date(),
+            expiryDate: expiryDate,
+            uploadedBy: uploadedBy
+        )
+        
+        try await firebaseService.createDocument(userId: userId, locationId: locationId, document: document)
+        await loadData()
+    }
+    
+    func deleteDocument(_ document: Document) async {
+        do {
+            try await firebaseService.deleteDocument(userId: userId, locationId: locationId, documentId: document.id)
+            await loadData()
+        } catch {
+            errorMessage = "Failed to delete document: \(error.localizedDescription)"
+        }
+    }
+    
+    func saveLotteryFormTemplate(_ template: LotteryFormTemplate) async {
+        do {
+            try await firebaseService.saveLotteryFormTemplate(userId: userId, locationId: locationId, template: template)
+            lotteryFormTemplate = template
+        } catch {
+            errorMessage = "Failed to save lottery form template: \(error.localizedDescription)"
         }
     }
     

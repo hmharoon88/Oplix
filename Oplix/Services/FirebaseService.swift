@@ -66,6 +66,56 @@ class FirebaseService: ObservableObject {
         return try document.data(as: User.self)
     }
     
+    func updateUser(userId: String, user: User) async throws {
+        try await db.collection("users").document(userId).setData(from: user, merge: true)
+    }
+    
+    func deleteAccount(userId: String, password: String) async throws {
+        // Re-authenticate user to verify password
+        guard let currentUser = Auth.auth().currentUser,
+              let email = currentUser.email else {
+            throw NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+        try await currentUser.reauthenticate(with: credential)
+        
+        // Send email notification (requires backend function in production)
+        // For now, we'll just log it
+        print("📧 Account deletion requested for: \(email)")
+        
+        // Fetch all data to delete
+        let locations = try await fetchLocations(userId: userId)
+        let employees = try await fetchManagerEmployees(userId: userId)
+        
+        // Delete all locations (this cascades to employees, tasks, shifts, lottery forms)
+        for location in locations {
+            try? await deleteLocation(userId: userId, locationId: location.id)
+        }
+        
+        // Delete all manager-level employees and their Firebase Auth accounts
+        for employee in employees {
+            // Delete employee's Firebase Auth account (requires Admin SDK in production)
+            // For now, we'll delete the Firestore documents
+            try? await deleteManagerEmployee(userId: userId, employeeId: employee.id)
+            
+            // Delete User document
+            try? await db.collection("users").document(employee.id).delete()
+        }
+        
+        // Delete all manager-level tasks
+        let tasks = try await fetchManagerTasks(userId: userId)
+        for task in tasks {
+            try? await deleteManagerTask(userId: userId, taskId: task.id)
+        }
+        
+        // Delete manager's User document
+        try await db.collection("users").document(userId).delete()
+        
+        // Delete Firebase Auth account
+        try await currentUser.delete()
+    }
+    
     func getCurrentUser() -> User? {
         guard let userId = Auth.auth().currentUser?.uid else { return nil }
         // In production, you'd fetch from Firestore, but for simplicity we'll return nil
@@ -788,6 +838,139 @@ class FirebaseService: ObservableObject {
                 }
             }
         }
+    }
+    
+    // MARK: - Documents (as subcollection under locations)
+    
+    func fetchDocuments(userId: String, locationId: String) async throws -> [Document] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("documents")
+            .order(by: "uploadedAt", descending: true)
+            .getDocuments()
+        return try snapshot.documents.compactMap { doc in
+            try doc.data(as: Document.self)
+        }
+    }
+    
+    func createDocument(userId: String, locationId: String, document: Document) async throws {
+        try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("documents")
+            .document(document.id)
+            .setData(from: document)
+    }
+    
+    func deleteDocument(userId: String, locationId: String, documentId: String) async throws {
+        // First, get the document to get the file URL
+        let docRef = db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("documents")
+            .document(documentId)
+        
+        let document = try await docRef.getDocument()
+        if let documentData = try? document.data(as: Document.self) {
+            // Delete from Firebase Storage
+            let storage = Storage.storage()
+            let fileRef = storage.reference(forURL: documentData.fileURL)
+            try? await fileRef.delete()
+        }
+        
+        // Delete from Firestore
+        try await docRef.delete()
+    }
+    
+    func uploadDocument(fileData: Data, fileName: String, fileType: String, userId: String, locationId: String) async throws -> String {
+        let storage = Storage.storage()
+        let fileExtension = (fileName as NSString).pathExtension.lowercased()
+        let sanitizedFileName = fileName.replacingOccurrences(of: " ", with: "_")
+        let documentRef = storage.reference().child("documents/\(userId)/\(locationId)/\(sanitizedFileName)")
+        
+        let metadata = StorageMetadata()
+        
+        // Set content type based on file type
+        switch fileExtension {
+        case "pdf":
+            metadata.contentType = "application/pdf"
+        case "jpg", "jpeg":
+            metadata.contentType = "image/jpeg"
+        case "png":
+            metadata.contentType = "image/png"
+        case "doc", "docx":
+            metadata.contentType = "application/msword"
+        default:
+            metadata.contentType = "application/octet-stream"
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            _ = documentRef.putData(fileData, metadata: metadata) { metadata, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                documentRef.downloadURL { url, error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else if let url = url {
+                        continuation.resume(returning: url.absoluteString)
+                    } else {
+                        continuation.resume(throwing: NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get download URL"]))
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fetch all documents across all locations for a manager (for notifications)
+    func fetchAllDocuments(userId: String) async throws -> [Document] {
+        let locations = try await fetchLocations(userId: userId)
+        var allDocuments: [Document] = []
+        
+        for location in locations {
+            do {
+                let documents = try await fetchDocuments(userId: userId, locationId: location.id)
+                allDocuments.append(contentsOf: documents)
+            } catch {
+                // Continue with other locations if one fails
+                continue
+            }
+        }
+        
+        return allDocuments
+    }
+    
+    // MARK: - Lottery Form Template
+    
+    func fetchLotteryFormTemplate(userId: String, locationId: String) async throws -> LotteryFormTemplate? {
+        let document = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryFormTemplate")
+            .document("template")
+            .getDocument()
+        
+        if document.exists {
+            return try? document.data(as: LotteryFormTemplate.self)
+        }
+        return nil
+    }
+    
+    func saveLotteryFormTemplate(userId: String, locationId: String, template: LotteryFormTemplate) async throws {
+        try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryFormTemplate")
+            .document("template")
+            .setData(from: template)
     }
     
     // MARK: - Cleanup

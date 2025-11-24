@@ -145,5 +145,33 @@ class ManagerEmployeesViewModel: ObservableObject {
             errorMessage = "Failed to unassign employee: \(error.localizedDescription)"
         }
     }
+    
+    func updateEmployee(_ employee: Employee) async throws {
+        // Update manager-level employee
+        try await firebaseService.updateManagerEmployee(userId: userId, employee: employee)
+        
+        // Also update in all assigned location subcollections
+        for locationId in employee.assignedLocationIds {
+            var locationEmployee = employee
+            locationEmployee.locationId = locationId // Set primary location for backward compatibility
+            try await firebaseService.updateEmployee(userId: userId, locationId: locationId, employee: locationEmployee)
+        }
+        
+        // Update User document if needed (username change)
+        // Note: We'll need to add a method to FirebaseService to update User documents
+        // For now, we'll skip this as username changes are less common
+        
+        await loadData()
+    }
+    
+    func updateEmployeePassword(employeeId: String, newPassword: String) async throws {
+        // Update password in manager-level employee
+        guard var employee = employees.first(where: { $0.id == employeeId }) else {
+            throw NSError(domain: "ManagerEmployeesViewModel", code: -1, userInfo: [NSLocalizedDescriptionKey: "Employee not found"])
+        }
+        
+        employee.password = newPassword
+        try await updateEmployee(employee)
+    }
 }
 

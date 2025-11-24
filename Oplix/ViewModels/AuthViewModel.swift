@@ -97,5 +97,20 @@ class AuthViewModel: ObservableObject {
             errorMessage = "Sign out failed: \(error.localizedDescription)"
         }
     }
+    
+    func updateUser(_ user: User) async throws {
+        let userId = user.id
+        try await firebaseService.updateUser(userId: userId, user: user)
+        currentUser = user
+    }
+    
+    func deleteAccount(password: String) async throws {
+        guard let userId = currentUser?.id else {
+            throw NSError(domain: "AuthViewModel", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        try await firebaseService.deleteAccount(userId: userId, password: password)
+        currentUser = nil
+        isAuthenticated = false
+    }
 }
 

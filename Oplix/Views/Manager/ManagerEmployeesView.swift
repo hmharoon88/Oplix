@@ -80,8 +80,10 @@ struct ManagerEmployeesView: View {
                     } else {
                         List {
                             ForEach(viewModel.employees) { employee in
-                                ManagerEmployeeRow(employee: employee, viewModel: viewModel)
-                                    .listRowBackground(Color.clear)
+                                NavigationLink(value: employee) {
+                                    ManagerEmployeeRow(employee: employee, viewModel: viewModel)
+                                }
+                                .listRowBackground(Color.clear)
                             }
                             .onDelete { indexSet in
                                 if let index = indexSet.first {
@@ -94,6 +96,9 @@ struct ManagerEmployeesView: View {
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
+                        .navigationDestination(for: Employee.self) { employee in
+                            EditManagerEmployeeView(employee: employee, viewModel: viewModel)
+                        }
                     }
                     
                     // Colored Footer

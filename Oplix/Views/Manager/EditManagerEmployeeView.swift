@@ -1,5 +1,5 @@
 //
-//  AddManagerEmployeeView.swift
+//  EditManagerEmployeeView.swift
 //  Oplix
 //
 //  Created by Hafiz Afzal on 11/17/25.
@@ -7,26 +7,13 @@
 
 import SwiftUI
 
-struct AddManagerEmployeeView: View {
+struct EditManagerEmployeeView: View {
     @ObservedObject var viewModel: ManagerEmployeesViewModel
     @Environment(\.dismiss) var dismiss
+    let employee: Employee
+    
     @State private var name = ""
     @State private var password = ""
-    @State private var workingHoursStart: Date = {
-        var components = DateComponents()
-        components.hour = 9
-        components.minute = 0
-        return Calendar.current.date(from: components) ?? Date()
-    }()
-    @State private var workingHoursEnd: Date = {
-        var components = DateComponents()
-        components.hour = 17
-        components.minute = 0
-        return Calendar.current.date(from: components) ?? Date()
-    }()
-    @State private var hasWorkingHours = false
-    @State private var useWeeklySchedule = true
-    @State private var weeklySchedule = WeeklySchedule()
     @State private var locationSchedules: [String: WeeklySchedule] = [:] // Store schedule per location
     @State private var locationUseWeeklySchedule: [String: Bool] = [:] // Track if location uses weekly schedule
     @State private var locationHasWorkingHours: [String: Bool] = [:] // Track if location has working hours
@@ -39,16 +26,19 @@ struct AddManagerEmployeeView: View {
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var showingSuccess = false
-    @State private var createdEmployeeInfo: (username: String, email: String, password: String)?
     @State private var scheduleConflicts: [String: [String]] = [:] // locationId: [conflicting location names]
     
+    init(employee: Employee, viewModel: ManagerEmployeesViewModel) {
+        self.employee = employee
+        _viewModel = ObservedObject(wrappedValue: viewModel)
+    }
+    
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.secondaryGradient
-                    .ignoresSafeArea()
-                
-                Form {
+        ZStack {
+            Theme.secondaryGradient
+                .ignoresSafeArea()
+            
+            Form {
                     // Conflict Warning Section
                     if hasScheduleConflicts {
                         Section {
@@ -59,7 +49,7 @@ struct AddManagerEmployeeView: View {
                                     Text("Schedule Conflicts Detected")
                                         .font(.headline)
                                         .foregroundColor(.orange)
-                                    Text("Please resolve overlapping schedules before creating the employee.")
+                                    Text("Please resolve overlapping schedules before saving.")
                                         .font(.caption)
                                         .foregroundColor(.black)
                                 }
@@ -92,28 +82,33 @@ struct AddManagerEmployeeView: View {
                                 Toggle(location.name, isOn: Binding(
                                     get: { selectedLocationIds.contains(location.id) },
                                     set: { isOn in
-                        if isOn {
-                            selectedLocationIds.insert(location.id)
-                            // Initialize schedule for this location
-                            if locationSchedules[location.id] == nil {
-                                locationSchedules[location.id] = WeeklySchedule()
-                                locationUseWeeklySchedule[location.id] = true
-                            }
-                            // Check for conflicts with other locations
-                            checkConflicts(for: location.id)
-                        } else {
-                            selectedLocationIds.remove(location.id)
-                            locationSchedules.removeValue(forKey: location.id)
-                            locationUseWeeklySchedule.removeValue(forKey: location.id)
-                            locationHasWorkingHours.removeValue(forKey: location.id)
-                            locationWorkingHoursStart.removeValue(forKey: location.id)
-                            locationWorkingHoursEnd.removeValue(forKey: location.id)
-                            scheduleConflicts.removeValue(forKey: location.id)
-                            // Recheck conflicts for remaining locations
-                            for remainingLocationId in selectedLocationIds {
-                                checkConflicts(for: remainingLocationId)
-                            }
-                        }
+                                        if isOn {
+                                            selectedLocationIds.insert(location.id)
+                                            // Initialize schedule for this location
+                                            if locationSchedules[location.id] == nil {
+                                                locationSchedules[location.id] = employee.weeklySchedule ?? WeeklySchedule()
+                                                locationUseWeeklySchedule[location.id] = employee.weeklySchedule != nil
+                                                locationHasWorkingHours[location.id] = employee.workingHoursStart != nil && employee.workingHoursEnd != nil
+                                                if let startTime = employee.workingHoursStart, let endTime = employee.workingHoursEnd {
+                                                    locationWorkingHoursStart[location.id] = parseTimeString(startTime)
+                                                    locationWorkingHoursEnd[location.id] = parseTimeString(endTime)
+                                                }
+                                            }
+                                            // Check for conflicts with other locations
+                                            checkConflicts(for: location.id)
+                                        } else {
+                                            selectedLocationIds.remove(location.id)
+                                            locationSchedules.removeValue(forKey: location.id)
+                                            locationUseWeeklySchedule.removeValue(forKey: location.id)
+                                            locationHasWorkingHours.removeValue(forKey: location.id)
+                                            locationWorkingHoursStart.removeValue(forKey: location.id)
+                                            locationWorkingHoursEnd.removeValue(forKey: location.id)
+                                            scheduleConflicts.removeValue(forKey: location.id)
+                                            // Recheck conflicts for remaining locations
+                                            for remainingLocationId in selectedLocationIds {
+                                                checkConflicts(for: remainingLocationId)
+                                            }
+                                        }
                                     }
                                 ))
                             }
@@ -134,7 +129,7 @@ struct AddManagerEmployeeView: View {
                         HStack {
                             Text("Username")
                             Spacer()
-                            Text(generatedUsername)
+                            Text(employee.username)
                                 .foregroundColor(.secondary)
                                 .font(.caption)
                         }
@@ -147,63 +142,89 @@ struct AddManagerEmployeeView: View {
                         }
                     }
                 }
-            }
-            .navigationTitle("New Employee")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
-                        Task {
-                            await createEmployee()
-                        }
-                    }
-                    .disabled(name.isEmpty || password.isEmpty || hasScheduleConflicts)
-                }
-            }
-            .alert("Error", isPresented: $showingError) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(errorMessage)
-            }
-            .alert("Employee Created Successfully", isPresented: $showingSuccess) {
-                Button("Copy Password") {
-                    if let password = createdEmployeeInfo?.password {
-                        UIPasteboard.general.string = password
-                    }
-                }
-                Button("Done", role: .cancel) {
+        }
+        .navigationTitle("Edit Employee")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
                     dismiss()
                 }
-            } message: {
-                if let info = createdEmployeeInfo {
-                    Text("Email: \(info.email)\n\nPassword: \(info.password)")
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    Task {
+                        await updateEmployee()
+                    }
                 }
+                .disabled(name.isEmpty || hasScheduleConflicts)
             }
-            .task {
-                await viewModel.loadData()
+        }
+        .alert("Error", isPresented: $showingError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
+        .alert("Success", isPresented: $showingSuccess) {
+            Button("OK", role: .cancel) {
+                dismiss()
             }
+        } message: {
+            Text("Employee updated successfully")
+        }
+        .task {
+            await viewModel.loadData()
+            loadEmployeeData()
         }
     }
     
-    private var generatedUsername: String {
-        guard !name.isEmpty else { return "" }
-        let username = name.lowercased()
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: "[^a-z0-9]", with: "", options: .regularExpression)
-        return username.isEmpty ? "employee" : username
-    }
-    
     private var generatedEmail: String {
-        let username = generatedUsername
-        return username.isEmpty ? "" : "\(username)@oplix.app"
+        return "\(employee.username)@oplix.app"
     }
     
-    private func createEmployee() async {
+    private func loadEmployeeData() {
+        name = employee.name
+        password = employee.password ?? ""
+        selectedLocationIds = Set(employee.assignedLocationIds)
+        canTakeRegister = employee.hasRegisterPermission
+        canSubmitLottery = employee.hasLotteryPermission
+        
+        if let rate = employee.hourlyRate {
+            hourlyRate = String(format: "%.2f", rate)
+        }
+        
+        // Load schedules for each assigned location
+        for locationId in employee.assignedLocationIds {
+            if let schedule = employee.weeklySchedule {
+                locationSchedules[locationId] = schedule
+                locationUseWeeklySchedule[locationId] = true
+            } else if let startTime = employee.workingHoursStart, let endTime = employee.workingHoursEnd {
+                locationHasWorkingHours[locationId] = true
+                locationWorkingHoursStart[locationId] = parseTimeString(startTime)
+                locationWorkingHoursEnd[locationId] = parseTimeString(endTime)
+                locationUseWeeklySchedule[locationId] = false
+            }
+        }
+        
+        // Check for conflicts after loading
+        for locationId in selectedLocationIds {
+            checkConflicts(for: locationId)
+        }
+    }
+    
+    private func parseTimeString(_ timeString: String) -> Date {
+        let components = timeString.split(separator: ":")
+        var dateComponents = DateComponents()
+        if components.count == 2,
+           let hour = Int(components[0]),
+           let minute = Int(components[1]) {
+            dateComponents.hour = hour
+            dateComponents.minute = minute
+        }
+        return Calendar.current.date(from: dateComponents) ?? Date()
+    }
+    
+    private func updateEmployee() async {
         do {
             // Use the first location's schedule, or create a default one
             let firstLocationId = selectedLocationIds.first
@@ -218,8 +239,8 @@ struct AddManagerEmployeeView: View {
                     endTime = nil
                 } else if let hasHours = locationHasWorkingHours[locationId], hasHours {
                     schedule = nil
-                    startTime = formatTime(locationWorkingHoursStart[locationId] ?? workingHoursStart)
-                    endTime = formatTime(locationWorkingHoursEnd[locationId] ?? workingHoursEnd)
+                    startTime = formatTime(locationWorkingHoursStart[locationId] ?? Date())
+                    endTime = formatTime(locationWorkingHoursEnd[locationId] ?? Date())
                 } else {
                     schedule = nil
                     startTime = nil
@@ -234,18 +255,23 @@ struct AddManagerEmployeeView: View {
             let rate = hourlyRate.isEmpty ? nil : Double(hourlyRate)
             let assignedLocationIds = Array(selectedLocationIds)
             
-            let info = try await viewModel.createEmployee(
-                name: name,
-                password: password,
-                workingHoursStart: startTime,
-                workingHoursEnd: endTime,
-                weeklySchedule: schedule,
-                assignedLocationIds: assignedLocationIds,
-                hourlyRate: rate,
-                canTakeRegister: canTakeRegister,
-                canSubmitLottery: canSubmitLottery
-            )
-            createdEmployeeInfo = info
+            var updatedEmployee = employee
+            updatedEmployee.name = name
+            updatedEmployee.assignedLocationIds = assignedLocationIds
+            updatedEmployee.weeklySchedule = schedule
+            updatedEmployee.workingHoursStart = startTime
+            updatedEmployee.workingHoursEnd = endTime
+            updatedEmployee.hourlyRate = rate
+            updatedEmployee.canTakeRegister = canTakeRegister
+            updatedEmployee.canSubmitLottery = canSubmitLottery
+            
+            try await viewModel.updateEmployee(updatedEmployee)
+            
+            // Update password if changed
+            if !password.isEmpty && password != employee.password {
+                try await viewModel.updateEmployeePassword(employeeId: employee.id, newPassword: password)
+            }
+            
             showingSuccess = true
         } catch {
             errorMessage = error.localizedDescription
@@ -263,9 +289,15 @@ struct AddManagerEmployeeView: View {
                     if isOn {
                         selectedLocationIds.insert(location.id)
                         if locationSchedules[location.id] == nil {
-                            locationSchedules[location.id] = WeeklySchedule()
-                            locationUseWeeklySchedule[location.id] = true
+                            locationSchedules[location.id] = employee.weeklySchedule ?? WeeklySchedule()
+                            locationUseWeeklySchedule[location.id] = employee.weeklySchedule != nil
+                            locationHasWorkingHours[location.id] = employee.workingHoursStart != nil && employee.workingHoursEnd != nil
+                            if let startTime = employee.workingHoursStart, let endTime = employee.workingHoursEnd {
+                                locationWorkingHoursStart[location.id] = parseTimeString(startTime)
+                                locationWorkingHoursEnd[location.id] = parseTimeString(endTime)
+                            }
                         }
+                        checkConflicts(for: location.id)
                     } else {
                         selectedLocationIds.remove(location.id)
                         locationSchedules.removeValue(forKey: location.id)

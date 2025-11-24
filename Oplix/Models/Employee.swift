@@ -9,7 +9,7 @@ import Foundation
 
 struct Employee: Identifiable, Codable, Hashable {
     let id: String
-    let name: String
+    var name: String // Allow name to be edited
     let username: String
     var locationId: String? // Optional - nil means manager-level employee, not assigned to location yet
     var assignedLocationIds: [String] // Can be assigned to multiple locations
