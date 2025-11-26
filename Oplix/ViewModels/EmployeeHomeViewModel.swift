@@ -16,6 +16,7 @@ class EmployeeHomeViewModel: ObservableObject {
     @Published var allShifts: [Shift] = [] // Store all shifts for stats calculation
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var lotteryTemplate: LotteryFormTemplate?
     
     private let firebaseService = FirebaseService.shared
     private let employeeId: String
@@ -123,14 +124,53 @@ class EmployeeHomeViewModel: ObservableObject {
                                                  minute: calendar.component(.minute, from: scheduledStart),
                                                  second: 0,
                                                  of: today) ?? today
-        let scheduledEndToday = calendar.date(bySettingHour: calendar.component(.hour, from: scheduledEnd),
-                                              minute: calendar.component(.minute, from: scheduledEnd),
-                                              second: 0,
-                                              of: today) ?? today
         
-        // Check if current time is within scheduled hours (no grace period - must be at or after start time)
-        if now < scheduledStartToday || now > scheduledEndToday {
+        // Calculate end time - check if it's on the same day or next day
+        let endHour = calendar.component(.hour, from: scheduledEnd)
+        let endMinute = calendar.component(.minute, from: scheduledEnd)
+        let scheduledEndSameDay = calendar.date(bySettingHour: endHour,
+                                                minute: endMinute,
+                                                second: 0,
+                                                of: today) ?? today
+        
+        // Determine if shift spans midnight (end time is earlier than start time on same day)
+        let scheduledEndToday: Date
+        let spansMidnight: Bool
+        
+        if scheduledEndSameDay <= scheduledStartToday {
+            // End time is on next day (shift spans midnight)
+            scheduledEndToday = calendar.date(byAdding: .day, value: 1, to: scheduledEndSameDay) ?? scheduledEndSameDay
+            spansMidnight = true
+        } else {
+            // End time is on same day (normal shift)
+            scheduledEndToday = scheduledEndSameDay
+            spansMidnight = false
+        }
+        
+        // Check if current time is within scheduled hours
+        let isWithinHours: Bool
+        if spansMidnight {
+            // Shift spans midnight: allow if now >= start OR now < end (next day)
+            isWithinHours = now >= scheduledStartToday || now < scheduledEndToday
+        } else {
+            // Normal shift: allow if now >= start AND now <= end
+            isWithinHours = now >= scheduledStartToday && now <= scheduledEndToday
+        }
+        
+        if !isWithinHours {
             errorMessage = "Clock in is only allowed during scheduled hours (\(startTimeStr) - \(endTimeStr))"
+            return
+        }
+        
+        // Check if employee already has an active shift (must clock out first before starting a new one)
+        let todayShifts = allShifts.filter { shift in
+            guard let clockInTime = shift.clockInTime else { return false }
+            return clockInTime >= today && clockInTime < calendar.date(byAdding: .day, value: 1, to: today) ?? today
+        }
+        
+        // Check if there's already an active shift
+        if let activeShift = todayShifts.first(where: { $0.isActive }) {
+            errorMessage = "You are already clocked in. Please clock out first."
             return
         }
         
@@ -186,6 +226,9 @@ class EmployeeHomeViewModel: ObservableObject {
                 currentShift = shift
                 self.employee = updatedEmployee
             }
+            
+            // Reload data to ensure everything is in sync
+            await loadData()
         } catch {
             errorMessage = "Failed to clock in: \(error.localizedDescription)"
         }
@@ -319,6 +362,32 @@ class EmployeeHomeViewModel: ObservableObject {
             await loadData()
         } catch {
             errorMessage = "Failed to update shift: \(error.localizedDescription)"
+        }
+    }
+    
+    func loadLotteryTemplate() async {
+        guard let managerUserId = managerUserId else { return }
+        do {
+            lotteryTemplate = try await firebaseService.fetchLotteryFormTemplate(userId: managerUserId, locationId: locationId)
+        } catch {
+            print("Failed to load lottery template: \(error.localizedDescription)")
+            lotteryTemplate = nil
+        }
+    }
+    
+    func updateLotteryRowEndingNumber(rowId: String, endingNumber: String) async throws {
+        guard let managerUserId = managerUserId else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager user ID not found"])
+        }
+        guard var template = lotteryTemplate else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
+        }
+        
+        // Find and update the row
+        if let index = template.rows.firstIndex(where: { $0.id == rowId }) {
+            template.rows[index].endingNumber = endingNumber
+            try await firebaseService.saveLotteryFormTemplate(userId: managerUserId, locationId: locationId, template: template)
+            lotteryTemplate = template
         }
     }
     

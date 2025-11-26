@@ -171,7 +171,9 @@ struct Shift: Identifiable, Codable, Equatable {
             return nil
         }
         
-        return endTime.timeIntervalSince(clockInTime) / 3600.0
+        // Calculate hours and ensure it's not negative (safeguard against data issues)
+        let hours = endTime.timeIntervalSince(clockInTime) / 3600.0
+        return hours > 0 ? hours : nil
     }
     
     // Check if shift started late (after scheduled start time)

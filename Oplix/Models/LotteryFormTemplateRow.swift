@@ -9,6 +9,7 @@ import Foundation
 
 struct LotteryFormTemplateRow: Identifiable, Codable {
     let id: String
+    var binNumber: String
     var gameNumber: String
     var value: String
     var tickets: String
@@ -18,8 +19,9 @@ struct LotteryFormTemplateRow: Identifiable, Codable {
     var dollar: String
     var books: String
     
-    init(id: String = UUID().uuidString, gameNumber: String = "", value: String = "", tickets: String = "", beginningNumber: String = "", endingNumber: String = "", sold: String = "", dollar: String = "", books: String = "") {
+    init(id: String = UUID().uuidString, binNumber: String = "", gameNumber: String = "", value: String = "", tickets: String = "", beginningNumber: String = "", endingNumber: String = "", sold: String = "", dollar: String = "", books: String = "") {
         self.id = id
+        self.binNumber = binNumber
         self.gameNumber = gameNumber
         self.value = value
         self.tickets = tickets

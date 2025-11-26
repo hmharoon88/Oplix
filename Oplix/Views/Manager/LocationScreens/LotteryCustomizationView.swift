@@ -115,6 +115,7 @@ struct LotteryCustomizationView: View {
                     VStack(spacing: 0) {
                         // Header Row
                         HStack(spacing: 0) {
+                            headerCell("Bin #")
                             headerCell("Game #")
                             headerCell("Value")
                             headerCell("Tickets")
@@ -166,8 +167,10 @@ struct LotteryCustomizationView: View {
                             .padding(.vertical, 60)
                             .background(Theme.cloudWhite)
                         } else {
-                            ForEach($formRows) { $row in
+                            ForEach(Array($formRows.enumerated()), id: \.element.id) { index, $row in
                                 HStack(spacing: 0) {
+                                    // Bin# column - auto-populated with serial number (read-only)
+                                    binNumberCell(String(index + 1))
                                     dataCell($row.gameNumber)
                                     dataCell($row.value)
                                     dataCell($row.tickets)
@@ -195,6 +198,7 @@ struct LotteryCustomizationView: View {
                             
                             // Totals Row (non-deletable)
                             HStack(spacing: 0) {
+                                totalCell("", isBold: false) // Empty for Bin#
                                 totalCell("TOTAL", isBold: true)
                                 totalCell("", isBold: false)
                                 totalCell("", isBold: false)
@@ -289,11 +293,11 @@ struct LotteryCustomizationView: View {
     }
     
     private var columnWidth: CGFloat {
-        // Calculate width to fit 8 columns on screen
+        // Calculate width to fit 9 columns on screen
         let screenWidth = UIScreen.main.bounds.width
         let padding: CGFloat = 16 // Side padding
         let availableWidth = screenWidth - padding * 2
-        return availableWidth / 8
+        return availableWidth / 9
     }
     
     private func headerCell(_ text: String) -> some View {
@@ -311,6 +315,29 @@ struct LotteryCustomizationView: View {
             )
             .overlay(
                 // Left border (only for first cell)
+                Rectangle()
+                    .frame(width: 1)
+                    .foregroundColor(.gray.opacity(0.5)),
+                alignment: .leading
+            )
+    }
+    
+    private func binNumberCell(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundColor(.black)
+            .multilineTextAlignment(.center)
+            .frame(width: columnWidth, height: 44)
+            .background(Theme.cloudWhite)
+            .overlay(
+                // Right border
+                Rectangle()
+                    .frame(width: 1)
+                    .foregroundColor(.gray.opacity(0.5)),
+                alignment: .trailing
+            )
+            .overlay(
+                // Left border
                 Rectangle()
                     .frame(width: 1)
                     .foregroundColor(.gray.opacity(0.5)),
