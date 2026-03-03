@@ -14,6 +14,8 @@ struct LocationStats: Identifiable {
     let monthToDateLotterySales: Double
     let monthToDatePayroll: Double
     let monthToDateExpenses: Double
+    let monthToDateFuelGallons: Double
+    let monthToDateFuelDollars: Double
 }
 
 @MainActor
@@ -92,7 +94,8 @@ class ManagerOverviewViewModel: ObservableObject {
         
         // Get start of current month (month-to-date)
         let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-        let monthEnd = calendar.date(byAdding: .day, value: 1, to: now)!
+        // Month-to-date means from start of month until now
+        let monthEnd = now
         
         // Create a dictionary of all employees (manager-level + location-specific) for quick lookup
         var allEmployeesDict: [String: Employee] = [:]
@@ -114,25 +117,67 @@ class ManagerOverviewViewModel: ObservableObject {
                     }
                 }
                 
-                // Calculate month-to-date sales
+                // Calculate month-to-date sales and fuel sales
                 var monthToDateSales: Double = 0.0
+                var monthToDateFuelGallons: Double = 0.0
+                var monthToDateFuelDollars: Double = 0.0
                 for shift in shifts {
-                    // Check if shift was completed this month (month-to-date)
-                    if let clockOutTime = shift.clockOutTime,
-                       clockOutTime >= monthStart && clockOutTime < monthEnd {
-                        monthToDateSales += (shift.cashSale ?? 0.0) + (shift.creditCard ?? 0.0)
+                    // Determine the date to use for month-to-date filtering
+                    // Priority: registerClosedAt > clockOutTime
+                    // If register data exists, use registerClosedAt or clockOutTime
+                    let dateToCheck: Date?
+                    if shift.hasRegisterData {
+                        // If register was closed, use that date; otherwise use clockOutTime
+                        dateToCheck = shift.registerClosedAt ?? shift.clockOutTime
+                    } else {
+                        // No register data, skip this shift
+                        continue
+                    }
+                    
+                    // Check if register was closed/completed this month (month-to-date)
+                    if let date = dateToCheck,
+                       date >= monthStart && date <= monthEnd {
+                        // Sum from all registers
+                        if !shift.registers.isEmpty {
+                            for register in shift.registers {
+                                let cash = register.cashSale ?? 0.0
+                                let credit = register.creditCard ?? 0.0
+                                let fuel = register.fuelSaleDollars ?? 0.0
+                                let fuelGallons = register.fuelSaleGallons ?? 0.0
+                                let registerTotal = cash + credit + fuel
+                                monthToDateSales += registerTotal
+                                
+                                // Track fuel sales separately
+                                monthToDateFuelGallons += fuelGallons
+                                monthToDateFuelDollars += fuel
+                                
+                                // Debug logging
+                                if fuel > 0 {
+                                    print("🔵 Fuel sales found: $\(fuel) (\(fuelGallons) gallons) for shift \(shift.id.prefix(8))")
+                                }
+                            }
+                        } else {
+                            // Legacy single register (for backward compatibility)
+                            monthToDateSales += (shift.cashSale ?? 0.0) + (shift.creditCard ?? 0.0)
+                        }
                     }
                 }
                 
                 // Calculate month-to-date lottery sales
+                // Uses shiftSummary.totalSoldAmount which is: instantTotal + onlineTotal
                 var monthToDateLotterySales: Double = 0.0
                 for form in lotteryForms {
                     // Only include forms submitted this month
-                    if form.submittedAt >= monthStart && form.submittedAt < monthEnd {
-                        // Extract sale amount from formData
-                        if let amountString = form.formData["amount"] ?? form.formData["sale"] ?? form.formData["total"],
-                           let amount = Double(amountString) {
-                            monthToDateLotterySales += amount
+                    if form.submittedAt >= monthStart && form.submittedAt <= monthEnd {
+                        // Use shiftSummary.totalSoldAmount if available (new format)
+                        if let shiftSummary = form.shiftSummary {
+                            monthToDateLotterySales += shiftSummary.totalSoldAmount
+                        } else {
+                            // Fallback to old format: try to extract from formData
+                            if let amountString = form.formData["amount"] ?? form.formData["sale"] ?? form.formData["total"],
+                               let amount = Double(amountString) {
+                                monthToDateLotterySales += amount
+                            }
                         }
                     }
                 }
@@ -141,8 +186,10 @@ class ManagerOverviewViewModel: ObservableObject {
                 var monthToDatePayroll: Double = 0.0
                 var monthToDateExpenses: Double = 0.0
                 let monthToDateShifts = shifts.filter { shift in
-                    guard let clockOutTime = shift.clockOutTime else { return false }
-                    return clockOutTime >= monthStart && clockOutTime < monthEnd
+                    // Use registerClosedAt if available, otherwise clockOutTime
+                    let dateToCheck = shift.registerClosedAt ?? shift.clockOutTime
+                    guard let date = dateToCheck else { return false }
+                    return date >= monthStart && date <= monthEnd
                 }
                 
                 // Group shifts by employee and calculate payroll
@@ -163,13 +210,22 @@ class ManagerOverviewViewModel: ObservableObject {
                     }
                 }
                 
+                // Debug logging for location stats
+                print("🔵 Location: \(location.name)")
+                print("   Month-to-date sales: $\(monthToDateSales)")
+                print("   Month-to-date fuel gallons: \(monthToDateFuelGallons)")
+                print("   Month-to-date fuel dollars: $\(monthToDateFuelDollars)")
+                print("   Shifts with register data: \(shifts.filter { $0.hasRegisterData }.count)")
+                
                 stats.append(LocationStats(
                     id: location.id,
                     locationName: location.name,
                     monthToDateSales: monthToDateSales,
                     monthToDateLotterySales: monthToDateLotterySales,
                     monthToDatePayroll: monthToDatePayroll,
-                    monthToDateExpenses: monthToDateExpenses
+                    monthToDateExpenses: monthToDateExpenses,
+                    monthToDateFuelGallons: monthToDateFuelGallons,
+                    monthToDateFuelDollars: monthToDateFuelDollars
                 ))
             } catch {
                 // If fetching fails for a location, continue with others
