@@ -7,6 +7,7 @@
 
 import SwiftUI
 import FirebaseCore
+import FirebaseAuth
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
@@ -25,6 +26,7 @@ struct OplixApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(authViewModel)
+                .preferredColorScheme(.light) // Force light mode for consistent colors
         }
     }
 }
@@ -44,8 +46,11 @@ struct RootView: View {
                 RoleSelectionView()
             }
         }
-        .task {
-            await authViewModel.loadCurrentUser()
+        .task(id: authViewModel.isAuthenticated) {
+            // Only load if not already authenticated and user exists
+            if !authViewModel.isAuthenticated && Auth.auth().currentUser != nil {
+                await authViewModel.loadCurrentUser()
+            }
         }
     }
 }

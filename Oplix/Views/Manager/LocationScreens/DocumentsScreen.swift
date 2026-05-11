@@ -32,7 +32,7 @@ struct DocumentsScreen: View {
                     
                     Text("Tap the + button to upload a document")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Theme.darkGray)
                 }
                 .padding()
             } else {
@@ -54,6 +54,15 @@ struct DocumentsScreen: View {
         }
         .navigationTitle("Documents")
         .navigationBarTitleDisplayMode(.large)
+        .onAppear {
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithTransparentBackground()
+            appearance.backgroundColor = UIColor.clear
+            appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(Theme.cloudBlue)]
+            appearance.titleTextAttributes = [.foregroundColor: UIColor(Theme.cloudBlue)]
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: {
@@ -114,7 +123,7 @@ struct DocumentRow: View {
                 HStack(spacing: 12) {
                     Text(document.fileType.uppercased())
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Theme.darkGray)
                     
                     if let expiryDate = document.expiryDate {
                         if document.isExpired {
@@ -128,14 +137,14 @@ struct DocumentRow: View {
                         } else {
                             Text("Expires: \(formatDate(expiryDate))")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Theme.darkGray)
                         }
                     }
                 }
                 
                 Text("Uploaded: \(formatDate(document.uploadedAt))")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Theme.darkGray)
             }
             
             Spacer()
@@ -306,7 +315,7 @@ struct AddDocumentView: View {
                 CameraPickerView(fileData: $fileData, fileName: $fileName, fileType: $fileType)
             }
             .sheet(isPresented: $showingImagePicker) {
-                ImagePickerView(fileData: $fileData, fileName: $fileName, fileType: $fileType)
+                DocumentImagePickerView(fileData: $fileData, fileName: $fileName, fileType: $fileType)
             }
             .alert("Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
@@ -424,7 +433,7 @@ struct CameraPickerView: UIViewControllerRepresentable {
     }
 }
 
-struct ImagePickerView: UIViewControllerRepresentable {
+struct DocumentImagePickerView: UIViewControllerRepresentable {
     @Binding var fileData: Data?
     @Binding var fileName: String
     @Binding var fileType: String
@@ -445,9 +454,9 @@ struct ImagePickerView: UIViewControllerRepresentable {
     }
     
     class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: ImagePickerView
+        let parent: DocumentImagePickerView
         
-        init(_ parent: ImagePickerView) {
+        init(_ parent: DocumentImagePickerView) {
             self.parent = parent
         }
         

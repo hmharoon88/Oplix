@@ -64,13 +64,12 @@ struct EmployeeTasksView: View {
         .sheet(item: $taskToComplete) { task in
             TaskImageCaptureView(
                 task: task,
-                onImageCaptured: { imageData in
-                    Task { @MainActor in
-                        await viewModel.completeTask(task, imageData: imageData)
-                        try? await Task.sleep(nanoseconds: 500_000_000)
-                        showingImageCapture = false
-                        taskToComplete = nil
-                    }
+                onImagesCaptured: { imageDataList in
+                    // Start background upload immediately
+                    viewModel.completeTaskInBackground(task, imageDataList: imageDataList)
+                    // Dismiss sheet immediately - upload continues in background
+                    showingImageCapture = false
+                    taskToComplete = nil
                 },
                 onCancel: {
                     showingImageCapture = false

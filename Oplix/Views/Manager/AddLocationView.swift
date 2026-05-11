@@ -17,7 +17,9 @@ struct AddLocationView: View {
     @State private var errorMessage = ""
     
     var body: some View {
-        NavigationStack {
+        let _ = print("🟡 SHEET - AddLocationView BODY RENDER")
+        
+        return NavigationStack {
             ZStack {
                 Theme.secondaryGradient
                     .ignoresSafeArea()
@@ -32,9 +34,13 @@ struct AddLocationView: View {
             }
             .navigationTitle("New Location")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                print("🟡 SHEET - AddLocationView ON APPEAR")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
+                        print("🟡 SHEET - AddLocationView DISMISS (Cancel)")
                         dismiss()
                     }
                 }
@@ -47,6 +53,8 @@ struct AddLocationView: View {
                     .disabled(name.isEmpty || address.isEmpty)
                 }
             }
+            .toolbarBackground(Theme.secondaryGradient, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .alert("Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -56,8 +64,13 @@ struct AddLocationView: View {
     }
     
     private func saveLocation() async {
+        print("🟡 SHEET - AddLocationView - Saving location")
+        print("   Name: \(name)")
+        print("   Address: \(address)")
+        
         // Get current user ID from authenticated user
         guard let userId = authViewModel.currentUser?.id else {
+            print("🟡 SHEET - AddLocationView - Error: User not logged in")
             errorMessage = "You must be logged in to create a location"
             showingError = true
             return
@@ -75,8 +88,10 @@ struct AddLocationView: View {
         
         do {
             try await FirebaseService.shared.createLocation(userId: userId, location: location)
+            print("🟡 SHEET - AddLocationView DISMISS (Success)")
             dismiss()
         } catch {
+            print("🟡 SHEET - AddLocationView - Error: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
             showingError = true
         }

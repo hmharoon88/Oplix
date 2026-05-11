@@ -108,7 +108,7 @@ struct PayrollScreen: View {
         // Calculate payroll for each week
         var payrolls: [WeeklyPayroll] = []
         
-        for (weekKey, shifts) in groupedShifts {
+        for (_, shifts) in groupedShifts {
             // Get week range
             guard let firstShift = shifts.first(where: { $0.clockOutTime != nil }),
                   let clockOutTime = firstShift.clockOutTime else { continue }

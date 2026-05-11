@@ -12,6 +12,9 @@ struct ManagerOverviewView: View {
     @StateObject private var viewModel: ManagerOverviewViewModel
     @Environment(\.dismiss) var dismiss
     @State private var selectedLocation: Location?
+    @State private var showingAllShifts = false
+    @State private var showingPayroll = false
+    @State private var showingInvoices = false
     
     init(userId: String) {
         self.userId = userId
@@ -22,7 +25,7 @@ struct ManagerOverviewView: View {
         NavigationStack {
             ZStack {
                 Theme.secondaryGradient
-                    .ignoresSafeArea()
+                    .ignoresSafeArea(edges: .top) // Only ignore top safe area
                 
                 VStack(spacing: 0) {
                     // Colored Header
@@ -150,6 +153,38 @@ struct ManagerOverviewView: View {
                                 }
                                 .padding(.horizontal)
                                 
+                                // Shortcuts Section
+                                VStack(alignment: .leading, spacing: 16) {
+                                    Text("Shortcuts")
+                                        .font(.headline)
+                                        .foregroundColor(.black)
+                                        .padding(.horizontal)
+                                    
+                                    Button(action: {
+                                        showingAllShifts = true
+                                    }) {
+                                        ShortcutCard(
+                                            icon: "clock.fill",
+                                            title: "Clock in Clock out data",
+                                            color: .green
+                                        )
+                                    }
+                                    .padding(.horizontal)
+                                    
+                                    Button(action: {
+                                        showingPayroll = true
+                                    }) {
+                                        ShortcutCard(
+                                            icon: "dollarsign.circle.fill",
+                                            title: "Payroll",
+                                            color: .blue
+                                        )
+                                    }
+                                    .padding(.horizontal)
+                                }
+                                .padding(.top, 8)
+                                .padding(.bottom, 20)
+                                
                                 // Location-specific stats
                                 if !viewModel.locationStats.isEmpty {
                                     VStack(alignment: .leading, spacing: 16) {
@@ -193,30 +228,11 @@ struct ManagerOverviewView: View {
                                         .padding()
                                 }
                             }
-                            .padding(.vertical)
+                            .padding(.top)
+                            .padding(.bottom, 100) // Add bottom padding to account for tab bar
                         }
+                        .scrollContentBackground(.hidden)
                     }
-                    
-                    // Colored Footer
-                    HStack {
-                        Spacer()
-                        Text("© 2025 Oplix")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.8))
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.1, green: 0.3, blue: 0.6),
-                                Color(red: 0.15, green: 0.4, blue: 0.7)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
                 }
             }
             .navigationTitle("")
@@ -239,6 +255,15 @@ struct ManagerOverviewView: View {
                     locationId: location.id,
                     locationName: location.name
                 )
+            }
+            .fullScreenCover(isPresented: $showingAllShifts) {
+                AllShiftsView(userId: userId)
+            }
+            .fullScreenCover(isPresented: $showingPayroll) {
+                PayrollView(userId: userId)
+            }
+            .fullScreenCover(isPresented: $showingInvoices) {
+                InvoicesListView(userId: userId)
             }
         }
     }
@@ -363,6 +388,20 @@ struct LocationStatsCard: View {
                 )
                 
                 StatRow(
+                    icon: "fuelpump.fill",
+                    label: "Fuel Sales (Gallons)",
+                    value: String(format: "%.2f", stats.monthToDateFuelGallons),
+                    color: .orange
+                )
+                
+                StatRow(
+                    icon: "fuelpump.fill",
+                    label: "Fuel Sales (Dollars)",
+                    value: formatCurrency(stats.monthToDateFuelDollars),
+                    color: .orange
+                )
+                
+                StatRow(
                     icon: "banknote.fill",
                     label: "Payroll",
                     value: formatCurrency(stats.monthToDatePayroll),
@@ -423,6 +462,42 @@ struct StatRow: View {
                 .fontWeight(.semibold)
                 .foregroundColor(.black)
         }
+    }
+}
+
+struct ShortcutCard: View {
+    let icon: String
+    let title: String
+    let color: Color
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 32))
+                .foregroundColor(.white)
+                .frame(width: 60, height: 60)
+                .background(
+                    LinearGradient(
+                        colors: [color.opacity(0.8), color],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .cornerRadius(12)
+            
+            Text(title)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.black)
+            
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .background(Theme.cloudWhite)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
     }
 }
 

@@ -19,6 +19,7 @@ struct User: Identifiable, Codable {
     enum UserRole: String, Codable {
         case manager
         case employee
+        case supervisor
     }
 }
 

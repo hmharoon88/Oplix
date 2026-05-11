@@ -17,6 +17,10 @@ struct LotteryCustomizationView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showingError = false
+    @State private var lotteryRegisterAmount: String = ""
+    @State private var reverseOrder: Bool = false
+    @State private var validationMessage: String?
+    @State private var showingValidationMessage = false
     
     var body: some View {
         ZStack {
@@ -69,6 +73,32 @@ struct LotteryCustomizationView: View {
                     )
                 )
                 
+                // Lottery Register Amount and Reverse Order Toggle
+                VStack(spacing: 16) {
+                    HStack(spacing: 16) {
+                        Text("Lottery Register Amount:")
+                            .font(.headline)
+                            .foregroundColor(.black)
+                        
+                        TextField("Enter amount", text: $lotteryRegisterAmount)
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.decimalPad)
+                            .frame(maxWidth: 200)
+                    }
+                    .padding(.horizontal)
+                    
+                    Toggle("Reverse Order", isOn: $reverseOrder)
+                        .padding(.horizontal)
+                        .onChange(of: reverseOrder) {
+                            // Recalculate all rows when reverse order changes
+                            for index in formRows.indices {
+                                calculateRowValues(for: index)
+                            }
+                        }
+                }
+                .padding(.vertical, 12)
+                .background(Theme.cloudWhite)
+                
                 // Add/Delete Buttons
                 HStack(spacing: 16) {
                     Button(action: {
@@ -86,7 +116,7 @@ struct LotteryCustomizationView: View {
                     }
                     
                     Button(action: {
-                        if let row = rowToDelete {
+                        if rowToDelete != nil {
                             showingDeleteConfirmation = true
                         } else if !formRows.isEmpty {
                             rowToDelete = formRows.last
@@ -171,14 +201,19 @@ struct LotteryCustomizationView: View {
                                 HStack(spacing: 0) {
                                     // Bin# column - auto-populated with serial number (read-only)
                                     binNumberCell(String(index + 1))
-                                    dataCell($row.gameNumber)
-                                    dataCell($row.value)
+                                    dataCell($row.gameNumber, rowIndex: index, isGameNumber: true)
+                                    dataCell($row.value, isValueField: true)
                                     dataCell($row.tickets)
-                                    dataCell($row.beginningNumber)
-                                    dataCell($row.endingNumber)
-                                    dataCell($row.sold)
-                                    dataCell($row.dollar)
-                                    dataCell($row.books)
+                                    dataCell($row.beginningNumber, onUpdate: {
+                                        validateAndCalculateRow(for: index)
+                                    }, rowIndex: index, isTicketNumber: true)
+                                    dataCell($row.endingNumber, onUpdate: {
+                                        validateAndCalculateRow(for: index)
+                                    }, rowIndex: index, isTicketNumber: true)
+                                    // Sold, Dollar, Books are read-only calculated cells
+                                    calculatedCell(calculateSold(for: row))
+                                    calculatedCell(calculateDollar(for: row))
+                                    calculatedCell(calculateBooks(for: row))
                                 }
                                 .background(rowToDelete?.id == row.id ? Color.red.opacity(0.2) : Theme.cloudWhite)
                                 .overlay(
@@ -205,7 +240,7 @@ struct LotteryCustomizationView: View {
                                 totalCell("", isBold: false)
                                 totalCell("", isBold: false)
                                 totalCell(formatNumber(totalSold), isBold: true)
-                                totalCell(formatNumber(totalDollars), isBold: true)
+                                totalCell(formatCurrency(totalDollars), isBold: true)
                                 totalCell(formatNumber(totalBooks), isBold: true)
                             }
                             .background(Color(red: 0.9, green: 0.9, blue: 0.95))
@@ -268,11 +303,29 @@ struct LotteryCustomizationView: View {
                 Text(errorMessage)
             }
         }
+        .alert("Validation", isPresented: $showingValidationMessage) {
+            Button("OK") {
+                validationMessage = nil
+            }
+        } message: {
+            if let validationMessage = validationMessage {
+                Text(validationMessage)
+            }
+        }
     }
     
     private func loadTemplate() async {
         isLoading = true
-        formRows = await viewModel.loadLotteryFormTemplate()
+        let result = await viewModel.loadLotteryFormTemplate()
+        formRows = result.rows
+        lotteryRegisterAmount = result.lotteryRegisterAmount
+        reverseOrder = result.reverseOrder
+        
+        // Calculate values for all rows after loading
+        for index in formRows.indices {
+            calculateRowValues(for: index)
+        }
+        
         isLoading = false
     }
     
@@ -282,7 +335,7 @@ struct LotteryCustomizationView: View {
         showingError = false
         
         do {
-            try await viewModel.saveLotteryFormTemplate(rows: formRows)
+            try await viewModel.saveLotteryFormTemplate(rows: formRows, lotteryRegisterAmount: lotteryRegisterAmount, reverseOrder: reverseOrder)
             isSaving = false
             dismiss()
         } catch {
@@ -345,14 +398,32 @@ struct LotteryCustomizationView: View {
             )
     }
     
-    private func dataCell(_ binding: Binding<String>) -> some View {
+    private func dataCell(_ binding: Binding<String>, onUpdate: (() -> Void)? = nil, rowIndex: Int? = nil, isTicketNumber: Bool = false, isGameNumber: Bool = false, isValueField: Bool = false) -> some View {
         TextField("", text: Binding(
-            get: { binding.wrappedValue },
+            get: { 
+                if isValueField {
+                    // Display with $ sign, but store without
+                    let value = binding.wrappedValue
+                    if value.isEmpty {
+                        return ""
+                    }
+                    // Remove $ if present, then add it back for display
+                    let cleanValue = value.replacingOccurrences(of: "$", with: "")
+                    return cleanValue.isEmpty ? "" : "$\(cleanValue)"
+                }
+                return binding.wrappedValue
+            },
             set: { newValue in
+                // For value field, remove $ sign before processing
+                var cleanValue = newValue
+                if isValueField {
+                    cleanValue = cleanValue.replacingOccurrences(of: "$", with: "")
+                }
+                
                 // Only allow numeric characters and single decimal point
                 var filtered = ""
                 var hasDecimal = false
-                for char in newValue {
+                for char in cleanValue {
                     if char.isNumber {
                         filtered.append(char)
                     } else if char == "." && !hasDecimal {
@@ -360,7 +431,41 @@ struct LotteryCustomizationView: View {
                         hasDecimal = true
                     }
                 }
+                
+                // Normalize "0" to "00" for ticket number fields (since "0" represents the first ticket)
+                if isTicketNumber && filtered == "0" {
+                    filtered = "00"
+                }
+                
+                // Validate ticket number range (prevent invalid entry, but don't show alert)
+                if isTicketNumber, let index = rowIndex, index < formRows.count {
+                    let row = formRows[index]
+                    if !filtered.isEmpty && filtered != "00" {
+                        // Check if tickets value exists
+                        if let ticketsInt = Int(row.tickets), ticketsInt > 0 {
+                            let maxTicketNumber = ticketsInt - 1
+                            if let enteredNum = Int(filtered), enteredNum > maxTicketNumber {
+                                // Don't update the value (silently prevent invalid entry)
+                                return
+                            }
+                        }
+                    }
+                }
+                
                 binding.wrappedValue = filtered
+                // Trigger calculation update
+                onUpdate?()
+                
+                // If this is a game number field, trigger auto-population after a short delay
+                if isGameNumber {
+                    Task {
+                        // Small delay to allow the value to be set
+                        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+                        if let index = rowIndex, index < formRows.count {
+                            await autoPopulateFromGameDatabase(for: index)
+                        }
+                    }
+                }
             }
         ))
         .keyboardType(.decimalPad)
@@ -386,6 +491,30 @@ struct LotteryCustomizationView: View {
         )
     }
     
+    // Read-only calculated cell
+    private func calculatedCell(_ value: String) -> some View {
+        Text(value)
+            .font(.system(size: 11))
+            .foregroundColor(.black)
+            .multilineTextAlignment(.center)
+            .frame(width: columnWidth, height: 44)
+            .background(Theme.cloudWhite)
+            .overlay(
+                // Right border
+                Rectangle()
+                    .frame(width: 1)
+                    .foregroundColor(.gray.opacity(0.5)),
+                alignment: .trailing
+            )
+            .overlay(
+                // Left border
+                Rectangle()
+                    .frame(width: 1)
+                    .foregroundColor(.gray.opacity(0.5)),
+                alignment: .leading
+            )
+    }
+    
     private func totalCell(_ text: String, isBold: Bool) -> some View {
         Text(text)
             .font(.system(size: 11, weight: isBold ? .bold : .regular))
@@ -409,17 +538,178 @@ struct LotteryCustomizationView: View {
             )
     }
     
-    // Computed properties for totals
+    // Calculate values for a specific row (no validation alerts during entry)
+    private func validateAndCalculateRow(for index: Int) {
+        guard index < formRows.count else { return }
+        let row = formRows[index]
+        
+        // Check if Value and Tickets are present
+        let hasValue = !row.value.isEmpty
+        let hasTickets = !row.tickets.isEmpty
+        let hasBeginning = !row.beginningNumber.isEmpty
+        let hasEnding = !row.endingNumber.isEmpty
+        
+        // Only calculate if we have all required fields
+        // No validation alerts - just skip calculation if fields are missing
+        guard hasValue && hasTickets && hasBeginning && hasEnding else {
+            // Clear calculated values if missing required fields
+            formRows[index].sold = ""
+            formRows[index].dollar = ""
+            formRows[index].books = ""
+            return
+        }
+        
+        // Calculate sold and books
+        let (sold, books) = LotteryCalculationService.calculateSoldAndBooks(
+            beginning: row.beginningNumber,
+            ending: row.endingNumber,
+            tickets: row.tickets,
+            reverseOrder: reverseOrder
+        )
+        
+        // Calculate dollars
+        let dollars = LotteryCalculationService.calculateDollars(sold: sold, value: row.value)
+        
+        // Update row values (these are stored but not displayed - we calculate on the fly)
+        formRows[index].sold = String(sold)
+        formRows[index].dollar = String(dollars)
+        formRows[index].books = String(books)
+    }
+    
+    // Calculate values for a specific row (without validation, for display)
+    private func calculateRowValues(for index: Int) {
+        guard index < formRows.count else { return }
+        let row = formRows[index]
+        
+        // Only calculate if we have all required fields
+        guard !row.value.isEmpty && !row.tickets.isEmpty && !row.beginningNumber.isEmpty && !row.endingNumber.isEmpty else {
+            return
+        }
+        
+        // Calculate sold and books
+        let (sold, books) = LotteryCalculationService.calculateSoldAndBooks(
+            beginning: row.beginningNumber,
+            ending: row.endingNumber,
+            tickets: row.tickets,
+            reverseOrder: reverseOrder
+        )
+        
+        // Calculate dollars
+        let dollars = LotteryCalculationService.calculateDollars(sold: sold, value: row.value)
+        
+        // Update row values (these are stored but not displayed - we calculate on the fly)
+        formRows[index].sold = String(sold)
+        formRows[index].dollar = String(dollars)
+        formRows[index].books = String(books)
+    }
+    
+    // Calculate sold for a row (for display)
+    private func calculateSold(for row: LotteryFormTemplateRow) -> String {
+        // Only calculate if Value and Tickets are present
+        guard !row.value.isEmpty && !row.tickets.isEmpty && !row.beginningNumber.isEmpty && !row.endingNumber.isEmpty else {
+            return ""
+        }
+        
+        let (sold, _) = LotteryCalculationService.calculateSoldAndBooks(
+            beginning: row.beginningNumber,
+            ending: row.endingNumber,
+            tickets: row.tickets,
+            reverseOrder: reverseOrder
+        )
+        return sold > 0 ? String(sold) : ""
+    }
+    
+    // Calculate dollar for a row (for display)
+    private func calculateDollar(for row: LotteryFormTemplateRow) -> String {
+        // Only calculate if Value and Tickets are present
+        guard !row.value.isEmpty && !row.tickets.isEmpty && !row.beginningNumber.isEmpty && !row.endingNumber.isEmpty else {
+            return ""
+        }
+        
+        let (sold, _) = LotteryCalculationService.calculateSoldAndBooks(
+            beginning: row.beginningNumber,
+            ending: row.endingNumber,
+            tickets: row.tickets,
+            reverseOrder: reverseOrder
+        )
+        let dollars = LotteryCalculationService.calculateDollars(sold: sold, value: row.value)
+        return dollars > 0 ? formatCurrency(Double(dollars)) : ""
+    }
+    
+    // Calculate books for a row (for display)
+    private func calculateBooks(for row: LotteryFormTemplateRow) -> String {
+        // Only calculate if Value and Tickets are present
+        guard !row.value.isEmpty && !row.tickets.isEmpty && !row.beginningNumber.isEmpty && !row.endingNumber.isEmpty else {
+            return ""
+        }
+        
+        let (_, books) = LotteryCalculationService.calculateSoldAndBooks(
+            beginning: row.beginningNumber,
+            ending: row.endingNumber,
+            tickets: row.tickets,
+            reverseOrder: reverseOrder
+        )
+        return books > 0 ? String(books) : ""
+    }
+    
+    // Computed properties for totals - only include rows with valid data
     private var totalSold: Double {
-        formRows.compactMap { Double($0.sold) }.reduce(0, +)
+        formRows.reduce(0.0) { total, row in
+            // Only calculate if row has beginning, ending, and tickets
+            guard !row.beginningNumber.isEmpty,
+                  !row.endingNumber.isEmpty,
+                  !row.tickets.isEmpty else {
+                return total
+            }
+            
+            let (sold, _) = LotteryCalculationService.calculateSoldAndBooks(
+                beginning: row.beginningNumber,
+                ending: row.endingNumber,
+                tickets: row.tickets,
+                reverseOrder: reverseOrder
+            )
+            return total + Double(sold)
+        }
     }
     
     private var totalDollars: Double {
-        formRows.compactMap { Double($0.dollar) }.reduce(0, +)
+        formRows.reduce(0.0) { total, row in
+            // Only calculate if row has beginning, ending, tickets, and value
+            guard !row.beginningNumber.isEmpty,
+                  !row.endingNumber.isEmpty,
+                  !row.tickets.isEmpty,
+                  !row.value.isEmpty else {
+                return total
+            }
+            
+            let (sold, _) = LotteryCalculationService.calculateSoldAndBooks(
+                beginning: row.beginningNumber,
+                ending: row.endingNumber,
+                tickets: row.tickets,
+                reverseOrder: reverseOrder
+            )
+            let dollars = LotteryCalculationService.calculateDollars(sold: sold, value: row.value)
+            return total + Double(dollars)
+        }
     }
     
     private var totalBooks: Double {
-        formRows.compactMap { Double($0.books) }.reduce(0, +)
+        formRows.reduce(0.0) { total, row in
+            // Only calculate if row has beginning, ending, and tickets
+            guard !row.beginningNumber.isEmpty,
+                  !row.endingNumber.isEmpty,
+                  !row.tickets.isEmpty else {
+                return total
+            }
+            
+            let (_, books) = LotteryCalculationService.calculateSoldAndBooks(
+                beginning: row.beginningNumber,
+                ending: row.endingNumber,
+                tickets: row.tickets,
+                reverseOrder: reverseOrder
+            )
+            return total + Double(books)
+        }
     }
     
     private func formatNumber(_ value: Double) -> String {
@@ -431,6 +721,45 @@ struct LotteryCustomizationView: View {
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 0
         return formatter.string(from: NSNumber(value: value)) ?? ""
+    }
+    
+    private func formatCurrency(_ value: Double) -> String {
+        if value == 0 {
+            return ""
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        let formatted = formatter.string(from: NSNumber(value: value)) ?? ""
+        return formatted.isEmpty ? "" : "$\(formatted)"
+    }
+    
+    // Auto-populate Value and Tickets from game database when game number is entered
+    private func autoPopulateFromGameDatabase(for index: Int) async {
+        guard index < formRows.count else { return }
+        let gameNumber = formRows[index].gameNumber
+        
+        // Only fetch if game number is not empty
+        guard !gameNumber.isEmpty else { return }
+        
+        do {
+            let gameData = try await FirebaseService.shared.fetchGameData(gameNumber: gameNumber)
+            
+            await MainActor.run {
+                if let gameData = gameData {
+                    // Auto-populate value and tickets
+                    formRows[index].value = gameData.value
+                    formRows[index].tickets = gameData.tickets
+                    
+                    // Recalculate row values
+                    calculateRowValues(for: index)
+                }
+            }
+        } catch {
+            // Game number not found in database - silently ignore
+            print("Game number \(gameNumber) not found in database")
+        }
     }
 }
 

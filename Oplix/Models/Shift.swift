@@ -21,12 +21,15 @@ struct Shift: Identifiable, Codable, Equatable {
     var startedLate: Bool = false // Whether the employee started the shift late
     var manuallyClockedOut: Bool = true // Whether the employee manually clocked out (false if auto)
     
-    // Register fields
+    // Register fields (legacy - for backward compatibility)
     var cashSale: Double?
     var cashInHand: Double?
     var overShort: Double?
     var creditCard: Double?
+    // Multiple registers support
+    var registers: [Register] = []
     var expenses: [Expense] = [] // Expenses added by employee
+    var registerClosedAt: Date? // When the register was last closed
     
     // Custom decoding to handle missing fields in existing Firestore documents
     enum CodingKeys: String, CodingKey {
@@ -46,7 +49,9 @@ struct Shift: Identifiable, Codable, Equatable {
         case cashInHand
         case overShort
         case creditCard
+        case registers
         case expenses
+        case registerClosedAt
     }
     
     init(from decoder: Decoder) throws {
@@ -67,7 +72,9 @@ struct Shift: Identifiable, Codable, Equatable {
         cashInHand = try container.decodeIfPresent(Double.self, forKey: .cashInHand)
         overShort = try container.decodeIfPresent(Double.self, forKey: .overShort)
         creditCard = try container.decodeIfPresent(Double.self, forKey: .creditCard)
+        registers = try container.decodeIfPresent([Register].self, forKey: .registers) ?? []
         expenses = try container.decodeIfPresent([Expense].self, forKey: .expenses) ?? []
+        registerClosedAt = try container.decodeIfPresent(Date.self, forKey: .registerClosedAt)
     }
     
     // Custom encoding
@@ -89,11 +96,13 @@ struct Shift: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(cashInHand, forKey: .cashInHand)
         try container.encodeIfPresent(overShort, forKey: .overShort)
         try container.encodeIfPresent(creditCard, forKey: .creditCard)
+        try container.encode(registers, forKey: .registers)
         try container.encode(expenses, forKey: .expenses)
+        try container.encodeIfPresent(registerClosedAt, forKey: .registerClosedAt)
     }
     
     // Initializer for creating new shifts
-    init(id: String, employeeId: String, locationId: String, clockInTime: Date? = nil, clockOutTime: Date? = nil, assignedAt: Date? = nil, acknowledged: Bool = false, scheduledStartTime: Date? = nil, scheduledEndTime: Date? = nil, isAutoClockedOut: Bool = false, startedLate: Bool = false, manuallyClockedOut: Bool = true, cashSale: Double? = nil, cashInHand: Double? = nil, overShort: Double? = nil, creditCard: Double? = nil, expenses: [Expense] = []) {
+    init(id: String, employeeId: String, locationId: String, clockInTime: Date? = nil, clockOutTime: Date? = nil, assignedAt: Date? = nil, acknowledged: Bool = false, scheduledStartTime: Date? = nil, scheduledEndTime: Date? = nil, isAutoClockedOut: Bool = false, startedLate: Bool = false, manuallyClockedOut: Bool = true, cashSale: Double? = nil, cashInHand: Double? = nil, overShort: Double? = nil, creditCard: Double? = nil, registers: [Register] = [], expenses: [Expense] = [], registerClosedAt: Date? = nil) {
         self.id = id
         self.employeeId = employeeId
         self.locationId = locationId
@@ -110,7 +119,9 @@ struct Shift: Identifiable, Codable, Equatable {
         self.cashInHand = cashInHand
         self.overShort = overShort
         self.creditCard = creditCard
+        self.registers = registers
         self.expenses = expenses
+        self.registerClosedAt = registerClosedAt
     }
     
     var isAssigned: Bool {
@@ -193,7 +204,7 @@ struct Shift: Identifiable, Codable, Equatable {
     }
     
     var hasRegisterData: Bool {
-        return cashSale != nil || cashInHand != nil || overShort != nil || creditCard != nil
+        return !registers.isEmpty || cashSale != nil || cashInHand != nil || overShort != nil || creditCard != nil
     }
 }
 

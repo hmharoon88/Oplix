@@ -15,11 +15,20 @@ struct ManagerLoginView: View {
     @State private var showingError = false
     @State private var showingSignUp = false
     @State private var showingForgotPassword = false
+    @State private var showingResendVerification = false
+    @State private var needsVerification = false
     
     var body: some View {
         ZStack {
-            Theme.primaryGradient
-                .ignoresSafeArea()
+            LinearGradient(
+                colors: [
+                    Color(red: 0.1, green: 0.3, blue: 0.6),  // Dark blue
+                    Color(red: 0.15, green: 0.4, blue: 0.7)   // Medium dark blue
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
             
             VStack(spacing: 30) {
                 // Back button
@@ -49,7 +58,7 @@ struct ManagerLoginView: View {
                         .font(.system(size: 80))
                         .foregroundColor(.white)
                     
-                    Text("Oplix Manager")
+                    Text("Oplix Owner")
                         .font(.system(size: 36, weight: .bold))
                         .foregroundColor(.white)
                 }
@@ -66,8 +75,14 @@ struct ManagerLoginView: View {
                     Button(action: {
                         Task { @MainActor in
                             await authViewModel.signIn(email: email, password: password)
-                            if let error = authViewModel.errorMessage {
-                                showingError = true
+                            if authViewModel.errorMessage != nil {
+                                // Check if error is about email verification
+                                if authViewModel.errorMessage?.contains("verify your email") == true {
+                                    needsVerification = true
+                                    showingResendVerification = true
+                                } else {
+                                    showingError = true
+                                }
                             } else {
                                 dismiss()
                             }
@@ -115,6 +130,23 @@ struct ManagerLoginView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(authViewModel.errorMessage ?? "Unknown error")
+        }
+        .alert("Email Verification Required", isPresented: $showingResendVerification) {
+            Button("Resend Verification Email") {
+                Task { @MainActor in
+                    let success = await authViewModel.resendVerificationEmail(email: email, password: password)
+                    if success {
+                        showingResendVerification = false
+                        showingError = true
+                        authViewModel.errorMessage = "Verification email resent! Please check your inbox (and spam folder) and click the verification link."
+                    } else {
+                        showingError = true
+                    }
+                }
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Please verify your email before signing in. Check your inbox (and spam folder) for the verification link. If you didn't receive it, tap 'Resend Verification Email'.")
         }
         .fullScreenCover(isPresented: $showingSignUp) {
             ManagerSignUpView()

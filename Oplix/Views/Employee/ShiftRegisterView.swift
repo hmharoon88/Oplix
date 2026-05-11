@@ -44,6 +44,12 @@ struct ShiftRegisterView: View {
                             .keyboardType(.decimalPad)
                         TextField("Cash In Hand", text: $cashInHand)
                             .keyboardType(.decimalPad)
+                        TextField("Cash Expense", text: Binding(
+                            get: { "" },
+                            set: { _ in }
+                        ))
+                        .keyboardType(.decimalPad)
+                        .disabled(true)
                         TextField("Over/Short", text: $overShort)
                             .keyboardType(.decimalPad)
                     }
@@ -53,7 +59,7 @@ struct ShiftRegisterView: View {
                             .keyboardType(.decimalPad)
                     }
                     
-                    Section("Expenses") {
+                    Section("Expenses (Non Cash, Check)") {
                         ForEach(expenses) { expense in
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {

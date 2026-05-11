@@ -8,12 +8,22 @@
 import SwiftUI
 
 struct Theme {
-    static let cloudBlue = Color(red: 0.3, green: 0.7, blue: 1.0)
-    static let sunshineYellow = Color(red: 1.0, green: 0.85, blue: 0.3)
-    static let softGray = Color(red: 0.9, green: 0.9, blue: 0.92)
-    static let cloudWhite = Color.white
-    static let skyBlue = Color(red: 0.5, green: 0.8, blue: 1.0)
-    static let darkGray = Color(red: 0.4, green: 0.4, blue: 0.4) // High contrast dark gray for better visibility
+    // Use explicit sRGB color space for consistent colors across devices
+    static let cloudBlue = Color(.sRGB, red: 0.3, green: 0.7, blue: 1.0, opacity: 1.0)
+    static let sunshineYellow = Color(.sRGB, red: 1.0, green: 0.85, blue: 0.3, opacity: 1.0)
+    static let softGray = Color(.sRGB, red: 0.9, green: 0.9, blue: 0.92, opacity: 1.0)
+    static let cloudWhite = Color(.sRGB, red: 1.0, green: 1.0, blue: 1.0, opacity: 1.0)
+    static let skyBlue = Color(.sRGB, red: 0.5, green: 0.8, blue: 1.0, opacity: 1.0)
+    static let darkGray = Color(.sRGB, red: 0.4, green: 0.4, blue: 0.4, opacity: 1.0) // High contrast dark gray for better visibility
+    
+    // System color replacements with explicit colors
+    static let systemBlue = Color(.sRGB, red: 0.0, green: 0.478, blue: 1.0, opacity: 1.0)
+    static let systemGreen = Color(.sRGB, red: 0.196, green: 0.804, blue: 0.196, opacity: 1.0)
+    static let systemRed = Color(.sRGB, red: 1.0, green: 0.231, blue: 0.188, opacity: 1.0)
+    static let systemOrange = Color(.sRGB, red: 1.0, green: 0.584, blue: 0.0, opacity: 1.0)
+    static let systemPurple = Color(.sRGB, red: 0.686, green: 0.322, blue: 0.871, opacity: 1.0)
+    static let systemIndigo = Color(.sRGB, red: 0.345, green: 0.337, blue: 0.839, opacity: 1.0)
+    static let systemTeal = Color(.sRGB, red: 0.204, green: 0.780, blue: 0.780, opacity: 1.0)
     
     static let primaryGradient = LinearGradient(
         colors: [skyBlue, cloudBlue],
