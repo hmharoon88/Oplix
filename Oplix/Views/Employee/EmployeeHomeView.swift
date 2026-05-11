@@ -207,11 +207,27 @@ struct EmployeeHomeContent: View {
                                 .font(.system(size: 20, weight: .bold))
                                 .foregroundColor(.white)
                             Spacer()
-                            Button("Logout") {
-                                authViewModel.signOut()
+                            // Header overflow menu — replaces the
+                            // bare Logout button so we can surface
+                            // additional account actions (currently
+                            // Notifications + Logout) without eating
+                            // more horizontal space in the header.
+                            Menu {
+                                NavigationLink {
+                                    NotificationSettingsView()
+                                } label: {
+                                    Label("Notifications", systemImage: "bell.badge")
+                                }
+                                Button(role: .destructive) {
+                                    authViewModel.signOut()
+                                } label: {
+                                    Label("Logout", systemImage: "arrow.right.square")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(.white)
                             }
-                            .foregroundColor(.white)
-                            .font(.system(size: 16))
                         }
                         
                         // Date and Location Info

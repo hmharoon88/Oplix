@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        APNs environment.
+
+        For local debug runs we use `development`, which is what the
+        sandbox APNs server expects when the build is signed with a
+        development provisioning profile. Xcode's "Push Notifications"
+        capability automatically rewrites this to `production` when
+        you archive for App Store distribution, so the same file
+        covers both Debug and Release configurations.
+
+        Pairs with the FirebaseMessaging plumbing in AppDelegate +
+        NotificationService — without this entitlement, APNs never
+        hands an apnsToken to the app and FCM token capture stays nil.
+    -->
+    <key>aps-environment</key>
+    <string>development</string>
+</dict>
+</plist>

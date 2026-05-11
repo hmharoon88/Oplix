@@ -147,7 +147,15 @@ struct PreviousLotteryShiftCard: View {
     @State private var template: LotteryFormTemplate?
     @State private var isLoadingTemplate = false
     @State private var showingFullScreenImage = false
-    
+
+    /// Whether this card belongs to a multi-terminal location. Used
+    /// only to drive whether we render a "Terminal N" badge — for
+    /// single-terminal locations the card looks exactly as it did
+    /// before multi-terminal support shipped (no badge).
+    private var showsTerminalLabel: Bool {
+        viewModel.location?.hasMultipleLotteryTerminals ?? false
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header with date
@@ -156,14 +164,29 @@ struct PreviousLotteryShiftCard: View {
                     Text("Lottery Shift")
                         .font(.headline)
                         .foregroundColor(.black)
-                    
+
                     Text(formatDate(form.submittedAt))
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-                
+
                 Spacer()
-                
+
+                if showsTerminalLabel {
+                    // Terminal badge sits between the title and the
+                    // time. Always renders for multi-terminal locations
+                    // even on legacy submissions (where terminalNumber
+                    // is nil) — those are shown as Terminal 1, which
+                    // matches how they're stored under doc id `template`.
+                    Text("Terminal \(form.effectiveTerminalNumber)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(Theme.cloudBlue)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Theme.cloudBlue.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+
                 Text(formatTime(form.submittedAt))
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -387,10 +410,20 @@ struct PreviousLotteryShiftCard: View {
     private func loadTemplate() {
         guard template == nil && !isLoadingTemplate else { return }
         isLoadingTemplate = true
-        
+
         Task {
             do {
-                if let fetchedTemplate = try await FirebaseService.shared.fetchLotteryFormTemplate(userId: viewModel.userId, locationId: form.locationId) {
+                // Fetch the template for the terminal this form belongs
+                // to. Legacy single-terminal forms have `terminalNumber`
+                // == nil, which the FirebaseService treats as terminal 1
+                // and reads from the legacy `template` doc — identical
+                // to the original wire call.
+                let fetchedTemplate = try await FirebaseService.shared.fetchLotteryFormTemplate(
+                    userId: viewModel.userId,
+                    locationId: form.locationId,
+                    terminalNumber: form.terminalNumber
+                )
+                if let fetchedTemplate = fetchedTemplate {
                     await MainActor.run {
                         self.template = fetchedTemplate
                         self.isLoadingTemplate = false

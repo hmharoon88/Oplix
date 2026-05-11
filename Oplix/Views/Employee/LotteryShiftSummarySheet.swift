@@ -112,81 +112,38 @@ struct LotteryShiftSummarySheet: View {
                                 .foregroundColor(Theme.darkGray)
                         }
                         .padding(.top, 40)
-                        
-                        // Beginning and Ending Numbers Table
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Beginning & Ending Numbers")
-                                .font(.headline)
-                                .fontWeight(.bold)
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 20)
-                            
-                            VStack(spacing: 0) {
-                                // Header Row
-                                HStack(spacing: 0) {
-                                    tableHeaderCell("Bin #")
-                                    tableHeaderCell("Begin #")
-                                    tableHeaderCell("End #")
-                                }
-                                .background(Theme.cloudBlue.opacity(0.2))
-                                
-                                // Data Rows - Use LazyVStack for better scrolling performance
-                                LazyVStack(spacing: 0) {
-                                    ForEach(Array(template.rows.enumerated()), id: \.element.id) { index, row in
-                                        let numbers = rowNumbers[row.id] ?? (beginning: "—", ending: "—")
-                                        LotterySummaryRowView(
-                                            binNumber: index + 1,
-                                            beginningNumber: numbers.beginning,
-                                            endingNumber: numbers.ending,
-                                            isEven: index % 2 == 0
-                                        )
-                                    }
-                                }
-                            }
-                            .overlay(
-                                Rectangle()
-                                    .frame(width: 1)
-                                    .foregroundColor(.gray.opacity(0.5)),
-                                alignment: .leading
-                            )
-                            .overlay(
-                                Rectangle()
-                                    .frame(width: 1)
-                                    .foregroundColor(.gray.opacity(0.5)),
-                                alignment: .trailing
-                            )
-                            .cornerRadius(8)
-                            .padding(.horizontal, 20)
-                        }
-                        .padding(.bottom, 8)
-                        
-                        // Summary Cards
+
+                        // Summary Cards — pulled above the begin/end
+                        // numbers table so the most relevant numbers
+                        // (totals + cash in hand entry) are visible
+                        // immediately when the sheet appears, without
+                        // scrolling past the per-row table first.
                         VStack(spacing: 16) {
                             // Lottery Totals
                             SummaryCard(
                                 title: "Lottery Totals",
                                 items: lotteryItems
                             )
-                            
+
                             // Cash Totals
                             SummaryCard(
                                 title: "Cash Totals",
                                 items: cashItems
                             )
-                            
+
                             // Online & Instant
                             SummaryCard(
                                 title: "Online & Instant",
                                 items: onlineInstantItems
                             )
-                            
+
                             // Total Sold Amount
                             SummaryCard(
                                 title: "Total Sold Amount",
                                 items: totalSoldItems,
                                 highlightColor: .green
                             )
-                            
+
                             // Cash in Hand Input Field
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Cash in Hand")
@@ -264,7 +221,57 @@ struct LotteryShiftSummarySheet: View {
                             .cornerRadius(12)
                         }
                         .padding(.horizontal, 20)
-                        
+
+                        // Beginning and Ending Numbers Table — moved
+                        // below the summary cards so users see the
+                        // headline totals first and the per-row detail
+                        // for reference / verification afterwards.
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Beginning & Ending Numbers")
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 20)
+
+                            VStack(spacing: 0) {
+                                // Header Row
+                                HStack(spacing: 0) {
+                                    tableHeaderCell("Bin #")
+                                    tableHeaderCell("Begin #")
+                                    tableHeaderCell("End #")
+                                }
+                                .background(Theme.cloudBlue.opacity(0.2))
+
+                                // Data Rows - Use LazyVStack for better scrolling performance
+                                LazyVStack(spacing: 0) {
+                                    ForEach(Array(template.rows.enumerated()), id: \.element.id) { index, row in
+                                        let numbers = rowNumbers[row.id] ?? (beginning: "—", ending: "—")
+                                        LotterySummaryRowView(
+                                            binNumber: index + 1,
+                                            beginningNumber: numbers.beginning,
+                                            endingNumber: numbers.ending,
+                                            isEven: index % 2 == 0
+                                        )
+                                    }
+                                }
+                            }
+                            .overlay(
+                                Rectangle()
+                                    .frame(width: 1)
+                                    .foregroundColor(.gray.opacity(0.5)),
+                                alignment: .leading
+                            )
+                            .overlay(
+                                Rectangle()
+                                    .frame(width: 1)
+                                    .foregroundColor(.gray.opacity(0.5)),
+                                alignment: .trailing
+                            )
+                            .cornerRadius(8)
+                            .padding(.horizontal, 20)
+                        }
+                        .padding(.bottom, 8)
+
                         // Close Button
                         Button(action: {
                             Task {

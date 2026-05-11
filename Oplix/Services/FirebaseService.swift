@@ -254,6 +254,32 @@ class FirebaseService: ObservableObject {
             "role": role.rawValue
         ])
     }
+
+    /// Update only the `notificationPrefs` map on a User document.
+    /// We deliberately encode just this one field (rather than calling
+    /// `updateUser(user:)` with the whole struct) so the write touches
+    /// nothing else — that keeps it safe against races where the local
+    /// `User` copy might be slightly stale, and ensures we never alter
+    /// existing user data when a user just toggles a notification.
+    func updateNotificationPrefs(userId: String, prefs: NotificationPrefs) async throws {
+        // Encode the prefs struct into a Firestore-friendly dictionary
+        // via JSON round-trip. This honours the optional/`nil` fields
+        // so unchecked toggles don't get persisted as `false` — they
+        // simply remain absent and resolve to their defaults later.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(prefs)
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(
+                domain: "FirebaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to encode notification prefs"]
+            )
+        }
+        try await db.collection("users").document(userId).updateData([
+            "notificationPrefs": dict
+        ])
+    }
     
     func deleteAccount(userId: String, password: String) async throws {
         // Re-authenticate user to verify password
@@ -1101,38 +1127,89 @@ class FirebaseService: ObservableObject {
     
     // MARK: - Lottery Form Template
     
+    /// Doc id used in the `lotteryFormTemplate` subcollection for a
+    /// given terminal. Terminal 1 — including the implicit/legacy
+    /// single-terminal case where `terminalNumber == nil` — keeps the
+    /// existing `"template"` doc id so we don't have to migrate a
+    /// single byte of existing data. Higher-numbered terminals use
+    /// `"terminal_2"`, `"terminal_3"`, …
+    private func lotteryTemplateDocId(for terminalNumber: Int?) -> String {
+        let n = terminalNumber ?? 1
+        return n <= 1 ? "template" : "terminal_\(n)"
+    }
+
     func saveLotteryFormTemplate(userId: String, locationId: String, template: LotteryFormTemplate) async throws {
-        var updatedTemplate = template
-        updatedTemplate = LotteryFormTemplate(
+        // Persist a fresh `lastUpdated`. We deliberately preserve the
+        // caller's `terminalNumber` (and treat nil as terminal 1) so
+        // single-terminal callers don't have to learn about terminals.
+        let updatedTemplate = LotteryFormTemplate(
             locationId: locationId,
             rows: template.rows,
             lastUpdated: Date(),
             lotteryRegisterAmount: template.lotteryRegisterAmount,
-            reverseOrder: template.reverseOrder
+            reverseOrder: template.reverseOrder,
+            terminalNumber: template.terminalNumber
         )
+
+        let docId = lotteryTemplateDocId(for: template.terminalNumber)
         try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
             .collection("lotteryFormTemplate")
-            .document("template")
+            .document(docId)
             .setData(from: updatedTemplate)
     }
-    
+
+    /// Single-terminal / legacy fetch. Reads doc id `"template"` and
+    /// returns it unchanged. Used by the existing single-terminal code
+    /// paths so they don't have to know terminals exist.
     func fetchLotteryFormTemplate(userId: String, locationId: String) async throws -> LotteryFormTemplate? {
+        return try await fetchLotteryFormTemplate(userId: userId, locationId: locationId, terminalNumber: nil)
+    }
+
+    /// Terminal-aware fetch. `nil` (or `1`) reads the legacy `"template"`
+    /// doc; higher numbers read `"terminal_N"`. Returns nil if the doc
+    /// is absent (e.g. terminal 3 was never configured).
+    func fetchLotteryFormTemplate(
+        userId: String,
+        locationId: String,
+        terminalNumber: Int?
+    ) async throws -> LotteryFormTemplate? {
+        let docId = lotteryTemplateDocId(for: terminalNumber)
         let document = try await db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
             .collection("lotteryFormTemplate")
-            .document("template")
+            .document(docId)
             .getDocument()
-        
-        guard document.exists else {
-            return nil
-        }
-        
+
+        guard document.exists else { return nil }
         return try document.data(as: LotteryFormTemplate.self)
+    }
+
+    /// Fetch every template doc under `lotteryFormTemplate/`. Returns
+    /// them sorted by `effectiveTerminalNumber`. Used by the
+    /// multi-terminal customization UI to render one tab per terminal.
+    func fetchAllLotteryFormTemplates(
+        userId: String,
+        locationId: String
+    ) async throws -> [LotteryFormTemplate] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryFormTemplate")
+            .getDocuments()
+
+        let templates: [LotteryFormTemplate] = snapshot.documents.compactMap { doc in
+            try? doc.data(as: LotteryFormTemplate.self)
+        }
+
+        return templates.sorted {
+            $0.effectiveTerminalNumber < $1.effectiveTerminalNumber
+        }
     }
     
     // MARK: - Firebase Storage

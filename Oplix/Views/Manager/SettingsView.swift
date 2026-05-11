@@ -94,6 +94,17 @@ struct SettingsView: View {
                             }
                         }
                         
+                        Section("Preferences") {
+                            NavigationLink {
+                                NotificationSettingsView()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "bell.badge")
+                                    Text("Notifications")
+                                }
+                            }
+                        }
+
                         Section("Information") {
                             Button(action: {
                                 showingAbout = true

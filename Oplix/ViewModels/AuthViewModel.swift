@@ -159,6 +159,17 @@ class AuthViewModel: ObservableObject {
         try await firebaseService.updateUser(userId: userId, user: user)
         currentUser = user
     }
+
+    /// Persist a new `notificationPrefs` value for the signed-in user.
+    /// Touches only the `notificationPrefs` map on Firestore (via
+    /// `updateNotificationPrefs`) so no other User fields are at risk
+    /// of being clobbered by a stale local copy.
+    func updateNotificationPrefs(_ prefs: NotificationPrefs) async throws {
+        guard var user = currentUser else { return }
+        try await firebaseService.updateNotificationPrefs(userId: user.id, prefs: prefs)
+        user.notificationPrefs = prefs
+        currentUser = user
+    }
     
     func deleteAccount(password: String) async throws {
         guard let userId = currentUser?.id else {

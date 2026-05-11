@@ -7,6 +7,21 @@
 
 import SwiftUI
 
+/// Per-terminal draft held in memory while the manager is editing.
+/// Each terminal has its own row list, register float, and reverse-
+/// order toggle — they're independent chains, so they have to be
+/// independent drafts.
+private struct TerminalDraft {
+    var rows: [LotteryFormTemplateRow] = []
+    var lotteryRegisterAmount: String = ""
+    var reverseOrder: Bool = false
+    /// True once the manager has touched any field on this terminal
+    /// during the current customization session. We only write dirty
+    /// drafts back to Firestore on Save so we don't churn the
+    /// `lastUpdated` timestamp on terminals nobody edited.
+    var isDirty: Bool = false
+}
+
 struct LotteryCustomizationView: View {
     @ObservedObject var viewModel: LocationDetailViewModel
     @Environment(\.dismiss) var dismiss
@@ -21,6 +36,20 @@ struct LotteryCustomizationView: View {
     @State private var reverseOrder: Bool = false
     @State private var validationMessage: String?
     @State private var showingValidationMessage = false
+
+    // MARK: - Multi-terminal state
+    //
+    // `terminalCount` and `archivedTerminals` are the staged values —
+    // the manager's edits don't hit `Location` until they tap Save.
+    // `terminalDrafts` is the in-memory editing state for each
+    // terminal; we lazy-load each terminal's template the first time
+    // it's selected so that bumping the count from 2 to 5 doesn't fire
+    // 3 unnecessary fetches up-front.
+    @State private var terminalCount: Int = 1
+    @State private var selectedTerminal: Int = 1
+    @State private var archivedTerminals: [Int] = []
+    @State private var terminalDrafts: [Int: TerminalDraft] = [:]
+    @State private var didReduceTerminals: Bool = false
     
     var body: some View {
         ZStack {
@@ -73,20 +102,33 @@ struct LotteryCustomizationView: View {
                     )
                 )
                 
+                // Terminal controls — only meaningful for multi-terminal
+                // locations. Single-terminal locations still see the
+                // stepper (so they can opt in by raising it to 2) but
+                // no tab strip until count > 1.
+                terminalControlsSection
+
                 // Lottery Register Amount and Reverse Order Toggle
+                // (per-terminal: both fields apply to whichever terminal
+                // is currently selected above).
                 VStack(spacing: 16) {
                     HStack(spacing: 16) {
-                        Text("Lottery Register Amount:")
+                        Text(terminalCount > 1
+                             ? "Register Amount (Terminal \(selectedTerminal)):"
+                             : "Lottery Register Amount:")
                             .font(.headline)
                             .foregroundColor(.black)
-                        
+
                         TextField("Enter amount", text: $lotteryRegisterAmount)
                             .textFieldStyle(.roundedBorder)
                             .keyboardType(.decimalPad)
                             .frame(maxWidth: 200)
+                            .onChange(of: lotteryRegisterAmount) {
+                                markCurrentTerminalDirty()
+                            }
                     }
                     .padding(.horizontal)
-                    
+
                     Toggle("Reverse Order", isOn: $reverseOrder)
                         .padding(.horizontal)
                         .onChange(of: reverseOrder) {
@@ -94,6 +136,7 @@ struct LotteryCustomizationView: View {
                             for index in formRows.indices {
                                 calculateRowValues(for: index)
                             }
+                            markCurrentTerminalDirty()
                         }
                 }
                 .padding(.vertical, 12)
@@ -103,6 +146,7 @@ struct LotteryCustomizationView: View {
                 HStack(spacing: 16) {
                     Button(action: {
                         formRows.append(LotteryFormTemplateRow())
+                        markCurrentTerminalDirty()
                     }) {
                         HStack {
                             Image(systemName: "plus.circle.fill")
@@ -284,6 +328,7 @@ struct LotteryCustomizationView: View {
                 if let row = rowToDelete {
                     formRows.removeAll { $0.id == row.id }
                     rowToDelete = nil
+                    markCurrentTerminalDirty()
                 }
             }
         } message: {
@@ -314,28 +359,297 @@ struct LotteryCustomizationView: View {
         }
     }
     
+    // MARK: - Terminal controls UI
+
+    /// Stepper + tab strip + "archived" affordance. Shows in every
+    /// location, but the tab strip and archived list collapse to
+    /// nothing when the count is 1, so single-terminal locations see
+    /// just a one-line stepper.
+    @ViewBuilder
+    private var terminalControlsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: "rectangle.stack.fill")
+                    .foregroundColor(Theme.cloudBlue)
+                Text("Lottery Terminals")
+                    .font(.headline)
+                    .foregroundColor(.black)
+                Spacer()
+                Stepper(
+                    value: Binding(
+                        get: { terminalCount },
+                        set: { newValue in
+                            handleTerminalCountChange(to: newValue)
+                        }
+                    ),
+                    in: 1...10
+                ) {
+                    Text("\(terminalCount) terminal\(terminalCount == 1 ? "" : "s")")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.black)
+                }
+                .labelsHidden()
+                Text("\(terminalCount)")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minWidth: 24)
+                    .foregroundColor(.black)
+            }
+            .padding(.horizontal)
+
+            // Tab strip — hidden entirely for single-terminal locations
+            // so they see exactly today's UI (zero visual diff).
+            if terminalCount > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(1...terminalCount, id: \.self) { terminal in
+                            terminalTabPill(terminal: terminal)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+
+            // Surface archived terminals so the manager knows raising
+            // the count back will restore them. Only shows when there's
+            // something archived (almost always empty for new locations).
+            if !archivedTerminals.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "archivebox")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Text("Archived: \(archivedTerminals.sorted().map(String.init).joined(separator: ", "))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal)
+            }
+        }
+        .padding(.vertical, 10)
+        .background(Theme.cloudWhite)
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundColor(.gray.opacity(0.3)),
+            alignment: .bottom
+        )
+    }
+
+    private func terminalTabPill(terminal: Int) -> some View {
+        let isSelected = terminal == selectedTerminal
+        return Button(action: {
+            Task { await selectTerminal(terminal) }
+        }) {
+            Text("Terminal \(terminal)")
+                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                .foregroundColor(isSelected ? .white : Theme.cloudBlue)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(isSelected ? Theme.cloudBlue : Theme.cloudBlue.opacity(0.12))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule().stroke(Theme.cloudBlue.opacity(isSelected ? 0 : 0.4), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Apply a stepper change. Bumping up just expands the count and
+    /// (if a previously-archived terminal slot is being re-exposed)
+    /// removes it from the archive list — its old template + history
+    /// come back into view automatically. Going down archives the
+    /// trailing terminals so their data isn't lost.
+    private func handleTerminalCountChange(to newValue: Int) {
+        let oldValue = terminalCount
+        guard newValue != oldValue, newValue >= 1 else { return }
+
+        if newValue > oldValue {
+            // If any terminals in the new range are archived, un-archive
+            // them. (Tab strip will show them with their preserved data.)
+            let unarchived = (oldValue + 1...newValue).filter { archivedTerminals.contains($0) }
+            archivedTerminals.removeAll { unarchived.contains($0) }
+        } else {
+            // Going from 3 → 2 archives terminals 3...3 (the trailing
+            // ones being dropped). Their template doc + history stay
+            // in Firestore untouched.
+            let toArchive = Array((newValue + 1)...oldValue)
+            // De-duplicate against any pre-existing archive entries.
+            archivedTerminals = Array(Set(archivedTerminals + toArchive)).sorted()
+            // Drop drafts for the archived terminals so we don't write
+            // them back on save.
+            for n in toArchive { terminalDrafts.removeValue(forKey: n) }
+            // If we were editing an about-to-be-archived terminal,
+            // bounce back to terminal 1.
+            if selectedTerminal > newValue {
+                Task { await selectTerminal(1) }
+            }
+            didReduceTerminals = true
+        }
+
+        terminalCount = newValue
+    }
+
+    // MARK: - Terminal-aware load / save
+
+    /// Initial load. Reads the location's current terminal config and
+    /// pulls terminal 1's template (always — every location has at
+    /// least one). Terminals 2+ are loaded lazily as the manager
+    /// switches tabs to them.
     private func loadTemplate() async {
         isLoading = true
-        let result = await viewModel.loadLotteryFormTemplate()
-        formRows = result.rows
-        lotteryRegisterAmount = result.lotteryRegisterAmount
-        reverseOrder = result.reverseOrder
-        
-        // Calculate values for all rows after loading
-        for index in formRows.indices {
-            calculateRowValues(for: index)
-        }
-        
+
+        let location = viewModel.location
+        terminalCount = location?.effectiveLotteryTerminalCount ?? 1
+        archivedTerminals = location?.lotteryArchivedTerminals ?? []
+        selectedTerminal = 1
+
+        let draft = await loadDraft(for: 1)
+        terminalDrafts[1] = draft
+        applyDraftToFields(draft)
+
         isLoading = false
     }
-    
+
+    /// Fetch a single terminal's template from Firestore and convert
+    /// it into a `TerminalDraft`. Returns an empty draft when nothing
+    /// exists yet (e.g. the manager just bumped the count from 2 to 5
+    /// and terminal 5 has never been configured).
+    private func loadDraft(for terminal: Int) async -> TerminalDraft {
+        let result: (rows: [LotteryFormTemplateRow], lotteryRegisterAmount: String, reverseOrder: Bool)
+        if terminal == 1 {
+            // Terminal 1 lives at the legacy doc id `template`, so we
+            // route through the original (unparametered) helper —
+            // identical wire calls to pre-multi-terminal code.
+            result = await viewModel.loadLotteryFormTemplate()
+        } else {
+            result = await viewModel.loadLotteryFormTemplate(terminalNumber: terminal)
+        }
+
+        var draft = TerminalDraft(
+            rows: result.rows,
+            lotteryRegisterAmount: result.lotteryRegisterAmount,
+            reverseOrder: result.reverseOrder
+        )
+
+        // Pre-calculate sold/dollars/books so the totals row is right
+        // immediately on tab switch without waiting for an edit.
+        for index in draft.rows.indices {
+            calculateRowValues(for: index, in: &draft)
+        }
+
+        draft.isDirty = false
+        return draft
+    }
+
+    /// Push the current `formRows`/`lotteryRegisterAmount`/
+    /// `reverseOrder` UI state into the in-memory draft for the given
+    /// terminal. Called right before switching tabs (or saving) so we
+    /// don't lose the manager's edits.
+    private func captureCurrentTerminalDraft() {
+        var draft = terminalDrafts[selectedTerminal] ?? TerminalDraft()
+        // Treat anything captured as already-known dirty if the
+        // existing draft was; otherwise we leave it alone.
+        let wasDirty = draft.isDirty
+        draft.rows = formRows
+        draft.lotteryRegisterAmount = lotteryRegisterAmount
+        draft.reverseOrder = reverseOrder
+        draft.isDirty = wasDirty
+        terminalDrafts[selectedTerminal] = draft
+    }
+
+    /// Pull the in-memory draft for the given terminal into the
+    /// editable UI fields. Called when the manager taps a different
+    /// terminal in the tab strip.
+    private func applyDraftToFields(_ draft: TerminalDraft) {
+        formRows = draft.rows
+        lotteryRegisterAmount = draft.lotteryRegisterAmount
+        reverseOrder = draft.reverseOrder
+        rowToDelete = nil
+    }
+
+    /// Mark whatever terminal is currently in the editor as dirty so
+    /// `saveTemplate()` knows it needs writing back to Firestore.
+    private func markCurrentTerminalDirty() {
+        // Avoid mutating during initial load (would prematurely
+        // dirty a draft we just fetched verbatim).
+        guard !isLoading else { return }
+        var draft = terminalDrafts[selectedTerminal] ?? TerminalDraft()
+        draft.rows = formRows
+        draft.lotteryRegisterAmount = lotteryRegisterAmount
+        draft.reverseOrder = reverseOrder
+        draft.isDirty = true
+        terminalDrafts[selectedTerminal] = draft
+    }
+
+    /// Switch the editor to a different terminal: capture the current
+    /// one's edits, then either restore that terminal from cache or
+    /// fetch it from Firestore.
+    private func selectTerminal(_ terminal: Int) async {
+        guard terminal != selectedTerminal else { return }
+        captureCurrentTerminalDraft()
+        selectedTerminal = terminal
+        if let cached = terminalDrafts[terminal] {
+            applyDraftToFields(cached)
+        } else {
+            isLoading = true
+            let draft = await loadDraft(for: terminal)
+            terminalDrafts[terminal] = draft
+            applyDraftToFields(draft)
+            isLoading = false
+        }
+    }
+
+    /// Save everything dirty. The order matters:
+    ///   1. Capture the currently-visible terminal's edits into the
+    ///      drafts dictionary.
+    ///   2. Write each dirty terminal's template (parallelisable, but
+    ///      kept sequential for simpler error reporting).
+    ///   3. Update the location's `lotteryTerminalCount` +
+    ///      `lotteryArchivedTerminals` last so the count never refers
+    ///      to terminals that haven't been written yet.
     private func saveTemplate() async {
         isSaving = true
         errorMessage = nil
         showingError = false
-        
+        captureCurrentTerminalDraft()
+
         do {
-            try await viewModel.saveLotteryFormTemplate(rows: formRows, lotteryRegisterAmount: lotteryRegisterAmount, reverseOrder: reverseOrder)
+            for (terminal, draft) in terminalDrafts where draft.isDirty {
+                // Preserve the legacy single-terminal doc shape: when
+                // the location has only one terminal we route through
+                // the original (unparametered) save helper, which
+                // doesn't attach a `terminalNumber` field. That keeps
+                // existing single-terminal Firestore docs byte-for-byte
+                // identical to how they looked before multi-terminal
+                // support shipped (no new fields added to legacy data).
+                if terminalCount == 1 && terminal == 1 {
+                    try await viewModel.saveLotteryFormTemplate(
+                        rows: draft.rows,
+                        lotteryRegisterAmount: draft.lotteryRegisterAmount,
+                        reverseOrder: draft.reverseOrder
+                    )
+                } else {
+                    try await viewModel.saveLotteryFormTemplate(
+                        terminalNumber: terminal,
+                        rows: draft.rows,
+                        lotteryRegisterAmount: draft.lotteryRegisterAmount,
+                        reverseOrder: draft.reverseOrder
+                    )
+                }
+            }
+
+            // Persist the new terminal count + archive list. We only
+            // touch this if it actually changed to avoid noisy writes.
+            let location = viewModel.location
+            let storedCount = location?.effectiveLotteryTerminalCount ?? 1
+            let storedArchived = location?.lotteryArchivedTerminals ?? []
+            if terminalCount != storedCount || archivedTerminals != storedArchived {
+                try await viewModel.updateLotteryTerminalCount(
+                    newCount: terminalCount,
+                    archived: archivedTerminals
+                )
+            }
+
             isSaving = false
             dismiss()
         } catch {
@@ -343,6 +657,34 @@ struct LotteryCustomizationView: View {
             showingError = true
             isSaving = false
         }
+    }
+
+    /// Variant of `calculateRowValues` that takes the draft by
+    /// reference, so we can pre-fill calculated columns without
+    /// touching the live `formRows` state.
+    private func calculateRowValues(for index: Int, in draft: inout TerminalDraft) {
+        guard index < draft.rows.count else { return }
+        let row = draft.rows[index]
+        let hasValue = !row.value.isEmpty
+        let hasTickets = !row.tickets.isEmpty
+        let hasBeginning = !row.beginningNumber.isEmpty
+        let hasEnding = !row.endingNumber.isEmpty
+        guard hasValue && hasTickets && hasBeginning && hasEnding else {
+            draft.rows[index].sold = ""
+            draft.rows[index].dollar = ""
+            draft.rows[index].books = ""
+            return
+        }
+        let (sold, books) = LotteryCalculationService.calculateSoldAndBooks(
+            beginning: row.beginningNumber,
+            ending: row.endingNumber,
+            tickets: row.tickets,
+            reverseOrder: draft.reverseOrder
+        )
+        let dollars = LotteryCalculationService.calculateDollars(sold: sold, value: row.value)
+        draft.rows[index].sold = String(sold)
+        draft.rows[index].dollar = String(dollars)
+        draft.rows[index].books = String(books)
     }
     
     private var columnWidth: CGFloat {
@@ -538,9 +880,14 @@ struct LotteryCustomizationView: View {
             )
     }
     
-    // Calculate values for a specific row (no validation alerts during entry)
+    // Calculate values for a specific row (no validation alerts during entry).
+    // Also marks the current terminal as dirty since this fires on
+    // every cell edit — that means every keystroke that might change
+    // a value flips the dirty bit. Cheap, and avoids a separate
+    // expensive `formRows` equality check.
     private func validateAndCalculateRow(for index: Int) {
         guard index < formRows.count else { return }
+        markCurrentTerminalDirty()
         let row = formRows[index]
         
         // Check if Value and Tickets are present

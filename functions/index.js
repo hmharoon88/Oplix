@@ -4,6 +4,19 @@ const {getAuth} = require('firebase-admin/auth');
 
 initializeApp();
 
+// Notification triggers. Each lives in `notifications/` so adding
+// new ones doesn't bloat this entry file. Re-exported here under
+// stable names so deployment manifests stay simple.
+const {onTaskAssigned} = require('./notifications/onTaskAssigned');
+const {onTaskReviewed} = require('./notifications/onTaskReviewed');
+const {onEmployeeProfileChanged} = require('./notifications/onEmployeeProfileChanged');
+const {onRoleChanged} = require('./notifications/onRoleChanged');
+
+exports.onTaskAssigned = onTaskAssigned;
+exports.onTaskReviewed = onTaskReviewed;
+exports.onEmployeeProfileChanged = onEmployeeProfileChanged;
+exports.onRoleChanged = onRoleChanged;
+
 /**
  * Cloud Function to delete Firebase Auth user when User document is deleted
  * This is triggered when a User document is deleted from Firestore
