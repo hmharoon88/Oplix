@@ -12,6 +12,20 @@ struct EmployeeLotteryView: View {
     @ObservedObject var viewModel: EmployeeHomeViewModel
     @State private var isLoading = true
     @State private var showingLotterySelection = false
+
+    /// Whether *any* terminal at this location has rows configured.
+    /// Multi-terminal locations only show the empty state when no
+    /// terminal at all is set up — otherwise the employee can pick
+    /// the configured terminals from the close-out sheet.
+    private var hasUsableLotteryForm: Bool {
+        if viewModel.hasMultipleLotteryTerminals {
+            return viewModel.lotteryTemplates.values.contains { !$0.rows.isEmpty }
+        }
+        if let template = viewModel.lotteryTemplate {
+            return !template.rows.isEmpty
+        }
+        return false
+    }
     
     var body: some View {
         ZStack {
@@ -26,7 +40,7 @@ struct EmployeeLotteryView: View {
                         .font(.headline)
                         .foregroundColor(.secondary)
                 }
-            } else if let template = viewModel.lotteryTemplate, !template.rows.isEmpty {
+            } else if hasUsableLotteryForm {
                 // Show selection view first
                 LotterySelectionView(viewModel: viewModel)
             } else {

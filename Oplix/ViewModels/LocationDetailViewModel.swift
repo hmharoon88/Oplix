@@ -718,10 +718,77 @@ class LocationDetailViewModel: ObservableObject {
         }
         return ([], "", false)
     }
-    
+
     func saveLotteryFormTemplate(rows: [LotteryFormTemplateRow], lotteryRegisterAmount: String, reverseOrder: Bool) async throws {
         let template = LotteryFormTemplate(locationId: locationId, rows: rows, lotteryRegisterAmount: lotteryRegisterAmount, reverseOrder: reverseOrder)
         try await firebaseService.saveLotteryFormTemplate(userId: userId, locationId: locationId, template: template)
+    }
+
+    // MARK: - Multi-terminal lottery
+    //
+    // The methods below let the customization screen edit one template
+    // per terminal independently. Single-terminal locations keep using
+    // the legacy `loadLotteryFormTemplate` / `saveLotteryFormTemplate`
+    // helpers above (which under the hood read/write doc id `template`,
+    // which `FirebaseService` also treats as terminal 1).
+
+    /// Load a specific terminal's template. Falls back to empty values
+    /// when the terminal hasn't been configured yet (e.g. terminal 3
+    /// after the manager just bumped the count from 2 to 3).
+    func loadLotteryFormTemplate(terminalNumber: Int) async -> (rows: [LotteryFormTemplateRow], lotteryRegisterAmount: String, reverseOrder: Bool) {
+        do {
+            if let template = try await firebaseService.fetchLotteryFormTemplate(
+                userId: userId,
+                locationId: locationId,
+                terminalNumber: terminalNumber
+            ) {
+                return (template.rows, template.lotteryRegisterAmount, template.reverseOrder)
+            }
+        } catch {
+            print("🔴 Failed to load lottery template for terminal \(terminalNumber): \(error.localizedDescription)")
+        }
+        return ([], "", false)
+    }
+
+    /// Save a specific terminal's template. We always pass through
+    /// `terminalNumber` so `FirebaseService` writes to the right doc id
+    /// (`template` for terminal 1, `terminal_N` for the rest).
+    func saveLotteryFormTemplate(
+        terminalNumber: Int,
+        rows: [LotteryFormTemplateRow],
+        lotteryRegisterAmount: String,
+        reverseOrder: Bool
+    ) async throws {
+        let template = LotteryFormTemplate(
+            locationId: locationId,
+            rows: rows,
+            lotteryRegisterAmount: lotteryRegisterAmount,
+            reverseOrder: reverseOrder,
+            terminalNumber: terminalNumber
+        )
+        try await firebaseService.saveLotteryFormTemplate(
+            userId: userId,
+            locationId: locationId,
+            template: template
+        )
+    }
+
+    /// Update the location's `lotteryTerminalCount` and (optionally)
+    /// the archived terminal list. Bumping the count exposes higher
+    /// terminals in customization + employee close-out; lowering it
+    /// archives those numbers (their template docs and history are
+    /// preserved untouched in Firestore so the manager can re-enable).
+    func updateLotteryTerminalCount(
+        newCount: Int,
+        archived: [Int]
+    ) async throws {
+        guard var updatedLocation = location else { return }
+        updatedLocation.lotteryTerminalCount = max(1, newCount)
+        updatedLocation.lotteryArchivedTerminals = archived.isEmpty ? nil : archived
+        try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
+        // Optimistic local update so the UI flips immediately without
+        // waiting for the snapshot listener.
+        location = updatedLocation
     }
 }
 

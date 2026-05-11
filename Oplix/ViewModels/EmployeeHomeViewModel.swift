@@ -556,29 +556,123 @@ class EmployeeHomeViewModel: ObservableObject {
         }
     }
     
+    /// Multi-terminal templates keyed by terminal number. Populated
+    /// **only** when this location runs multiple lottery terminals.
+    /// For single-terminal locations this dictionary stays empty and
+    /// the legacy `lotteryTemplate` is the source of truth — that keeps
+    /// the existing call sites byte-for-byte unchanged.
+    @Published var lotteryTemplates: [Int: LotteryFormTemplate] = [:]
+
+    /// True iff the loaded `Location` has been configured with > 1
+    /// lottery terminal. Drives whether the multi-terminal employee
+    /// flow lights up at all. Reads through to `Location` so we don't
+    /// hold a stale copy.
+    var hasMultipleLotteryTerminals: Bool {
+        location?.hasMultipleLotteryTerminals ?? false
+    }
+
     func loadLotteryTemplate() async {
         guard let managerUserId = managerUserId else { return }
+
+        // Multi-terminal path: pull every active terminal's template
+        // in parallel. Archived terminals (in
+        // `Location.lotteryArchivedTerminals`) are skipped so the
+        // employee never sees them on close-out, but their docs stay
+        // in Firestore for re-enable later.
+        if let location = location, location.hasMultipleLotteryTerminals {
+            let archived = Set(location.lotteryArchivedTerminals ?? [])
+            let active = location.activeLotteryTerminalNumbers.filter { !archived.contains($0) }
+            var loaded: [Int: LotteryFormTemplate] = [:]
+
+            await withTaskGroup(of: (Int, LotteryFormTemplate?).self) { group in
+                for terminal in active {
+                    group.addTask { [firebaseService, locationId] in
+                        let template = try? await firebaseService.fetchLotteryFormTemplate(
+                            userId: managerUserId,
+                            locationId: locationId,
+                            terminalNumber: terminal
+                        )
+                        return (terminal, template)
+                    }
+                }
+                for await (terminal, template) in group {
+                    if let template = template {
+                        loaded[terminal] = template
+                    }
+                }
+            }
+
+            lotteryTemplates = loaded
+            // Keep the legacy `lotteryTemplate` pointing at terminal 1
+            // so existing nil/empty checks (e.g. EmployeeLotteryView's
+            // empty-state branch) still behave correctly when the
+            // manager hasn't filled in terminal 1 yet.
+            lotteryTemplate = loaded[1]
+            return
+        }
+
+        // Single-terminal / legacy path — unchanged from before.
         do {
             lotteryTemplate = try await firebaseService.fetchLotteryFormTemplate(userId: managerUserId, locationId: locationId)
+            lotteryTemplates = [:]
         } catch {
             print("Failed to load lottery template: \(error.localizedDescription)")
             lotteryTemplate = nil
+            lotteryTemplates = [:]
         }
     }
     
-    func updateLotteryRowEndingNumber(rowId: String, endingNumber: String) async throws {
+    /// Resolve the in-memory template for a given terminal. `nil`
+    /// means "the legacy single-terminal template" — i.e. the same
+    /// `lotteryTemplate` that pre-dates multi-terminal support, which
+    /// the storage layer treats as terminal 1. Non-nil reads from
+    /// `lotteryTemplates`. Returns nil if nothing's loaded.
+    private func template(for terminalNumber: Int?) -> LotteryFormTemplate? {
+        guard let terminalNumber = terminalNumber else { return lotteryTemplate }
+        return lotteryTemplates[terminalNumber]
+    }
+
+    /// Write the given template back into in-memory state. Mirror of
+    /// `template(for:)` — if the caller passes nil we update the
+    /// legacy `lotteryTemplate`; otherwise we update the dictionary.
+    private func setTemplate(_ template: LotteryFormTemplate, for terminalNumber: Int?) {
+        if let terminalNumber = terminalNumber {
+            lotteryTemplates[terminalNumber] = template
+            // Multi-terminal locations also keep `lotteryTemplate`
+            // pointing at terminal 1 so legacy nil/empty checks behave.
+            if terminalNumber == 1 {
+                lotteryTemplate = template
+            }
+        } else {
+            lotteryTemplate = template
+        }
+    }
+
+    func updateLotteryRowEndingNumber(
+        rowId: String,
+        endingNumber: String,
+        terminalNumber: Int? = nil
+    ) async throws {
         guard let managerUserId = managerUserId else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager user ID not found"])
         }
-        guard var template = lotteryTemplate else {
+        guard var template = template(for: terminalNumber) else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
         }
-        
-        // Find and update the row
+
+        // Find and update the row, then persist the whole template.
+        // We keep the per-keystroke save behaviour the original
+        // single-terminal code had so an interrupted session doesn't
+        // lose the employee's input — same trade-off, just scoped to
+        // the right terminal.
         if let index = template.rows.firstIndex(where: { $0.id == rowId }) {
             template.rows[index].endingNumber = endingNumber
-            try await firebaseService.saveLotteryFormTemplate(userId: managerUserId, locationId: locationId, template: template)
-            lotteryTemplate = template
+            try await firebaseService.saveLotteryFormTemplate(
+                userId: managerUserId,
+                locationId: locationId,
+                template: template
+            )
+            setTemplate(template, for: terminalNumber)
         }
     }
     
@@ -594,9 +688,12 @@ class EmployeeHomeViewModel: ObservableObject {
         }
     }
     
-    // Validate lottery form for incomplete rows
-    func validateLotteryForm() async -> ValidationResult {
-        guard let template = lotteryTemplate else {
+    /// Validate lottery form for incomplete rows. `terminalNumber: nil`
+    /// validates against the legacy single-terminal template (existing
+    /// behaviour); a non-nil value validates that specific terminal's
+    /// template instead.
+    func validateLotteryForm(terminalNumber: Int? = nil) async -> ValidationResult {
+        guard let template = template(for: terminalNumber) else {
             return ValidationResult(incompleteRows: [], hasIncompleteRows: false)
         }
         
@@ -635,6 +732,18 @@ class EmployeeHomeViewModel: ObservableObject {
         )
     }
     
+    /// Close a lottery shift for either:
+    ///   • the legacy single-terminal location (`terminalNumber == nil`,
+    ///     which keeps every existing call site working byte-for-byte),
+    ///     or
+    ///   • a specific terminal at a multi-terminal location
+    ///     (`terminalNumber == 1, 2, 3, …`).
+    ///
+    /// Multi-terminal locations call this once **per terminal** the
+    /// employee actually worked. Untouched terminals are simply not
+    /// invoked, so their beginning numbers carry over to the next
+    /// shift unchanged — that's the "skip allowed" behaviour locked in
+    /// during planning.
     func closeLotteryShift(
         formData: [String: String],
         onlineTotals: [String],
@@ -642,30 +751,36 @@ class EmployeeHomeViewModel: ObservableObject {
         instantCashes: [String],
         imageData: Data?,
         registerCash: String?,
-        skipValidation: Bool = false
+        skipValidation: Bool = false,
+        terminalNumber: Int? = nil
     ) async throws -> LotteryForm {
         guard let managerUserId = managerUserId else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager user ID not found"])
         }
-        
+
         // Require an active shift (employee must be clocked in)
         guard let shift = currentShift, shift.isActive else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "You must be clocked in to submit a lottery form. Please clock in first."])
         }
-        
-        // 0. Reload template from Firebase to ensure we have the latest ending numbers
-        // This ensures we're using the most up-to-date values that the employee entered
-        if let latestTemplate = try? await firebaseService.fetchLotteryFormTemplate(userId: managerUserId, locationId: locationId) {
-            lotteryTemplate = latestTemplate
+
+        // 0. Reload the template we're about to mutate so we pick up
+        // any keystroke-level saves (`updateLotteryRowEndingNumber`)
+        // the form view kicked off while the employee was typing.
+        if let latestTemplate = try? await firebaseService.fetchLotteryFormTemplate(
+            userId: managerUserId,
+            locationId: locationId,
+            terminalNumber: terminalNumber
+        ) {
+            setTemplate(latestTemplate, for: terminalNumber)
         }
-        
-        guard var template = lotteryTemplate else {
+
+        guard var template = template(for: terminalNumber) else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
         }
-        
+
         // Validate before proceeding (unless validation is skipped)
         if !skipValidation {
-            let validation = await validateLotteryForm()
+            let validation = await validateLotteryForm(terminalNumber: terminalNumber)
             if validation.hasIncompleteRows {
                 // Create a detailed error message
                 var errorMessage = "Some rows have missing fields:\n\n"
@@ -677,7 +792,7 @@ class EmployeeHomeViewModel: ObservableObject {
                     errorMessage += ": Missing \(incompleteRow.missingFields.joined(separator: ", "))\n"
                 }
                 errorMessage += "\nYou can still close the shift, but these rows will not be included in calculations."
-                
+
                 // Throw a validation error that can be caught and handled
                 throw NSError(
                     domain: "Oplix",
@@ -771,15 +886,19 @@ class EmployeeHomeViewModel: ObservableObject {
             // If ending number is empty, keep the beginning number as is (don't move it)
         }
         
-        // 6. Save updated template (with ending moved to beginning)
+        // 6. Save updated template (with ending moved to beginning).
+        // Re-stamp the terminal number on the value we save in case
+        // the in-memory template was loaded before terminals existed
+        // — guarantees the right doc id is used for the write.
+        template.terminalNumber = terminalNumber ?? template.terminalNumber
         try await firebaseService.saveLotteryFormTemplate(
             userId: managerUserId,
             locationId: locationId,
             template: template
         )
-        
+
         // 7. Update local template
-        lotteryTemplate = template
+        setTemplate(template, for: terminalNumber)
         
         // Convert ShiftSummary to ShiftSummaryData (do this before image upload)
         let summaryData = ShiftSummaryData(
@@ -799,7 +918,10 @@ class EmployeeHomeViewModel: ObservableObject {
             overShort: nil // Will be set by employee in shift summary sheet
         )
         
-        // 8. Create and save lottery form with report (without image URL first for faster response)
+        // 8. Create and save lottery form with report (without image URL first for faster response).
+        // Tag the form with the terminal it represents so multi-
+        // terminal history can group + label correctly. nil keeps the
+        // existing single-terminal write byte-identical.
         let form = LotteryForm(
             id: formId,
             locationId: locationId,
@@ -807,7 +929,8 @@ class EmployeeHomeViewModel: ObservableObject {
             formData: updatedFormData,
             notes: "",
             submittedAt: Date(),
-            shiftSummary: summaryData
+            shiftSummary: summaryData,
+            terminalNumber: terminalNumber
         )
         
         // Create form immediately (don't wait for image upload)

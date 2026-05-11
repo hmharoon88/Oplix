@@ -108,13 +108,28 @@ struct LotterySelectionView: View {
             Text(errorMessage)
         }
         .fullScreenCover(isPresented: $showingActiveShiftForm) {
-            if let template = viewModel.lotteryTemplate, !template.rows.isEmpty {
+            // Multi-terminal locations route through a tabbed close-out
+            // sheet — one tab per active terminal — so the employee can
+            // pick which terminals they actually worked. Single-terminal
+            // locations keep the original behaviour byte-for-byte.
+            if viewModel.hasMultipleLotteryTerminals {
+                MultiTerminalLotteryFormSheet(viewModel: viewModel)
+            } else if let template = viewModel.lotteryTemplate, !template.rows.isEmpty {
                 EmployeeLotteryFormSheet(viewModel: viewModel, template: template)
             }
         }
         .fullScreenCover(isPresented: $showingLastShiftSummary) {
-            if let lastForm = lastShiftLotteryForm, let template = viewModel.lotteryTemplate {
-                LastShiftSummarySheet(viewModel: viewModel, lotteryForm: lastForm, template: template)
+            if let lastForm = lastShiftLotteryForm {
+                if viewModel.hasMultipleLotteryTerminals {
+                    // Show every terminal's submission for the last
+                    // shift in one stacked summary sheet.
+                    LastShiftMultiTerminalSummarySheet(
+                        viewModel: viewModel,
+                        anchorForm: lastForm
+                    )
+                } else if let template = viewModel.lotteryTemplate {
+                    LastShiftSummarySheet(viewModel: viewModel, lotteryForm: lastForm, template: template)
+                }
             }
         }
         .onAppear {

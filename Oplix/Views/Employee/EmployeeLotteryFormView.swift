@@ -11,6 +11,11 @@ import UIKit
 struct EmployeeLotteryFormView: View {
     @ObservedObject var viewModel: EmployeeHomeViewModel
     let template: LotteryFormTemplate
+    /// Which terminal this form belongs to. `nil` keeps the legacy
+    /// single-terminal behaviour byte-for-byte (storage layer treats
+    /// nil + 1 the same). For multi-terminal locations the host
+    /// (multi-terminal close-out sheet) passes the explicit number.
+    var terminalNumber: Int? = nil
     @Environment(\.dismiss) var dismiss
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -185,7 +190,11 @@ struct EmployeeLotteryFormView: View {
         Task {
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             if rowValues[rowId] == newValue {
-                try? await viewModel.updateLotteryRowEndingNumber(rowId: rowId, endingNumber: newValue)
+                try? await viewModel.updateLotteryRowEndingNumber(
+                    rowId: rowId,
+                    endingNumber: newValue,
+                    terminalNumber: terminalNumber
+                )
             }
         }
     }
@@ -417,8 +426,8 @@ struct EmployeeLotteryFormView: View {
         // Reload template to get latest data
         await viewModel.loadLotteryTemplate()
         
-        // Validate the form
-        let validation = await viewModel.validateLotteryForm()
+        // Validate the form against the terminal we're closing
+        let validation = await viewModel.validateLotteryForm(terminalNumber: terminalNumber)
         
         if validation.hasIncompleteRows {
             // Build warning message
@@ -479,7 +488,9 @@ struct EmployeeLotteryFormView: View {
                 return
             }
             
-            // Close lottery shift with calculations and report creation
+            // Close lottery shift with calculations and report creation.
+            // `terminalNumber == nil` keeps every existing single-terminal
+            // call site behaving exactly as it did before multi-terminal.
             let completedForm = try await viewModel.closeLotteryShift(
                 formData: formData,
                 onlineTotals: onlineTotals.filter { !$0.isEmpty },
@@ -487,7 +498,8 @@ struct EmployeeLotteryFormView: View {
                 instantCashes: instantCashes.filter { !$0.isEmpty },
                 imageData: imageData,
                 registerCash: registerCash,
-                skipValidation: skipValidation
+                skipValidation: skipValidation,
+                terminalNumber: terminalNumber
             )
             
             // Show summary immediately without waiting for template reload
@@ -497,15 +509,24 @@ struct EmployeeLotteryFormView: View {
                 showingShiftSummary = true
             }
             
-            // Reload template in the background (non-blocking)
+            // Reload template in the background (non-blocking) so the
+            // user sees their new beginning numbers if they re-open
+            // the form. For multi-terminal locations we re-read the
+            // specific terminal we just closed; for single-terminal
+            // we just refresh `lotteryTemplate` like before.
             Task.detached(priority: .background) {
                 await viewModel.loadLotteryTemplate()
-                
-                // Update local row values to reflect new beginning numbers (which should now be empty)
+
                 await MainActor.run {
-                    if let updatedTemplate = viewModel.lotteryTemplate {
+                    let refreshedTemplate: LotteryFormTemplate? = {
+                        if let terminalNumber = terminalNumber {
+                            return viewModel.lotteryTemplates[terminalNumber]
+                        }
+                        return viewModel.lotteryTemplate
+                    }()
+                    if let updatedTemplate = refreshedTemplate {
                         for row in updatedTemplate.rows {
-                            rowValues[row.id] = row.endingNumber // This will be empty after the shift closes
+                            rowValues[row.id] = row.endingNumber
                         }
                     }
                 }
