@@ -13,10 +13,11 @@ struct LocationDetailView: View {
     @StateObject private var viewModel: LocationDetailViewModel
     @StateObject private var statisticsViewModel = LocationStatisticsViewModel()
     @State private var showingAddEmployee = false
-    @State private var showingAddTask = false
     @State private var showingDeleteConfirmation = false
     @State private var showingError = false
     @State private var showingSalesExpenses = false
+    @State private var recurringPayablesCount = 0
+    @State private var recurringReceivablesCount = 0
     @Environment(\.dismiss) var dismiss
     
     init(userId: String, locationId: String) {
@@ -46,6 +47,29 @@ struct LocationDetailView: View {
                 .onAppear {
                     print("🔵 Showing loading state")
                 }
+            } else if let errorMessage = viewModel.errorMessage {
+                VStack(spacing: 16) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 48))
+                        .foregroundColor(.orange)
+                    Text("Error Loading Location")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text(errorMessage)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                    Button("Retry") {
+                        Task {
+                            viewModel.resetLoadedDataFlag()
+                            await viewModel.loadData()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.top, 8)
+                }
+                .padding()
             } else if let location = viewModel.location {
                 VStack(spacing: 0) {
                     // Header
@@ -148,7 +172,19 @@ struct LocationDetailView: View {
                                     icon: "person.2.fill",
                                     title: "Employees",
                                     color: .blue,
-                                    count: viewModel.employees.count
+                                    count: viewModel.employees.count,
+                                    showCount: false
+                                )
+                            }
+                            
+                            // Supervisors
+                            NavigationLink(value: LocationSection.supervisors) {
+                                SectionIconCard(
+                                    icon: "person.badge.key.fill",
+                                    title: "Supervisors",
+                                    color: .purple,
+                                    count: viewModel.supervisors.count,
+                                    showCount: false
                                 )
                             }
                             
@@ -158,7 +194,8 @@ struct LocationDetailView: View {
                                     icon: "checklist",
                                     title: "Tasks",
                                     color: .green,
-                                    count: viewModel.tasks.count
+                                    count: viewModel.tasks.count,
+                                    showCount: false
                                 )
                             }
                             
@@ -168,7 +205,8 @@ struct LocationDetailView: View {
                                     icon: "clock.fill",
                                     title: "Shift Manager",
                                     color: .purple,
-                                    count: viewModel.shifts.count
+                                    count: viewModel.shifts.count,
+                                    showCount: false
                                 )
                             }
                             
@@ -178,7 +216,8 @@ struct LocationDetailView: View {
                                     icon: "ticket.fill",
                                     title: "Lottery",
                                     color: .orange,
-                                    count: viewModel.lotteryForms.count
+                                    count: viewModel.lotteryForms.count,
+                                    showCount: false
                                 )
                             }
                             
@@ -188,7 +227,8 @@ struct LocationDetailView: View {
                                     icon: "doc.fill",
                                     title: "Documents",
                                     color: .indigo,
-                                    count: 0
+                                    count: 0,
+                                    showCount: false
                                 )
                             }
                             
@@ -198,7 +238,8 @@ struct LocationDetailView: View {
                                     icon: "dollarsign.circle.fill",
                                     title: "Payroll",
                                     color: .green,
-                                    count: 0
+                                    count: 0,
+                                    showCount: false
                                 )
                             }
                             
@@ -210,9 +251,35 @@ struct LocationDetailView: View {
                                     icon: "chart.bar.fill",
                                     title: "Sales & Expenses",
                                     color: .teal,
-                                    count: 0
+                                    count: 0,
+                                    showCount: false
                                 )
                             }
+                            
+                            // Payables
+                            NavigationLink(value: LocationSection.payables) {
+                                SectionIconCard(
+                                    icon: "arrow.up.circle.fill",
+                                    title: "Payables",
+                                    color: .red,
+                                    count: 0,
+                                    badgeCount: recurringPayablesCount > 0 ? recurringPayablesCount : nil,
+                                    showCount: false
+                                )
+                            }
+                            
+                            // Receivables
+                            NavigationLink(value: LocationSection.receivables) {
+                                SectionIconCard(
+                                    icon: "arrow.down.circle.fill",
+                                    title: "Receivables",
+                                    color: .blue,
+                                    count: 0,
+                                    badgeCount: recurringReceivablesCount > 0 ? recurringReceivablesCount : nil,
+                                    showCount: false
+                                )
+                            }
+                            
                         }
                         .padding()
                     }
@@ -276,8 +343,10 @@ struct LocationDetailView: View {
             switch section {
             case .employees:
                 EmployeesScreen(viewModel: viewModel, showingAddEmployee: $showingAddEmployee)
+            case .supervisors:
+                SupervisorsScreen(viewModel: viewModel)
             case .tasks:
-                TasksScreen(viewModel: viewModel, showingAddTask: $showingAddTask)
+                TasksScreen(viewModel: viewModel)
             case .shifts:
                 ShiftsScreen(viewModel: viewModel)
             case .lottery:
@@ -289,10 +358,20 @@ struct LocationDetailView: View {
             case .salesExpenses:
                 // Sales & Expenses is handled via sheet, not navigation
                 EmptyView()
+            case .payables:
+                PayablesView(userId: userId, locationId: locationId)
+            case .receivables:
+                ReceivablesView(userId: userId, locationId: locationId)
             }
         }
         .onAppear {
             print("🔵 LocationDetailView body rendered")
+            Task {
+                await loadRecurringCounts()
+            }
+        }
+        .task {
+            await loadRecurringCounts()
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationTitle(viewModel.location?.name ?? "Location")
@@ -306,31 +385,50 @@ struct LocationDetailView: View {
                 }
             }
         }
-        .onAppear {
-            print("🔵 LocationDetailView onAppear - locationId: \(locationId)")
+        .task(id: locationId) {
+            print("🔵 LocationDetailView task - locationId: \(locationId)")
+            // Reset hasLoadedData when locationId changes to allow reloading
+            viewModel.resetLoadedDataFlag()
             print("🔵 isLoading: \(viewModel.isLoading)")
             print("🔵 location: \(viewModel.location?.name ?? "nil")")
+            print("🔵 Starting loadData...")
+            await viewModel.loadData()
+            print("🔵 loadData completed - isLoading: \(viewModel.isLoading)")
+            print("🔵 location: \(viewModel.location?.name ?? "nil")")
+            print("🔵 errorMessage: \(viewModel.errorMessage ?? "nil")")
+            viewModel.startObserving()
+            print("🔵 Observing started")
+            
+            // Load statistics
+            await statisticsViewModel.loadStatistics(userId: userId, locationId: locationId)
+            
+            // Load recurring counts for notification badges
+            await loadRecurringCounts()
+        }
+        .onAppear {
+            // Also reset when view appears to allow reloading after navigation
+            viewModel.resetLoadedDataFlag()
+            // Refresh recurring counts when view appears (e.g., returning from payables/receivables)
             Task {
-                print("🔵 Starting loadData...")
-                await viewModel.loadData()
-                print("🔵 loadData completed - isLoading: \(viewModel.isLoading)")
-                print("🔵 location: \(viewModel.location?.name ?? "nil")")
-                print("🔵 errorMessage: \(viewModel.errorMessage ?? "nil")")
-                viewModel.startObserving()
-                print("🔵 Observing started")
-                
-                // Load statistics
-                await statisticsViewModel.loadStatistics(userId: userId, locationId: locationId)
+                await loadRecurringCounts()
             }
         }
         .sheet(isPresented: $showingAddEmployee) {
-            AddEmployeeView(viewModel: viewModel)
+            print("🟡 SHEET - AddEmployeeView PRESENTED")
+            print("   Location: \(viewModel.location?.name ?? "nil")")
+            print("   LocationId: \(locationId)")
+            print("   ViewModel employees count: \(viewModel.employees.count)")
+            return AddEmployeeView(viewModel: viewModel)
         }
-        .sheet(isPresented: $showingAddTask) {
-            AddTaskView(viewModel: viewModel)
+        .onChange(of: showingAddEmployee) { oldValue, newValue in
+            print("🟡 SHEET - showingAddEmployee changed: \(oldValue) -> \(newValue)")
         }
         .sheet(isPresented: $showingSalesExpenses) {
-            SalesExpensesScreen(viewModel: viewModel)
+            print("🟡 SHEET - SalesExpensesScreen PRESENTED")
+            return SalesExpensesScreen(viewModel: viewModel)
+        }
+        .onChange(of: showingSalesExpenses) { oldValue, newValue in
+            print("🟡 SHEET - showingSalesExpenses changed: \(oldValue) -> \(newValue)")
         }
         .alert("Delete Location", isPresented: $showingDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -343,6 +441,12 @@ struct LocationDetailView: View {
             if let location = viewModel.location {
                 Text("Are you sure you want to delete '\(location.name)'? This action cannot be undone.")
             }
+        }
+        .task {
+            // Load data when view appears
+            print("🔵 LocationDetailView - Task: Loading data...")
+            viewModel.resetLoadedDataFlag()
+            await viewModel.loadData()
         }
         .onChange(of: viewModel.errorMessage) { oldValue, newValue in
             showingError = newValue != nil
@@ -391,6 +495,20 @@ struct LocationDetailView: View {
         formatter.minimumFractionDigits = 2
         formatter.maximumFractionDigits = 2
         return formatter.string(from: NSNumber(value: amount)) ?? "$\(String(format: "%.2f", amount))"
+    }
+    
+    private func loadRecurringCounts() async {
+        do {
+            let payables = try await FirebaseService.shared.fetchPayables(userId: userId, locationId: locationId)
+            // Only count recurring items that are NOT paid
+            recurringPayablesCount = payables.filter { $0.frequency != .none && !$0.isPaid }.count
+            
+            let receivables = try await FirebaseService.shared.fetchReceivables(userId: userId, locationId: locationId)
+            // Only count recurring items that are NOT received
+            recurringReceivablesCount = receivables.filter { $0.frequency != .none && !$0.isReceived }.count
+        } catch {
+            print("Error loading recurring counts: \(error.localizedDescription)")
+        }
     }
 }
 

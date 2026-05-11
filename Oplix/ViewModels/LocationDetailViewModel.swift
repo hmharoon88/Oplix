@@ -6,11 +6,13 @@
 //
 
 import Foundation
+import FirebaseAuth
 
 @MainActor
 class LocationDetailViewModel: ObservableObject {
     @Published var location: Location?
     @Published var employees: [Employee] = []
+    @Published var supervisors: [Employee] = [] // Supervisors at this location
     @Published var tasks: [WorkTask] = []
     @Published var shifts: [Shift] = []
     @Published var lotteryForms: [LotteryForm] = []
@@ -26,15 +28,63 @@ class LocationDetailViewModel: ObservableObject {
     private let firebaseService = FirebaseService.shared
     let userId: String
     private let locationId: String
+    private var isLoadDataInProgress = false // Prevent concurrent loadData calls
+    private var hasLoadedData = false // Track if data has been successfully loaded
+    private var currentUserRole: User.UserRole? // Store current user's role to avoid fetching
+    private var currentUserId: String? // Store current user ID to skip fetching
+    private var userRoleCache: [String: User.UserRole] = [:] // Persistent cache across loadData calls
     
-    init(userId: String, locationId: String) {
+    // Static cache shared across all instances to prevent fetching same user multiple times
+    private static var globalUserRoleCache: [String: User.UserRole] = [:]
+    private static var cacheLock = NSLock()
+    
+    // Helper function for async-safe cache access
+    private static func withCacheLock<T>(_ operation: () -> T) -> T {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return operation()
+    }
+
+    /// Public hook so role changes made outside the location screens
+    /// (e.g. promote/demote from `EditManagerEmployeeView`) can keep the
+    /// shared role cache consistent. Without this the next location
+    /// screen would still bucket the affected user under their old role
+    /// until a fresh User-doc fetch happens.
+    static func setCachedRole(_ role: User.UserRole?, for employeeId: String) {
+        withCacheLock {
+            if let role = role {
+                globalUserRoleCache[employeeId] = role
+            } else {
+                globalUserRoleCache.removeValue(forKey: employeeId)
+            }
+        }
+    }
+    
+    init(userId: String, locationId: String, currentUserRole: User.UserRole? = nil) {
         self.userId = userId
         self.locationId = locationId
-        print("🟢 LocationDetailViewModel init - userId: \(userId), locationId: \(locationId)")
+        self.currentUserRole = currentUserRole
+        self.currentUserId = Auth.auth().currentUser?.uid
+        print("🟢 LocationDetailViewModel init - userId: \(userId), locationId: \(locationId), currentUserRole: \(currentUserRole?.rawValue ?? "nil"), currentUserId: \(currentUserId ?? "nil")")
         print("🟢 isLoading: \(isLoading)")
     }
     
     func loadData() async {
+        // Prevent concurrent calls
+        guard !isLoadDataInProgress else {
+            print("⚠️ loadData already in progress, skipping...")
+            return
+        }
+        
+        // If data has already been loaded and we have location/employees, don't reload
+        // This prevents loops from view re-renders
+        // But allow reload if location is nil (data might have been cleared)
+        if hasLoadedData && location != nil && !employees.isEmpty {
+            print("⚠️ loadData skipped - data already loaded (location: \(location?.name ?? "nil"), employees: \(employees.count))")
+            return
+        }
+        
+        isLoadDataInProgress = true
         print("🟢 loadData called - userId: \(userId), locationId: \(locationId)")
         isLoading = true
         errorMessage = nil
@@ -49,8 +99,88 @@ class LocationDetailViewModel: ObservableObject {
             
             location = try await locationTask
             print("🟢 Location fetched: \(location?.name ?? "nil")")
-            employees = try await employeesTask
-            print("🟢 Employees fetched: \(employees.count)")
+            
+            // Fetch employees - if empty, that's okay (might be timing issue)
+            do {
+                let allEmployees = try await employeesTask
+                print("🟢 Employees fetched: \(allEmployees.count)")
+                
+                // Separate employees and supervisors based on their User role
+                var employeesList: [Employee] = []
+                var supervisorsList: [Employee] = []
+                
+                for employee in allEmployees {
+                    // Check local cache first
+                    if let cachedRole = userRoleCache[employee.id] {
+                        if cachedRole == .supervisor {
+                            supervisorsList.append(employee)
+                        } else {
+                            employeesList.append(employee)
+                        }
+                        continue
+                    }
+                    
+                    // Check global static cache
+                    let cachedRole: User.UserRole? = LocationDetailViewModel.withCacheLock {
+                        return LocationDetailViewModel.globalUserRoleCache[employee.id]
+                    }
+                    if let cached = cachedRole {
+                        userRoleCache[employee.id] = cached
+                        if cached == .supervisor {
+                            supervisorsList.append(employee)
+                        } else {
+                            employeesList.append(employee)
+                        }
+                        continue
+                    }
+                    
+                    // Skip fetching current user's document if we know their role
+                    if let currentUserId = currentUserId, employee.id == currentUserId, let role = currentUserRole {
+                        print("⚠️ Skipping user fetch for current user: \(employee.id), using role: \(role.rawValue)")
+                        userRoleCache[employee.id] = role
+                        LocationDetailViewModel.withCacheLock {
+                            LocationDetailViewModel.globalUserRoleCache[employee.id] = role
+                        }
+                        if role == .supervisor {
+                            supervisorsList.append(employee)
+                        } else {
+                            employeesList.append(employee)
+                        }
+                        continue
+                    }
+                    
+                    // Fetch user document to check role (only if not cached and not current user)
+                    do {
+                        let user = try await firebaseService.fetchUser(userId: employee.id)
+                        let role = user.role
+                        userRoleCache[employee.id] = role // Cache locally
+                        LocationDetailViewModel.withCacheLock {
+                            LocationDetailViewModel.globalUserRoleCache[employee.id] = role // Cache globally
+                        }
+                        if role == .supervisor {
+                            supervisorsList.append(employee)
+                        } else {
+                            employeesList.append(employee)
+                        }
+                    } catch {
+                        // If user fetch fails, assume employee (default)
+                        employeesList.append(employee)
+                        userRoleCache[employee.id] = .employee
+                        LocationDetailViewModel.withCacheLock {
+                            LocationDetailViewModel.globalUserRoleCache[employee.id] = .employee
+                        }
+                    }
+                }
+                
+                employees = employeesList
+                supervisors = supervisorsList
+                print("🟢 Separated: \(employees.count) employees, \(supervisors.count) supervisors")
+            } catch {
+                print("⚠️ Warning: Failed to fetch employees: \(error.localizedDescription)")
+                employees = [] // Set to empty array instead of failing
+                supervisors = []
+            }
+            
             tasks = try await tasksTask
             print("🟢 Tasks fetched: \(tasks.count)")
             shifts = try await shiftsTask
@@ -65,10 +195,23 @@ class LocationDetailViewModel: ObservableObject {
             errorMessage = "Failed to load data: \(error.localizedDescription)"
         }
         isLoading = false
+        isLoadDataInProgress = false
+        hasLoadedData = true // Mark data as loaded
         print("🟢 loadData completed - isLoading: \(isLoading), location: \(location?.name ?? "nil")")
     }
     
-    func createEmployee(name: String, password: String, workingHoursStart: String? = nil, workingHoursEnd: String? = nil, weeklySchedule: WeeklySchedule? = nil, hourlyRate: Double? = nil, canTakeRegister: Bool = false, canSubmitLottery: Bool = false) async throws -> (username: String, email: String, password: String) {
+    // Method to force reload (for when data needs to be refreshed)
+    func reloadData() async {
+        hasLoadedData = false
+        await loadData()
+    }
+    
+    // Method to reset loaded data flag (allows reloading when view reappears)
+    func resetLoadedDataFlag() {
+        hasLoadedData = false
+    }
+    
+    func createEmployee(name: String, password: String, role: User.UserRole = .employee, workingHoursStart: String? = nil, workingHoursEnd: String? = nil, weeklySchedule: WeeklySchedule? = nil, is24Hours: Bool? = nil, hourlyRate: Double? = nil, canTakeRegister: Bool = false, canSubmitLottery: Bool = false, canEditSchedules: Bool? = nil, canManageTasks: Bool? = nil, canManageDocuments: Bool? = nil, managerEmail: String? = nil, managerPassword: String? = nil) async throws -> (username: String, email: String, password: String) {
         // Auto-generate username from name
         let baseUsername = name.lowercased()
             .replacingOccurrences(of: " ", with: "")
@@ -82,6 +225,9 @@ class LocationDetailViewModel: ObservableObject {
         var attempts = 0
         let maxAttempts = 10
         
+        // Get manager's email before creating employee (for re-authentication)
+        let managerEmail = Auth.auth().currentUser?.email
+        
         // Try to create user, if email exists, add unique suffix
         while attempts < maxAttempts {
             do {
@@ -89,9 +235,12 @@ class LocationDetailViewModel: ObservableObject {
                     email: email,
                     password: password,
                     username: finalUsername,
-                    role: .employee,
+                    role: role,
                     locationId: locationId,
-                    managerUserId: userId
+                    managerUserId: userId,
+                    signOutAfterCreation: false, // Don't sign out yet - we need to create employee document first
+                    managerEmail: managerEmail,
+                    managerPassword: managerPassword
                 )
                 break // Success, exit loop
             } catch {
@@ -119,6 +268,10 @@ class LocationDetailViewModel: ObservableObject {
             throw NSError(domain: "LocationDetailViewModel", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create user after \(maxAttempts) attempts"])
         }
         
+        // At this point, the employee is signed in (createUser signs them in automatically)
+        // We need to create the Employee document while the employee is still signed in
+        // (Firestore rules allow employees to create their own documents)
+        
         // Create Employee document using the user ID from Firebase Auth
         var employee = Employee(
             id: createdUser.id,
@@ -132,30 +285,79 @@ class LocationDetailViewModel: ObservableObject {
             workingHoursStart: workingHoursStart,
             workingHoursEnd: workingHoursEnd,
             weeklySchedule: weeklySchedule,
+            is24Hours: is24Hours,
             assignedLocationIds: [locationId], // Add to assigned locations
             hourlyRate: hourlyRate
         )
         employee.canTakeRegister = canTakeRegister
         employee.canSubmitLottery = canSubmitLottery
+        // Set supervisor-specific permissions
+        employee.canEditSchedules = canEditSchedules
+        employee.canManageTasks = canManageTasks
+        employee.canManageDocuments = canManageDocuments
         
-        // Create at manager level first
+        // Create employee document while employee is still signed in
+        // (Employee can create their own document per Firestore rules)
         try await firebaseService.createManagerEmployee(userId: userId, employee: employee)
         
         // Also create in location subcollection for backward compatibility
         try await firebaseService.createEmployee(userId: userId, locationId: locationId, employee: employee)
         
-        // Update location
-        var updatedLocation = location!
-        updatedLocation.employees.append(createdUser.id)
-        try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
+        // Small delay to ensure documents are fully written
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
         
-        await loadData()
+        // Sign out the employee
+        try Auth.auth().signOut()
+        
+        // Re-authenticate manager if we have credentials (manager has full access to all employee data)
+        if let managerEmail = managerEmail,
+           let managerPassword = managerPassword {
+            do {
+                _ = try await Auth.auth().signIn(withEmail: managerEmail, password: managerPassword)
+                print("✅ Manager re-authenticated - has full access to all employee data")
+                
+                // Update location
+                var updatedLocation = location!
+                updatedLocation.employees.append(createdUser.id)
+                try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
+                
+                // Small delay before reloading to ensure location is updated
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                
+                // Reload data (manager is authenticated)
+                // Store any existing error message before loadData
+                _ = errorMessage
+                await loadData()
+                // If employee creation succeeded, clear any "Employee not found" errors from loadData
+                // The employee was created successfully, so this error is just a timing issue
+                if errorMessage?.contains("Employee not found") == true || 
+                   errorMessage?.contains("Failed to load data") == true {
+                    errorMessage = nil
+                    print("✅ Employee created successfully - ignoring loadData timing error")
+                }
+            } catch {
+                print("⚠️ Warning: Failed to re-authenticate manager: \(error.localizedDescription)")
+                // Still update location even if re-auth fails
+                var updatedLocation = location!
+                updatedLocation.employees.append(createdUser.id)
+                try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
+                // Manager will need to sign in again to see the updated data
+            }
+        } else {
+            // If no manager credentials, just update location
+            // Manager will need to sign in again to see the updated data
+            var updatedLocation = location!
+            updatedLocation.employees.append(createdUser.id)
+            try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
+        }
         
         return (username: finalUsername, email: email, password: password)
     }
     
     func updateEmployee(_ employee: Employee) async throws {
         try await firebaseService.updateEmployee(userId: userId, locationId: locationId, employee: employee)
+        // Reset the loaded data flag so loadData will refresh the data
+        resetLoadedDataFlag()
         await loadData()
     }
     
@@ -178,36 +380,59 @@ class LocationDetailViewModel: ObservableObject {
     
     func deleteEmployee(_ employee: Employee) async {
         do {
-            // First, unassign all tasks from this employee
+            // First, unassign all tasks from this employee at this location.
             let tasksToUnassign = tasks.filter { $0.isAssignedTo(employeeId: employee.id) }
             for task in tasksToUnassign {
                 await unassignTask(task, fromEmployeeId: employee.id)
             }
-            
-            // Delete employee from Firestore (including User document)
-            try await firebaseService.deleteEmployee(userId: userId, locationId: locationId, employeeId: employee.id)
-            
-            // Remove employee ID from location's employees array
-            var updatedLocation = location!
-            updatedLocation.employees.removeAll { $0 == employee.id }
-            try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
-            
+
+            // Same hard-delete flow as the Manager Employees tab — unassign
+            // from every location the employee was at (cleans up each
+            // location's subcollection + `Location.employees` array), then
+            // remove from the manager-level mirror and delete the User
+            // document. Without this the deleted employee keeps showing up
+            // in the Employees tab.
+            //
+            // Defend against data drift by also unioning in the current
+            // location id, so a stale `assignedLocationIds` that's missing
+            // this location still gets cleaned.
+            var locationsToUnassign = Set(employee.assignedLocationIds)
+            locationsToUnassign.insert(locationId)
+            for assignedLocId in locationsToUnassign {
+                try? await firebaseService.unassignEmployeeFromLocation(
+                    userId: userId,
+                    employeeId: employee.id,
+                    locationId: assignedLocId
+                )
+            }
+
+            // Delete from manager-level employees + Firebase User doc.
+            try await firebaseService.deleteManagerEmployee(userId: userId, employeeId: employee.id)
+
+            // Keep the in-memory `location.employees` array honest so the
+            // location detail screen reflects the change without waiting on
+            // the next snapshot.
+            if var updatedLocation = location {
+                updatedLocation.employees.removeAll { $0 == employee.id }
+                location = updatedLocation
+            }
+
             await loadData()
         } catch {
             errorMessage = "Failed to delete employee: \(error.localizedDescription)"
         }
     }
     
-    func createTask(description: String, assignedToEmployeeId: String?) async {
+    func createTask(description: String, assignedEmployeeIds: [String], frequency: TaskFrequency = .oneTime) async {
         do {
-            let assignedIds = assignedToEmployeeId != nil ? [assignedToEmployeeId!] : []
             let task = WorkTask(
                 id: UUID().uuidString,
                 description: description,
-                assignedEmployeeIds: assignedIds,
+                assignedEmployeeIds: assignedEmployeeIds,
                 locationId: locationId, // Set primary location
                 assignedLocationIds: [locationId], // Add to assigned locations
-                employeeCompletions: [:]
+                employeeCompletions: [:],
+                frequency: frequency
             )
             
             // Create at manager level first
@@ -229,18 +454,80 @@ class LocationDetailViewModel: ObservableObject {
     func updateTask(_ task: WorkTask) async {
         do {
             try await firebaseService.updateTask(userId: userId, locationId: locationId, task: task)
+            // Mirror to manager-level so dashboard score bars stay in sync.
+            do {
+                try await firebaseService.updateManagerTask(userId: userId, task: task)
+            } catch {
+                print("⚠️ Failed to mirror task update to manager-level: \(error.localizedDescription)")
+            }
             await loadData()
         } catch {
             errorMessage = "Failed to update task: \(error.localizedDescription)"
         }
     }
+
+    /// Manager / supervisor approves or disapproves a specific completion
+    /// photo on a task. Disapproved completions stop counting toward the
+    /// "done" / score calculations (see `WorkTask.isCompletedBy`), and the
+    /// employee will see the task flip back to incomplete with a "please
+    /// redo" banner the next time they open it.
+    ///
+    /// - Parameters:
+    ///   - task: The task containing the completion to review.
+    ///   - employeeId: The employee whose photo is being reviewed.
+    ///   - approved: `true` for Approve, `false` for Disapprove.
+    ///   - note: Optional reason shown to the employee on disapproval.
+    ///   - reviewerId: The signed-in manager / supervisor user id.
+    func reviewCompletion(
+        task: WorkTask,
+        employeeId: String,
+        approved: Bool,
+        note: String?,
+        reviewerId: String
+    ) async {
+        guard var completion = task.employeeCompletions[employeeId] else {
+            errorMessage = "Could not find a completion to review."
+            return
+        }
+
+        completion.isApproved = approved
+        completion.reviewedBy = reviewerId
+        completion.reviewedAt = Date()
+        completion.disapprovalNote = approved ? nil : note
+
+        var updatedTask = task
+        updatedTask.employeeCompletions[employeeId] = completion
+
+        // Keep an optimistic copy in our local in-memory store so the UI
+        // (status pill, score bars, employee row) reflects the review
+        // immediately without waiting for the round-trip + reload.
+        if let index = tasks.firstIndex(where: { $0.id == updatedTask.id }) {
+            tasks[index] = updatedTask
+        }
+
+        await updateTask(updatedTask)
+    }
     
     func deleteTask(_ task: WorkTask) async {
         do {
             try await firebaseService.deleteTask(userId: userId, locationId: locationId, taskId: task.id)
+            // Also delete the manager-level mirror so dashboard score bars
+            // stop counting this task immediately. Non-fatal — even if this
+            // fails, the per-location delete is the source of truth.
+            do {
+                try await firebaseService.deleteManagerTask(userId: userId, taskId: task.id)
+            } catch {
+                print("⚠️ Failed to delete manager-level mirror for task: \(error.localizedDescription)")
+            }
             var updatedLocation = location!
             updatedLocation.tasks.removeAll { $0 == task.id }
             try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
+            // Mirror the change locally so sequential deletes (e.g. bulk-delete
+            // loop) don't read a stale `location.tasks` and re-add already-deleted
+            // ids on the next write. `loadData()` is guarded and won't refetch
+            // here, so we have to keep the in-memory copy in sync ourselves.
+            location = updatedLocation
+            tasks.removeAll { $0.id == task.id }
             await loadData()
         } catch {
             errorMessage = "Failed to delete task: \(error.localizedDescription)"
@@ -421,19 +708,19 @@ class LocationDetailViewModel: ObservableObject {
         }
     }
     
-    func loadLotteryFormTemplate() async -> [LotteryFormTemplateRow] {
+    func loadLotteryFormTemplate() async -> (rows: [LotteryFormTemplateRow], lotteryRegisterAmount: String, reverseOrder: Bool) {
         do {
             if let template = try await firebaseService.fetchLotteryFormTemplate(userId: userId, locationId: locationId) {
-                return template.rows
+                return (template.rows, template.lotteryRegisterAmount, template.reverseOrder)
             }
         } catch {
             print("🔴 Failed to load lottery form template: \(error.localizedDescription)")
         }
-        return []
+        return ([], "", false)
     }
     
-    func saveLotteryFormTemplate(rows: [LotteryFormTemplateRow]) async throws {
-        let template = LotteryFormTemplate(locationId: locationId, rows: rows)
+    func saveLotteryFormTemplate(rows: [LotteryFormTemplateRow], lotteryRegisterAmount: String, reverseOrder: Bool) async throws {
+        let template = LotteryFormTemplate(locationId: locationId, rows: rows, lotteryRegisterAmount: lotteryRegisterAmount, reverseOrder: reverseOrder)
         try await firebaseService.saveLotteryFormTemplate(userId: userId, locationId: locationId, template: template)
     }
 }

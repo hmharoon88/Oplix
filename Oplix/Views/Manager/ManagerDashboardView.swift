@@ -16,6 +16,7 @@ struct ManagerDashboardView: View {
     @State private var locationToDelete: Location?
     @State private var showingDeleteConfirmation = false
     @State private var selectedTab = 2 // Default to Home tab
+    @State private var locationRecurringCounts: [String: Int] = [:] // locationId: recurring count
     
     var body: some View {
         ZStack {
@@ -48,12 +49,21 @@ struct ManagerDashboardView: View {
             }
         }
         .onAppear {
-            // Set tab bar appearance
+            // Set tab bar appearance for the entire app
             let appearance = UITabBarAppearance()
             appearance.configureWithOpaqueBackground()
             appearance.backgroundColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
+            
+            // Set icon and text colors
+            appearance.stackedLayoutAppearance.normal.iconColor = UIColor.white.withAlphaComponent(0.6)
+            appearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.white.withAlphaComponent(0.6)]
+            appearance.stackedLayoutAppearance.selected.iconColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
+            appearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)]
+            
             UITabBar.appearance().standardAppearance = appearance
             UITabBar.appearance().scrollEdgeAppearance = appearance
+            UITabBar.appearance().barTintColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
+            UITabBar.appearance().isTranslucent = false
         }
     }
     
@@ -130,7 +140,10 @@ struct ManagerDashboardView: View {
                                         LocationRow(
                                             location: location,
                                             index: index,
-                                            userId: authViewModel.currentUser?.id
+                                            userId: authViewModel.currentUser?.id,
+                                            recurringCount: locationRecurringCounts[location.id],
+                                            todayScore: viewModel.todayScore(for: location),
+                                            sevenDayScore: viewModel.sevenDayScore(for: location)
                                         )
                                     }
                                     .listRowBackground(Color.clear)
@@ -145,27 +158,6 @@ struct ManagerDashboardView: View {
                             .listStyle(.plain)
                             .scrollContentBackground(.hidden)
                         }
-                        
-                        // Colored Footer
-                        HStack {
-                            Spacer()
-                            Text("© 2025 Oplix")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.8))
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.1, green: 0.3, blue: 0.6),  // Dark blue
-                                    Color(red: 0.15, green: 0.4, blue: 0.7)   // Medium dark blue
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
                     }
                 }
                 .navigationTitle("")
@@ -181,13 +173,24 @@ struct ManagerDashboardView: View {
                     appearance.titleTextAttributes = [.foregroundColor: UIColor.clear]
                     UINavigationBar.appearance().standardAppearance = appearance
                     UINavigationBar.appearance().scrollEdgeAppearance = appearance
+                    
+                    Task {
+                        await self.loadRecurringCountsForAllLocations()
+                    }
+                }
+                .task {
+                    await self.loadRecurringCountsForAllLocations()
                 }
                 .toolbar {
                     // Add button is now in the header
                 }
                 .sheet(isPresented: $showingAddLocation) {
-                    AddLocationView(viewModel: viewModel)
+                    print("🟡 SHEET - AddLocationView PRESENTED (from ManagerDashboard)")
+                    return AddLocationView(viewModel: viewModel)
                         .environmentObject(authViewModel)
+                }
+                .onChange(of: showingAddLocation) { oldValue, newValue in
+                    print("🟡 SHEET - showingAddLocation changed: \(oldValue) -> \(newValue)")
                 }
                 .fullScreenCover(item: $selectedLocation) { location in
                     NavigationStack {
@@ -276,9 +279,6 @@ struct ManagerDashboardView: View {
                 }
                 .tag(4)
         }
-        .toolbarBackground(.visible, for: .tabBar)
-        .toolbarBackground(Color(red: 0.1, green: 0.3, blue: 0.6), for: .tabBar)
-        .background(TabBarPositionFix())
         .onAppear {
             // Set tab bar appearance to make icons white with dark blue background
             let appearance = UITabBarAppearance()
@@ -287,7 +287,7 @@ struct ManagerDashboardView: View {
             // Dark blue background matching the header/footer
             appearance.backgroundColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
             
-            // Set unselected icon color to white with reduced opacity (smaller icons)
+            // Set unselected icon color to white with reduced opacity
             appearance.stackedLayoutAppearance.normal.iconColor = UIColor.white.withAlphaComponent(0.6)
             appearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.white.withAlphaComponent(0.6)]
             
@@ -295,11 +295,16 @@ struct ManagerDashboardView: View {
             appearance.stackedLayoutAppearance.selected.iconColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0) // Gold/Yellow
             appearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)]
             
+            // Apply to both standard and scroll edge appearances
             UITabBar.appearance().standardAppearance = appearance
             UITabBar.appearance().scrollEdgeAppearance = appearance
             
+            // Also set the background color directly
+            UITabBar.appearance().barTintColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
+            UITabBar.appearance().isTranslucent = false
+            
             // Make Home tab icon bigger and others smaller
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                    let window = windowScene.windows.first {
                     var tabBarController: UITabBarController?
@@ -328,7 +333,14 @@ struct ManagerDashboardView: View {
                         }
                     }
                     
-                    guard let tabBarItems = tabBarController?.tabBar.items else { return }
+                    guard let tabBarController = tabBarController,
+                          let tabBarItems = tabBarController.tabBar.items else { return }
+                    
+                    // Apply appearance to the actual tab bar
+                    tabBarController.tabBar.standardAppearance = appearance
+                    tabBarController.tabBar.scrollEdgeAppearance = appearance
+                    tabBarController.tabBar.barTintColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
+                    tabBarController.tabBar.isTranslucent = false
                     
                     // Make other icons smaller (pointSize 18)
                     for (index, item) in tabBarItems.enumerated() where index != 2 {
@@ -420,7 +432,10 @@ struct ManagerDashboardView: View {
                                     LocationRow(
                                         location: location,
                                         index: index,
-                                        userId: authViewModel.currentUser?.id
+                                        userId: authViewModel.currentUser?.id,
+                                        recurringCount: locationRecurringCounts[location.id],
+                                        todayScore: viewModel.todayScore(for: location),
+                                        sevenDayScore: viewModel.sevenDayScore(for: location)
                                     )
                                 }
                                 .listRowBackground(Color.clear)
@@ -435,27 +450,6 @@ struct ManagerDashboardView: View {
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
                     }
-                    
-                    // Colored Footer
-                    HStack {
-                        Spacer()
-                        Text("© 2025 Oplix")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.8))
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.1, green: 0.3, blue: 0.6),
-                                Color(red: 0.15, green: 0.4, blue: 0.7)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
                 }
             }
             .navigationTitle("")
@@ -501,6 +495,7 @@ struct ManagerDashboardView: View {
                 }
                 await viewModel.loadLocations()
                 viewModel.startObservingLocations()
+                await self.loadRecurringCountsForAllLocations()
             }
         }
     }
@@ -576,13 +571,41 @@ struct ManagerDashboardView: View {
             .frame(maxWidth: .infinity)
         }
     }
+    
+    private func loadRecurringCountsForAllLocations() async {
+        guard let userId = authViewModel.currentUser?.id else { return }
+        
+        var counts: [String: Int] = [:]
+        
+        for location in viewModel.locations {
+            do {
+                let payables = try await FirebaseService.shared.fetchPayables(userId: userId, locationId: location.id)
+                let receivables = try await FirebaseService.shared.fetchReceivables(userId: userId, locationId: location.id)
+                
+                let recurringPayables = payables.filter { $0.frequency != .none }.count
+                let recurringReceivables = receivables.filter { $0.frequency != .none }.count
+                
+                counts[location.id] = recurringPayables + recurringReceivables
+            } catch {
+                print("Error loading recurring counts for location \(location.id): \(error.localizedDescription)")
+            }
+        }
+        
+        locationRecurringCounts = counts
+    }
 }
 
 struct LocationRow: View {
     let location: Location
     let index: Int
     let userId: String?
-    
+    let recurringCount: Int? // Optional recurring items count for badge
+    // Optional today + 7-day completion scores. When non-nil, a thin
+    // progress bar is drawn at the bottom of the card. Pass nil to keep
+    // the existing legacy appearance.
+    var todayScore: LocationScoreSegment? = nil
+    var sevenDayScore: LocationScoreSegment? = nil
+
     private var cardGradient: LinearGradient {
         // More vibrant and colorful gradients with multiple colors
         let gradients: [[Color]] = [
@@ -612,27 +635,93 @@ struct LocationRow: View {
     }
     
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(location.name)
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .fontWeight(.bold)
-                Text(location.address)
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.95))
+        VStack(spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(location.name)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .fontWeight(.bold)
+
+                        if let recurringCount = recurringCount, recurringCount > 0 {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 20, height: 20)
+                                .overlay(
+                                    Text("\(recurringCount)")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.white)
+                                )
+                        }
+                    }
+
+                    Text(location.address)
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.95))
+                }
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.white.opacity(0.9))
+                    .fontWeight(.semibold)
+                    .font(.system(size: 16))
             }
-            Spacer()
-            
-            Image(systemName: "chevron.right")
-                .foregroundColor(.white.opacity(0.9))
-                .fontWeight(.semibold)
-                .font(.system(size: 16))
+
+            // Score bar — only rendered when at least one segment is supplied.
+            if todayScore != nil || sevenDayScore != nil {
+                scoreBar
+            }
         }
         .padding()
         .background(cardGradient)
         .cornerRadius(16)
         .shadow(color: Color.black.opacity(0.25), radius: 10, x: 0, y: 5)
+    }
+
+    // White-on-gradient progress bar that shows two stacked tracks:
+    // "TODAY" (filled to today's %) and "PAST WEEK" (filled to the previous
+    // 7 full days' completion rate), with a small label on the right showing
+    // both percentages.
+    private var scoreBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let today = todayScore {
+                scoreTrack(label: "TODAY", segment: today)
+            }
+            if let week = sevenDayScore {
+                scoreTrack(label: "PAST WEEK", segment: week)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func scoreTrack(label: String, segment: LocationScoreSegment) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundColor(.white.opacity(0.85))
+                .frame(width: 56, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.25))
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: max(4, geo.size.width * segment.percentage))
+                }
+            }
+            .frame(height: 6)
+
+            Text("\(segment.numerator)/\(segment.denominator) · \(segment.displayPercent)%")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 86, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
     }
 }
 

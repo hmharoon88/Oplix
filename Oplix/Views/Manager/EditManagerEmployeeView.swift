@@ -22,19 +22,131 @@ struct EditManagerEmployeeView: View {
     @State private var hourlyRate = ""
     @State private var canTakeRegister = false
     @State private var canSubmitLottery = false
+    @State private var is24Hours = false
     @State private var selectedLocationIds: Set<String> = []
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var showingSuccess = false
     @State private var scheduleConflicts: [String: [String]] = [:] // locationId: [conflicting location names]
+    @State private var hasLoadedData = false // Prevent multiple loads
+
+    // Password change (mirrors EmployeeDetailView UX so credentials work the
+    // same way no matter which entry point you used to reach the editor).
+    @State private var showingChangePassword = false
+    /// When true, the password field uses plain text so the manager can read it.
+    @State private var showPlaintextPassword = false
+
+    // Supervisor-only permission toggles. Stored as plain Bool with a
+    // separate "show" gate driven by `selectedRole`, so we never
+    // accidentally write supervisor flags onto a regular employee record.
+    @State private var canViewEmployeeData = false
+    @State private var canManageTasks = false
+    @State private var canManageDocuments = false
+    @State private var canViewRegisterData = false
+    @State private var canViewLotteryData = false
+    @State private var canEditSchedules = false
+    @State private var canViewReports = false
+
+    // Role promotion / demotion. `selectedRole` is what's currently
+    // visible in the picker and drives the supervisor section visibility.
+    // `originalRole` is what was loaded from Firestore — we compare on
+    // save to decide whether to issue a role write. `pendingRoleChange`
+    // holds the picker target while the confirmation alert is showing
+    // (so cancelling reverts cleanly).
+    @State private var selectedRole: User.UserRole = .employee
+    @State private var originalRole: User.UserRole = .employee
+    @State private var pendingRoleChange: User.UserRole?
+    @State private var showingRoleChangeAlert = false
+    @State private var hasInitializedRole = false
+
+    /// True when the employee being edited currently has the supervisor
+    /// role in the picker. Drives whether the supervisor permissions
+    /// section is rendered. Tied to `selectedRole` (not the saved
+    /// Firestore value) so the section appears/disappears immediately
+    /// when an admin toggles the picker, letting them configure flags
+    /// in the same edit session before saving.
+    private var isSupervisor: Bool {
+        selectedRole == .supervisor
+    }
     
     init(employee: Employee, viewModel: ManagerEmployeesViewModel) {
+        print("🔵 EditManagerEmployeeView - INIT")
+        print("   Employee ID: \(employee.id)")
+        print("   Employee Name: \(employee.name)")
+        print("   Assigned Locations: \(employee.assignedLocationIds)")
+        print("   ViewModel locations count: \(viewModel.locations.count)")
         self.employee = employee
         _viewModel = ObservedObject(wrappedValue: viewModel)
+        
+        // Initialize state immediately to prevent re-renders
+        _name = State(initialValue: employee.name)
+        _password = State(initialValue: employee.password ?? "")
+        _selectedLocationIds = State(initialValue: Set(employee.assignedLocationIds))
+        _canTakeRegister = State(initialValue: employee.hasRegisterPermission)
+        _canSubmitLottery = State(initialValue: employee.hasLotteryPermission)
+        _is24Hours = State(initialValue: employee.is24Hours ?? false)
+
+        // Supervisor-only permission flags. Stored on Employee but only
+        // surfaced in the UI when we know this person's role is supervisor;
+        // the helper still defaults nil → false so older records keep their
+        // old behaviour.
+        _canViewEmployeeData = State(initialValue: employee.canViewEmployeeData ?? false)
+        _canManageTasks = State(initialValue: employee.canManageTasks ?? false)
+        _canManageDocuments = State(initialValue: employee.canManageDocuments ?? false)
+        _canViewRegisterData = State(initialValue: employee.canViewRegisterData ?? false)
+        _canViewLotteryData = State(initialValue: employee.canViewLotteryData ?? false)
+        _canEditSchedules = State(initialValue: employee.canEditSchedules ?? false)
+        _canViewReports = State(initialValue: employee.canViewReports ?? false)
+        
+        if let rate = employee.hourlyRate {
+            _hourlyRate = State(initialValue: String(format: "%.2f", rate))
+        }
+        
+        // Initialize location schedules
+        var schedules: [String: WeeklySchedule] = [:]
+        var useWeekly: [String: Bool] = [:]
+        var hasHours: [String: Bool] = [:]
+        var startTimes: [String: Date] = [:]
+        var endTimes: [String: Date] = [:]
+        
+        for locationId in employee.assignedLocationIds {
+            if let schedule = employee.weeklySchedule {
+                schedules[locationId] = schedule
+                useWeekly[locationId] = true
+            } else if let startTime = employee.workingHoursStart, let endTime = employee.workingHoursEnd {
+                hasHours[locationId] = true
+                let components1 = startTime.split(separator: ":")
+                let components2 = endTime.split(separator: ":")
+                var dateComponents1 = DateComponents()
+                var dateComponents2 = DateComponents()
+                if components1.count == 2, let hour = Int(components1[0]), let minute = Int(components1[1]) {
+                    dateComponents1.hour = hour
+                    dateComponents1.minute = minute
+                }
+                if components2.count == 2, let hour = Int(components2[0]), let minute = Int(components2[1]) {
+                    dateComponents2.hour = hour
+                    dateComponents2.minute = minute
+                }
+                startTimes[locationId] = Calendar.current.date(from: dateComponents1) ?? Date()
+                endTimes[locationId] = Calendar.current.date(from: dateComponents2) ?? Date()
+                useWeekly[locationId] = false
+            }
+        }
+        
+        _locationSchedules = State(initialValue: schedules)
+        _locationUseWeeklySchedule = State(initialValue: useWeekly)
+        _locationHasWorkingHours = State(initialValue: hasHours)
+        _locationWorkingHoursStart = State(initialValue: startTimes)
+        _locationWorkingHoursEnd = State(initialValue: endTimes)
     }
     
     var body: some View {
-        ZStack {
+        let _ = print("🔵 EditManagerEmployeeView - BODY RENDER")
+        let _ = print("   Employee: \(employee.name) (ID: \(employee.id))")
+        let _ = print("   Selected Locations: \(selectedLocationIds)")
+        let _ = print("   ViewModel locations: \(viewModel.locations.count)")
+        
+        return ZStack {
             Theme.secondaryGradient
                 .ignoresSafeArea()
             
@@ -61,7 +173,26 @@ struct EditManagerEmployeeView: View {
                     Section("Employee Details") {
                         TextField("Employee Name", text: $name)
                             .textInputAutocapitalization(.words)
-                        SecureField("Password", text: $password)
+                        HStack(spacing: 8) {
+                            Group {
+                                if showPlaintextPassword {
+                                    TextField("Password", text: $password)
+                                        .textContentType(.password)
+                                        .autocorrectionDisabled()
+                                        .textInputAutocapitalization(.never)
+                                } else {
+                                    SecureField("Password", text: $password)
+                                }
+                            }
+                            Button {
+                                showPlaintextPassword.toggle()
+                            } label: {
+                                Image(systemName: showPlaintextPassword ? "eye.slash.fill" : "eye.fill")
+                                    .foregroundColor(.secondary)
+                                    .accessibilityLabel(showPlaintextPassword ? "Hide password" : "Show password")
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     
                     Section("Assign to Locations") {
@@ -115,33 +246,40 @@ struct EditManagerEmployeeView: View {
                         }
                     }
                     
+                    Section("Schedule Settings") {
+                        Toggle("24/7", isOn: $is24Hours)
+                            .onChange(of: is24Hours) { _, newValue in
+                                // When 24/7 is enabled, disable weekly schedule for all locations
+                                if newValue {
+                                    for locationId in selectedLocationIds {
+                                        locationUseWeeklySchedule[locationId] = false
+                                    }
+                                }
+                            }
+                    }
+                    
                     Section("Compensation") {
                         TextField("Hourly Rate (e.g., 25.50)", text: $hourlyRate)
                             .keyboardType(.decimalPad)
                     }
                     
-                    Section("Permissions") {
-                        Toggle("Can Take Register", isOn: $canTakeRegister)
-                        Toggle("Can Submit Lottery", isOn: $canSubmitLottery)
+                    roleSection
+                    permissionsSection
+                    if isSupervisor {
+                        supervisorPermissionsSection
                     }
-                    
-                    Section("Auto-Generated") {
-                        HStack {
-                            Text("Username")
-                            Spacer()
-                            Text(employee.username)
-                                .foregroundColor(.secondary)
-                                .font(.caption)
-                        }
-                        HStack {
-                            Text("Email")
-                            Spacer()
-                            Text(generatedEmail)
-                                .foregroundColor(.secondary)
-                                .font(.caption)
-                        }
-                    }
+                    loginCredentialsSection
                 }
+        }
+        .sheet(isPresented: $showingChangePassword) {
+            ChangePasswordView(
+                employeeName: employee.name,
+                onSave: { newPassword in
+                    password = newPassword
+                    showingChangePassword = false
+                },
+                onCancel: { showingChangePassword = false }
+            )
         }
         .navigationTitle("Edit Employee")
         .navigationBarTitleDisplayMode(.inline)
@@ -172,44 +310,255 @@ struct EditManagerEmployeeView: View {
         } message: {
             Text("Employee updated successfully")
         }
-        .task {
-            await viewModel.loadData()
-            loadEmployeeData()
+        .alert(
+            pendingRoleChange == .supervisor ? "Promote to Supervisor?" : "Demote to Employee?",
+            isPresented: $showingRoleChangeAlert,
+            presenting: pendingRoleChange
+        ) { newRole in
+            Button(newRole == .supervisor ? "Promote" : "Demote", role: .destructive) {
+                // The picker is already at `newRole`. Just commit it as
+                // the displayed selection so the supervisor section
+                // visibility tracks. The actual Firestore write happens
+                // in updateEmployee() on Save.
+                selectedRole = newRole
+                if newRole == .employee {
+                    // Clean state on demote: clear all supervisor flags
+                    // locally so when the Employee record is saved they
+                    // get written back as false.
+                    canViewEmployeeData = false
+                    canManageTasks = false
+                    canManageDocuments = false
+                    canEditSchedules = false
+                    canViewRegisterData = false
+                    canViewLotteryData = false
+                    canViewReports = false
+                }
+                pendingRoleChange = nil
+            }
+            Button("Cancel", role: .cancel) {
+                // Revert the picker to the saved value. The onChange
+                // observer's `newValue != originalRole` guard will
+                // suppress the re-prompt this revert would otherwise
+                // trigger.
+                selectedRole = originalRole
+                pendingRoleChange = nil
+            }
+        } message: { newRole in
+            Text(newRole == .supervisor
+                 ? "\(employee.name) will gain supervisor controls and access to the location's Task Check, Documents, Payables, and Receivables (per the toggles you'll set below). They must log out and back in for the change to take effect."
+                 : "\(employee.name)'s supervisor controls will be removed and all supervisor permissions cleared. They must log out and back in for the change to take effect.")
         }
+        .onChange(of: selectedRole) { _, newValue in
+            // Only prompt when this is a real user-driven change (not the
+            // initial load, and not a no-op on the currently-shown role).
+            // `pendingRoleChange` being non-nil means we're already mid-
+            // confirmation; suppress to avoid double-prompting.
+            guard hasInitializedRole, pendingRoleChange == nil else { return }
+            guard newValue != originalRole else { return }
+            pendingRoleChange = newValue
+            showingRoleChangeAlert = true
+        }
+        .onChange(of: viewModel.userRoles) { _, _ in
+            // viewModel.loadData() resolves roles asynchronously. Once the
+            // role for this employee lands, sync the picker to it (only
+            // until the user has actually started touching it themselves).
+            if !hasInitializedRole {
+                let role = viewModel.role(for: employee.id)
+                selectedRole = role
+                originalRole = role
+                hasInitializedRole = true
+            }
+        }
+        .onAppear {
+            print("🔵 EditManagerEmployeeView - ON APPEAR")
+            print("   Employee: \(employee.name) (ID: \(employee.id))")
+            print("   ViewModel locations count: \(viewModel.locations.count)")
+            print("   hasLoadedData: \(hasLoadedData)")
+
+            // If the role for this employee is already cached on the
+            // view model (because the executive previously visited this
+            // tab in the same session), seed the picker straight away.
+            // Otherwise the .onChange observer above will pick it up
+            // once loadData completes.
+            if !hasInitializedRole, viewModel.userRoles[employee.id] != nil {
+                let role = viewModel.role(for: employee.id)
+                selectedRole = role
+                originalRole = role
+                hasInitializedRole = true
+            }
+
+            // Only load viewModel data once if needed
+            if !hasLoadedData && viewModel.locations.isEmpty {
+                Task {
+                    print("🔵 EditManagerEmployeeView - TASK STARTED")
+                    print("   Loading viewModel data for employee: \(employee.name)")
+                    await viewModel.loadData()
+                    print("🔵 EditManagerEmployeeView - DATA LOADED")
+                    print("   ViewModel locations count after load: \(viewModel.locations.count)")
+                    // Check for conflicts after loading locations
+                    for locationId in selectedLocationIds {
+                        checkConflicts(for: locationId)
+                    }
+                    hasLoadedData = true
+                }
+            } else {
+                // Check for conflicts if locations are already loaded
+                if !viewModel.locations.isEmpty {
+                    for locationId in selectedLocationIds {
+                        checkConflicts(for: locationId)
+                    }
+                }
+                hasLoadedData = true
+            }
+        }
+        .id(employee.id) // Stabilize the view with employee ID
     }
     
     private var generatedEmail: String {
         return "\(employee.username)@oplix.app"
     }
+
+    // MARK: - Form sections
+    //
+    // These are extracted into computed @ViewBuilder properties so the
+    // SwiftUI type checker doesn't have to digest the entire Form in a
+    // single expression. With every section inline, body got past the
+    // "unable to type-check this expression in reasonable time" cliff.
+
+    @ViewBuilder
+    private var roleSection: some View {
+        Section {
+            Picker("Role", selection: $selectedRole) {
+                Text("Employee").tag(User.UserRole.employee)
+                Text("Supervisor").tag(User.UserRole.supervisor)
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Role")
+        } footer: {
+            roleSectionFooter
+        }
+    }
+
+    @ViewBuilder
+    private var roleSectionFooter: some View {
+        if selectedRole != originalRole {
+            let message = selectedRole == .supervisor
+                ? "On save, \(employee.name) will be promoted to supervisor. They'll need to log out and back in to see supervisor controls."
+                : "On save, \(employee.name) will be demoted to a regular employee. All supervisor permissions will be cleared. They'll need to log out and back in for the change to take effect."
+            Text(message)
+                .foregroundColor(.orange)
+        }
+    }
+
+    @ViewBuilder
+    private var permissionsSection: some View {
+        Section("Permissions") {
+            Toggle("Can Take Register", isOn: $canTakeRegister)
+            Toggle("Can Submit Lottery", isOn: $canSubmitLottery)
+        }
+    }
+
+    @ViewBuilder
+    private var supervisorPermissionsSection: some View {
+        Section {
+            Toggle("Can View Employee Data", isOn: $canViewEmployeeData)
+            Toggle("Can Manage Tasks", isOn: $canManageTasks)
+            Toggle("Can Manage Documents", isOn: $canManageDocuments)
+            Toggle("Can Edit Schedules", isOn: $canEditSchedules)
+            Toggle("Can View Register Data", isOn: $canViewRegisterData)
+            Toggle("Can View Lottery Data", isOn: $canViewLotteryData)
+            Toggle("Can View Reports", isOn: $canViewReports)
+        } header: {
+            Text("Supervisor Permissions")
+        } footer: {
+            Text("Controls what this supervisor can do from their Supervisor tab.")
+        }
+    }
+
+    @ViewBuilder
+    private var loginCredentialsSection: some View {
+        Section("Login Credentials") {
+            HStack {
+                Text("Username")
+                Spacer()
+                Text(employee.username)
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            }
+            HStack {
+                Text("Email")
+                Spacer()
+                Text(generatedEmail)
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            }
+            Button(action: { showingChangePassword = true }) {
+                HStack {
+                    Image(systemName: "lock.fill")
+                        .foregroundColor(Theme.cloudBlue)
+                    Text(passwordButtonLabel)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
+    private var passwordButtonLabel: String {
+        let stored = employee.password
+        let hasPassword = !(stored == nil || stored?.isEmpty == true)
+        return hasPassword ? "Change Password" : "Set Password"
+    }
     
     private func loadEmployeeData() {
+        print("🔵 EditManagerEmployeeView - loadEmployeeData() STARTED")
+        print("   Employee name: \(employee.name)")
+        print("   Assigned location IDs: \(employee.assignedLocationIds)")
+        print("   Has weekly schedule: \(employee.weeklySchedule != nil)")
+        print("   Has working hours: \(employee.workingHoursStart != nil && employee.workingHoursEnd != nil)")
+        
         name = employee.name
         password = employee.password ?? ""
         selectedLocationIds = Set(employee.assignedLocationIds)
         canTakeRegister = employee.hasRegisterPermission
         canSubmitLottery = employee.hasLotteryPermission
         
+        print("   Set selectedLocationIds: \(selectedLocationIds)")
+        
         if let rate = employee.hourlyRate {
             hourlyRate = String(format: "%.2f", rate)
+            print("   Hourly rate: \(hourlyRate)")
         }
         
         // Load schedules for each assigned location
         for locationId in employee.assignedLocationIds {
+            print("   Processing location: \(locationId)")
             if let schedule = employee.weeklySchedule {
                 locationSchedules[locationId] = schedule
                 locationUseWeeklySchedule[locationId] = true
+                print("     - Using weekly schedule")
             } else if let startTime = employee.workingHoursStart, let endTime = employee.workingHoursEnd {
                 locationHasWorkingHours[locationId] = true
                 locationWorkingHoursStart[locationId] = parseTimeString(startTime)
                 locationWorkingHoursEnd[locationId] = parseTimeString(endTime)
                 locationUseWeeklySchedule[locationId] = false
+                print("     - Using working hours: \(startTime) - \(endTime)")
+            } else {
+                print("     - No schedule or working hours found")
             }
         }
+        
+        print("   Location schedules loaded: \(locationSchedules.count)")
         
         // Check for conflicts after loading
         for locationId in selectedLocationIds {
             checkConflicts(for: locationId)
         }
+        
+        print("🔵 EditManagerEmployeeView - loadEmployeeData() COMPLETED")
     }
     
     private func parseTimeString(_ timeString: String) -> Date {
@@ -239,8 +588,29 @@ struct EditManagerEmployeeView: View {
                     endTime = nil
                 } else if let hasHours = locationHasWorkingHours[locationId], hasHours {
                     schedule = nil
-                    startTime = formatTime(locationWorkingHoursStart[locationId] ?? Date())
-                    endTime = formatTime(locationWorkingHoursEnd[locationId] ?? Date())
+                    // Get the actual stored time, or use the default from DatePicker if not set
+                    let startDate: Date
+                    if let storedStart = locationWorkingHoursStart[locationId] {
+                        startDate = storedStart
+                    } else {
+                        var components = DateComponents()
+                        components.hour = 9
+                        components.minute = 0
+                        startDate = Calendar.current.date(from: components) ?? Date()
+                    }
+                    
+                    let endDate: Date
+                    if let storedEnd = locationWorkingHoursEnd[locationId] {
+                        endDate = storedEnd
+                    } else {
+                        var components = DateComponents()
+                        components.hour = 17
+                        components.minute = 0
+                        endDate = Calendar.current.date(from: components) ?? Date()
+                    }
+                    
+                    startTime = formatTime(startDate)
+                    endTime = formatTime(endDate)
                 } else {
                     schedule = nil
                     startTime = nil
@@ -261,17 +631,58 @@ struct EditManagerEmployeeView: View {
             updatedEmployee.weeklySchedule = schedule
             updatedEmployee.workingHoursStart = startTime
             updatedEmployee.workingHoursEnd = endTime
+            updatedEmployee.is24Hours = is24Hours // Save 24/7 status
             updatedEmployee.hourlyRate = rate
             updatedEmployee.canTakeRegister = canTakeRegister
             updatedEmployee.canSubmitLottery = canSubmitLottery
-            
+
+            // Supervisor-only flags. For supervisors we write the
+            // current toggle state. For regular employees we explicitly
+            // write `false` for all of them — important on demote so the
+            // supervisor section doesn't keep granting access to a user
+            // whose role is now `.employee`. (For an employee who was
+            // never promoted these were already false, so this is a
+            // safe no-op.)
+            if isSupervisor {
+                updatedEmployee.canViewEmployeeData = canViewEmployeeData
+                updatedEmployee.canManageTasks = canManageTasks
+                updatedEmployee.canManageDocuments = canManageDocuments
+                updatedEmployee.canEditSchedules = canEditSchedules
+                updatedEmployee.canViewRegisterData = canViewRegisterData
+                updatedEmployee.canViewLotteryData = canViewLotteryData
+                updatedEmployee.canViewReports = canViewReports
+            } else {
+                updatedEmployee.canViewEmployeeData = false
+                updatedEmployee.canManageTasks = false
+                updatedEmployee.canManageDocuments = false
+                updatedEmployee.canEditSchedules = false
+                updatedEmployee.canViewRegisterData = false
+                updatedEmployee.canViewLotteryData = false
+                updatedEmployee.canViewReports = false
+            }
+
+            print("🔵 Saving employee with is24Hours: \(is24Hours)")
             try await viewModel.updateEmployee(updatedEmployee)
-            
+            print("🔵 Employee saved successfully with is24Hours: \(is24Hours)")
+
+            // Promote / demote the User document if the picker changed.
+            // We do this AFTER updateEmployee so the supervisor-flag
+            // clear has already landed in Firestore — that way there's
+            // no in-between state where User.role == .employee but the
+            // Employee record still has supervisor flags set.
+            if selectedRole != originalRole {
+                try await viewModel.updateUserRole(
+                    employeeId: employee.id,
+                    newRole: selectedRole
+                )
+                originalRole = selectedRole
+            }
+
             // Update password if changed
             if !password.isEmpty && password != employee.password {
                 try await viewModel.updateEmployeePassword(employeeId: employee.id, newPassword: password)
             }
-            
+
             showingSuccess = true
         } catch {
             errorMessage = error.localizedDescription
@@ -344,11 +755,17 @@ struct EditManagerEmployeeView: View {
                     get: { locationUseWeeklySchedule[location.id] ?? true },
                     set: {
                         locationUseWeeklySchedule[location.id] = $0
+                        // When weekly schedule is enabled, disable 24/7
+                        if $0 {
+                            is24Hours = false
+                        }
                         checkConflicts(for: location.id)
                     }
                 ))
+                .disabled(is24Hours)
+                .foregroundColor(is24Hours ? Theme.darkGray : .primary)
                 
-                if locationUseWeeklySchedule[location.id] ?? true {
+                if locationUseWeeklySchedule[location.id] ?? true && !is24Hours {
                     WeeklyScheduleEditor(schedule: Binding(
                         get: { locationSchedules[location.id] ?? WeeklySchedule() },
                         set: {
@@ -356,11 +773,28 @@ struct EditManagerEmployeeView: View {
                             checkConflicts(for: location.id)
                         }
                     ))
-                } else {
+                    .disabled(is24Hours)
+                    .opacity(is24Hours ? 0.5 : 1.0)
+                } else if !is24Hours {
                     Toggle("Set Working Hours", isOn: Binding(
                         get: { locationHasWorkingHours[location.id] ?? false },
                         set: {
                             locationHasWorkingHours[location.id] = $0
+                            // Initialize default times if not already set when toggling on
+                            if $0 {
+                                if locationWorkingHoursStart[location.id] == nil {
+                                    var components = DateComponents()
+                                    components.hour = 9
+                                    components.minute = 0
+                                    locationWorkingHoursStart[location.id] = Calendar.current.date(from: components) ?? Date()
+                                }
+                                if locationWorkingHoursEnd[location.id] == nil {
+                                    var components = DateComponents()
+                                    components.hour = 17
+                                    components.minute = 0
+                                    locationWorkingHoursEnd[location.id] = Calendar.current.date(from: components) ?? Date()
+                                }
+                            }
                             checkConflicts(for: location.id)
                         }
                     ))
@@ -420,7 +854,7 @@ struct EditManagerEmployeeView: View {
     private func checkConflicts(for locationId: String) {
         var conflicts: [String] = []
         
-        guard let currentLocation = viewModel.locations.first(where: { $0.id == locationId }) else { return }
+        guard viewModel.locations.first(where: { $0.id == locationId }) != nil else { return }
         
         // Get current location's schedule
         let currentUseWeekly = locationUseWeeklySchedule[locationId] ?? true
