@@ -21,6 +21,18 @@ class EmployeeHomeViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var lotteryTemplate: LotteryFormTemplate?
+    /// Last 3 lottery shifts submitted at this location, newest first
+    /// (counted across every terminal). Powers the "Recent Lottery" card
+    /// on the employee/supervisor home so they can see the over/short of
+    /// the most recent shifts even before the day's first submission.
+    @Published var recentLotteryForms: [LotteryForm] = []
+
+    /// Announcements addressed to this user, newest first. Powers the
+    /// home-screen announcements card + the inbox screen. Already
+    /// filtered to `recipientIds.contains(employeeId)` server- and
+    /// client-side so the employee only sees what was sent to them.
+    @Published var myAnnouncements: [Announcement] = []
+    private var announcementsListener: ListenerRegistration?
     
     private let firebaseService = FirebaseService.shared
     let employeeId: String
@@ -112,6 +124,10 @@ class EmployeeHomeViewModel: ObservableObject {
             async let tasksTask = firebaseService.fetchTasks(userId: managerUserId, locationId: locationId)
             async let shiftsTask = firebaseService.fetchShifts(userId: managerUserId, locationId: locationId)
             async let employeesTask = firebaseService.fetchEmployees(userId: managerUserId, locationId: locationId)
+            // Fetch in parallel; we'll filter to today client-side. Failure
+            // here is non-fatal — the home screen still works without
+            // lottery data, just minus the Lottery Today card.
+            async let lotteryFormsTask = firebaseService.fetchLotteryForms(userId: managerUserId, locationId: locationId)
             
             employee = try await employeeTask
             location = try await locationTask
@@ -129,6 +145,21 @@ class EmployeeHomeViewModel: ObservableObject {
             
             // Store all employees for getting names
             allEmployees = try await employeesTask
+            
+            // Take the 3 most recent lottery submissions across every
+            // terminal at this location for the home-screen card.
+            // Tolerate fetch failures — lottery data is optional on home.
+            do {
+                let allForms = try await lotteryFormsTask
+                recentLotteryForms = allForms
+                    .sorted { $0.submittedAt > $1.submittedAt }
+                    .prefix(3)
+                    .map { $0 }
+                print("🎟️ Recent lottery: fetched \(allForms.count) forms for location \(locationId), kept \(recentLotteryForms.count) most recent.")
+            } catch {
+                print("⚠️ Recent lottery: fetch failed for location \(locationId): \(error.localizedDescription)")
+                recentLotteryForms = []
+            }
             
             // Find the last closed register for this location (from any employee)
             await loadLastLocationRegisterClose(managerUserId: managerUserId, locationId: locationId)
@@ -373,7 +404,7 @@ class EmployeeHomeViewModel: ObservableObject {
         await loadData()
     }
     
-    func completeTask(_ task: WorkTask, imageDataList: [Data]) async {
+    func completeTask(_ task: WorkTask, imageDataList: [Data], note: String? = nil) async {
         guard let managerUserId = managerUserId else {
             errorMessage = "Manager user ID not found"
             return
@@ -395,7 +426,8 @@ class EmployeeHomeViewModel: ObservableObject {
             let completion = TaskCompletion(
                 employeeId: employeeId,
                 imageURLs: imageURLs,
-                timestamp: Date()
+                timestamp: Date(),
+                note: note
             )
             updatedTask.employeeCompletions[employeeId] = completion
             
@@ -428,7 +460,7 @@ class EmployeeHomeViewModel: ObservableObject {
     }
     
     // Background upload function that continues even after view dismissal
-    func completeTaskInBackground(_ task: WorkTask, imageDataList: [Data]) {
+    func completeTaskInBackground(_ task: WorkTask, imageDataList: [Data], note: String? = nil) {
         // Capture necessary values before starting background task
         guard let managerUserId = managerUserId else {
             errorMessage = "Manager user ID not found"
@@ -456,7 +488,8 @@ class EmployeeHomeViewModel: ObservableObject {
                 let completion = TaskCompletion(
                     employeeId: currentEmployeeId,
                     imageURLs: imageURLs,
-                    timestamp: Date()
+                    timestamp: Date(),
+                    note: note
                 )
                 updatedTask.employeeCompletions[currentEmployeeId] = completion
                 
@@ -867,12 +900,19 @@ class EmployeeHomeViewModel: ObservableObject {
         // 4. Create form data with summary
         let formId = UUID().uuidString
         var updatedFormData = formData
-        
-        // Store beginning numbers before they get overwritten
+
+        // Snapshot beginning + ending from the Firestore template we
+        // just used for calculations — not from client `formData` alone.
+        // The UI builds `formData["row_*"]` from debounced `rowValues`;
+        // if the employee closes within the debounce window (or a save
+        // fails), those keys can still match **Begin** while the book
+        // actually advanced in Firestore. Overwriting from `template`
+        // keeps the saved form consistent with totals and roll-forward.
         for row in template.rows {
             if !row.beginningNumber.isEmpty {
                 updatedFormData["begin_\(row.id)"] = row.beginningNumber
             }
+            updatedFormData["row_\(row.id)"] = row.endingNumber
         }
         
         // 5. Move ending numbers to beginning numbers in template, then clear ending numbers
@@ -1047,6 +1087,70 @@ class EmployeeHomeViewModel: ObservableObject {
                 // Check for shifts that need auto clock out
                 await self.checkAndAutoClockOut()
             }
+        }
+
+        // Observe announcements addressed to this user. Server side
+        // already wrote the recipient list; we just filter on the
+        // client so each role only sees what was sent to them.
+        announcementsListener?.remove()
+        announcementsListener = firebaseService.observeAnnouncements(
+            managerUserId: managerUserId
+        ) { [weak self] all in
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.myAnnouncements = all.filter {
+                    $0.recipientIds.contains(self.employeeId)
+                }
+            }
+        }
+    }
+
+    func stopObserving() {
+        announcementsListener?.remove()
+        announcementsListener = nil
+    }
+
+    deinit {
+        announcementsListener?.remove()
+    }
+
+    // MARK: - Announcements
+
+    /// Unread count for the home-screen badge. Counts only the
+    /// announcements this user hasn't tapped into yet.
+    var unreadAnnouncementCount: Int {
+        myAnnouncements.filter { $0.isUnread(for: employeeId) }.count
+    }
+
+    /// Most-recent announcement, used by the home-screen preview card.
+    /// nil when the user has never received one.
+    var latestAnnouncement: Announcement? {
+        myAnnouncements.first
+    }
+
+    /// Mark a single announcement as read for the current user. Safe
+    /// to call repeatedly; the Firestore write is a no-op when the
+    /// user is already in `readBy`.
+    func markAnnouncementRead(_ announcement: Announcement) async {
+        guard let managerUserId = managerUserId else { return }
+        // Optimistic local update so the badge drops immediately.
+        if let idx = myAnnouncements.firstIndex(where: { $0.id == announcement.id }) {
+            var copy = myAnnouncements[idx]
+            var by = copy.readBy ?? [:]
+            if by[employeeId] == nil {
+                by[employeeId] = Date()
+                copy.readBy = by
+                myAnnouncements[idx] = copy
+            }
+        }
+        do {
+            try await firebaseService.markAnnouncementRead(
+                managerUserId: managerUserId,
+                announcementId: announcement.id,
+                userId: employeeId
+            )
+        } catch {
+            print("⚠️ Failed to mark announcement \(announcement.id) read: \(error.localizedDescription)")
         }
     }
     

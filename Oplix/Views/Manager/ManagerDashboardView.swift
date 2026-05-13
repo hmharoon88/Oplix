@@ -9,6 +9,16 @@ import SwiftUI
 import UIKit
 
 struct ManagerDashboardView: View {
+    /// Matches `UITabBar` / iPad custom bar so safe-area gaps read as brand blue.
+    private static let managerTabChromeGradient = LinearGradient(
+        colors: [
+            Color(red: 0.1, green: 0.3, blue: 0.6),
+            Color(red: 0.15, green: 0.4, blue: 0.7)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     @StateObject private var viewModel = ManagerDashboardViewModel()
     @EnvironmentObject var authViewModel: AuthViewModel
     @State private var showingAddLocation = false
@@ -44,8 +54,15 @@ struct ManagerDashboardView: View {
                     customBottomTabBar
                 }
             } else {
-                // iPhone: Use standard TabView
-                standardTabView
+                // iPhone: System TabView (iOS 18+ floating bar). Appearance APIs
+                // tint the bar itself, not the strip below the home indicator —
+                // that shows the layer behind the TabView (default white). Paint
+                // full-screen chrome here so it matches iPad's blue tab chrome.
+                ZStack {
+                    Self.managerTabChromeGradient
+                        .ignoresSafeArea()
+                    standardTabView
+                }
             }
         }
         .onAppear {
@@ -196,17 +213,20 @@ struct ManagerDashboardView: View {
                     NavigationStack {
                         Group {
                             if let userId = authViewModel.currentUser?.id {
-                                LocationDetailView(userId: userId, locationId: location.id)
+                                // showsCloseButton renders the bottom-right
+                                // floating Done pill from inside the location
+                                // view itself, matching the trash FAB on the
+                                // bottom-left. We used to set an external
+                                // toolbar Done here too, which produced a
+                                // duplicate button in the top-right on iPhone
+                                // — removed.
+                                LocationDetailView(
+                                    userId: userId,
+                                    locationId: location.id,
+                                    showsCloseButton: true
+                                )
                             } else {
                                 Text("Error: User not authenticated")
-                            }
-                        }
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                Button("Done") {
-                                    print("🟡 Done button tapped")
-                                    selectedLocation = nil
-                                }
                             }
                         }
                         .onAppear {
@@ -279,6 +299,9 @@ struct ManagerDashboardView: View {
                 }
                 .tag(4)
         }
+        .toolbarBackground(Self.managerTabChromeGradient, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .toolbarColorScheme(.dark, for: .tabBar)
         .onAppear {
             // Set tab bar appearance to make icons white with dark blue background
             let appearance = UITabBarAppearance()
@@ -461,14 +484,13 @@ struct ManagerDashboardView: View {
             .fullScreenCover(item: $selectedLocation) { location in
                 NavigationStack {
                     if let userId = authViewModel.currentUser?.id {
-                        LocationDetailView(userId: userId, locationId: location.id)
-                            .toolbar {
-                                ToolbarItem(placement: .navigationBarTrailing) {
-                                    Button("Done") {
-                                        selectedLocation = nil
-                                    }
-                                }
-                            }
+                        // Built-in Done button (showsCloseButton) replaces
+                        // the external toolbar override that used to live here.
+                        LocationDetailView(
+                            userId: userId,
+                            locationId: location.id,
+                            showsCloseButton: true
+                        )
                     }
                 }
             }
@@ -544,7 +566,7 @@ struct ManagerDashboardView: View {
             )
         }
         .frame(height: 60)
-        .background(
+        .background {
             LinearGradient(
                 colors: [
                     Color(red: 0.1, green: 0.3, blue: 0.6),
@@ -553,7 +575,8 @@ struct ManagerDashboardView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-        )
+            .ignoresSafeArea(edges: .bottom)
+        }
     }
     
     private func tabBarButton(icon: String, label: String, tag: Int, isSelected: Bool, isLarge: Bool = false) -> some View {
@@ -572,20 +595,32 @@ struct ManagerDashboardView: View {
         }
     }
     
+    // Counts recurring items that are actually overdue (frequency != none,
+    // still unpaid/unreceived, and past their due-date at start-of-day).
+    // The red badge on each LocationRow surfaces this — it should mean
+    // "you have stuff to deal with here", not "you have N rows in books".
     private func loadRecurringCountsForAllLocations() async {
         guard let userId = authViewModel.currentUser?.id else { return }
         
         var counts: [String: Int] = [:]
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
         
         for location in viewModel.locations {
             do {
                 let payables = try await FirebaseService.shared.fetchPayables(userId: userId, locationId: location.id)
                 let receivables = try await FirebaseService.shared.fetchReceivables(userId: userId, locationId: location.id)
                 
-                let recurringPayables = payables.filter { $0.frequency != .none }.count
-                let recurringReceivables = receivables.filter { $0.frequency != .none }.count
+                let overduePayables = payables.filter { p in
+                    guard p.frequency != .none, !p.isPaid, let due = p.dueDate else { return false }
+                    return calendar.startOfDay(for: due) < todayStart
+                }.count
+                let overdueReceivables = receivables.filter { r in
+                    guard r.frequency != .none, !r.isReceived, let due = r.dueDate else { return false }
+                    return calendar.startOfDay(for: due) < todayStart
+                }.count
                 
-                counts[location.id] = recurringPayables + recurringReceivables
+                counts[location.id] = overduePayables + overdueReceivables
             } catch {
                 print("Error loading recurring counts for location \(location.id): \(error.localizedDescription)")
             }
@@ -599,7 +634,9 @@ struct LocationRow: View {
     let location: Location
     let index: Int
     let userId: String?
-    let recurringCount: Int? // Optional recurring items count for badge
+    // Count of OVERDUE recurring payables + receivables for this location.
+    // Surfaced as a red badge next to the location name. nil hides the badge.
+    let recurringCount: Int?
     // Optional today + 7-day completion scores. When non-nil, a thin
     // progress bar is drawn at the bottom of the card. Pass nil to keep
     // the existing legacy appearance.

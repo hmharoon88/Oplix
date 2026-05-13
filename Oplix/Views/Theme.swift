@@ -36,16 +36,34 @@ struct Theme {
         startPoint: .top,
         endPoint: .bottom
     )
+
+    /// Selection tint for `.pickerStyle(.segmented)` (sign-in role + manager tools).
+    static let segmentedPickerTint = cloudBlue
 }
 
 extension View {
     func cloudCard() -> some View {
         self
             .background(Theme.cloudWhite)
-            .cornerRadius(16)
-            .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+            .cornerRadius(14)
+            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 3)
     }
-    
+
+    /// Canonical chrome for status / info cards on the home dashboards
+    /// (Today, This Week, Lottery Today, Action Center, Performance,
+    /// Weekly Stats, etc). Use INSTEAD of the per-card inline
+    /// `.background(Theme.cloudWhite).cornerRadius(16).shadow(...)`
+    /// so all home-dashboard cards stay visually unified.
+    ///
+    /// Caller still applies its own `.padding(...)` so inner layouts
+    /// keep their bespoke spacing — this modifier only owns chrome.
+    func oplixCard() -> some View {
+        self
+            .background(Theme.cloudWhite)
+            .cornerRadius(14)
+            .shadow(color: Color.black.opacity(0.07), radius: 6, x: 0, y: 2)
+    }
+
     func cloudButton(backgroundColor: Color = Theme.cloudBlue) -> some View {
         self
             .foregroundColor(.white)
@@ -54,6 +72,40 @@ extension View {
             .background(backgroundColor)
             .cornerRadius(12)
             .shadow(color: backgroundColor.opacity(0.3), radius: 4, x: 0, y: 2)
+    }
+
+    /// Shorter text fields (auth + forms) for a denser layout on iPad/iPhone.
+    func oplixCompactFormField() -> some View {
+        self
+            .font(.subheadline)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
+    }
+
+    /// Compact frosted panel for auth flows. Clamps width with `maxWidth`; center with
+    /// `.frame(maxWidth: .infinity, alignment: .center)` on the result when needed.
+    func oplixCompactGlassCard(maxWidth: CGFloat = 380) -> some View {
+        self
+            .padding(16)
+            .frame(maxWidth: maxWidth)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 5)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.28), lineWidth: 1)
+            )
+    }
+
+    /// Use on any `Picker` with `.pickerStyle(.segmented)` for consistent Oplix accent.
+    func oplixSegmentedPickerTint() -> some View {
+        tint(Theme.segmentedPickerTint)
     }
 }
 

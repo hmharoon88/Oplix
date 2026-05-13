@@ -30,7 +30,7 @@ struct ManagerLoginView: View {
             )
             .ignoresSafeArea()
             
-            VStack(spacing: 30) {
+            VStack(spacing: 20) {
                 // Back button
                 HStack {
                     Button(action: {
@@ -53,24 +53,18 @@ struct ManagerLoginView: View {
                 
                 Spacer()
                 
-                VStack(spacing: 16) {
-                    Image(systemName: "cloud.fill")
-                        .font(.system(size: 80))
-                        .foregroundColor(.white)
-                    
-                    Text("Oplix Owner")
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundColor(.white)
-                }
+                Image(systemName: "cloud.fill")
+                    .font(.system(size: 64))
+                    .foregroundColor(.white)
                 
-                VStack(spacing: 20) {
+                VStack(spacing: 12) {
                     TextField("Email", text: $email)
-                        .textFieldStyle(.roundedBorder)
                         .autocapitalization(.none)
                         .keyboardType(.emailAddress)
+                        .oplixCompactFormField()
                     
                     SecureField("Password", text: $password)
-                        .textFieldStyle(.roundedBorder)
+                        .oplixCompactFormField()
                     
                     Button(action: {
                         Task { @MainActor in
@@ -89,12 +83,13 @@ struct ManagerLoginView: View {
                         }
                     }) {
                         Text("Sign In")
+                            .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .foregroundColor(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 11)
                             .background(Theme.cloudBlue)
-                            .cornerRadius(12)
+                            .cornerRadius(11)
                             .shadow(color: Theme.cloudBlue.opacity(0.3), radius: 4, x: 0, y: 2)
                     }
                     .disabled(authViewModel.isLoading)
@@ -104,8 +99,14 @@ struct ManagerLoginView: View {
                         showingForgotPassword = true
                     }) {
                         Text("Forgot Password?")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.9))
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(Color(red: 0.12, green: 0.35, blue: 0.62))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color.primary.opacity(0.05))
+                            )
                     }
                     
                     // Sign Up button
@@ -113,15 +114,16 @@ struct ManagerLoginView: View {
                         showingSignUp = true
                     }) {
                         Text("Don't have an account? Sign Up")
-                            .font(.subheadline)
+                            .font(.caption.weight(.semibold))
                             .foregroundColor(.white)
-                            .padding(.vertical, 12)
+                            .padding(.vertical, 10)
                             .frame(maxWidth: .infinity)
-                            .background(Color.white.opacity(0.2))
-                            .cornerRadius(12)
+                            .background(Theme.cloudBlue)
+                            .cornerRadius(10)
                     }
                 }
-                .padding(.horizontal, 40)
+                .oplixCompactGlassCard(maxWidth: 380)
+                .frame(maxWidth: .infinity, alignment: .center)
                 
                 Spacer()
             }
