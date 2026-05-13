@@ -35,6 +35,11 @@ struct TaskCompletion: Codable {
     /// Optional reason a manager left when disapproving. Surfaced to the
     /// employee in the "please redo" banner.
     var disapprovalNote: String?
+    /// Optional brief note the employee typed when submitting the
+    /// completion photo. Surfaced to the manager during review so the
+    /// employee can flag context (e.g. "fridge was already 38°F",
+    /// "stockroom was locked, did break room only").
+    var note: String?
 
     init(employeeId: String, imageURL: String, timestamp: Date) {
         self.employeeId = employeeId
@@ -43,11 +48,12 @@ struct TaskCompletion: Codable {
         self.timestamp = timestamp
     }
 
-    init(employeeId: String, imageURLs: [String], timestamp: Date) {
+    init(employeeId: String, imageURLs: [String], timestamp: Date, note: String? = nil) {
         self.employeeId = employeeId
         self.imageURL = imageURLs.first ?? ""  // Keep first image for backward compatibility
         self.imageURLs = imageURLs
         self.timestamp = timestamp
+        self.note = note
     }
 
     enum CodingKeys: String, CodingKey {
@@ -59,6 +65,7 @@ struct TaskCompletion: Codable {
         case reviewedBy
         case reviewedAt
         case disapprovalNote
+        case note
     }
 
     init(from decoder: Decoder) throws {
@@ -85,6 +92,7 @@ struct TaskCompletion: Codable {
         reviewedBy = try container.decodeIfPresent(String.self, forKey: .reviewedBy)
         reviewedAt = try container.decodeIfPresent(Date.self, forKey: .reviewedAt)
         disapprovalNote = try container.decodeIfPresent(String.self, forKey: .disapprovalNote)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -97,6 +105,7 @@ struct TaskCompletion: Codable {
         try container.encodeIfPresent(reviewedBy, forKey: .reviewedBy)
         try container.encodeIfPresent(reviewedAt, forKey: .reviewedAt)
         try container.encodeIfPresent(disapprovalNote, forKey: .disapprovalNote)
+        try container.encodeIfPresent(note, forKey: .note)
     }
 
     // MARK: - Convenience

@@ -64,9 +64,9 @@ struct EmployeeTasksView: View {
         .sheet(item: $taskToComplete) { task in
             TaskImageCaptureView(
                 task: task,
-                onImagesCaptured: { imageDataList in
+                onImagesCaptured: { imageDataList, note in
                     // Start background upload immediately
-                    viewModel.completeTaskInBackground(task, imageDataList: imageDataList)
+                    viewModel.completeTaskInBackground(task, imageDataList: imageDataList, note: note)
                     // Dismiss sheet immediately - upload continues in background
                     showingImageCapture = false
                     taskToComplete = nil

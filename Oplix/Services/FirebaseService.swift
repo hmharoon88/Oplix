@@ -1037,6 +1037,128 @@ class FirebaseService: ObservableObject {
     
     // MARK: - Lottery Forms (as subcollection under locations)
     
+    // MARK: - Announcements
+    //
+    // Path: users/{managerUserId}/announcements/{announcementId}
+    // Doc shape mirrors `Announcement` in Models/Announcement.swift.
+    // Written by the `sendAnnouncement` Cloud Function (server-side);
+    // the client only reads + flips per-user `readBy` entries.
+
+    /// Fetch all announcements owned by the given manager. Sorted
+    /// newest-first. Filter to a specific recipient client-side if you
+    /// want only what a single employee should see.
+    func fetchAnnouncements(managerUserId: String) async throws -> [Announcement] {
+        let snapshot = try await db.collection("users")
+            .document(managerUserId)
+            .collection("announcements")
+            .order(by: "sentAt", descending: true)
+            .getDocuments()
+        return snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            // Older docs (before the inbox feature) may not have
+            // `readBy` — that's fine, defaults to nil → "unread for
+            // everyone." Decode manually so we can be tolerant of
+            // missing fields without throwing.
+            guard let title = data["title"] as? String,
+                  let body = data["body"] as? String,
+                  let authorId = data["authorId"] as? String,
+                  let recipientIds = data["recipientIds"] as? [String] else {
+                print("⚠️ Skipping malformed announcement \(doc.documentID)")
+                return nil
+            }
+            let sentAt: Date
+            if let ts = data["sentAt"] as? Timestamp {
+                sentAt = ts.dateValue()
+            } else if let d = data["sentAt"] as? Date {
+                sentAt = d
+            } else {
+                sentAt = Date()
+            }
+            let locationId = data["locationId"] as? String
+            // Firestore returns the `readBy` map as `[String: Timestamp]`.
+            var readBy: [String: Date]? = nil
+            if let raw = data["readBy"] as? [String: Timestamp] {
+                readBy = raw.mapValues { $0.dateValue() }
+            }
+            return Announcement(
+                id: doc.documentID,
+                title: title,
+                body: body,
+                locationId: locationId,
+                authorId: authorId,
+                recipientIds: recipientIds,
+                sentAt: sentAt,
+                readBy: readBy
+            )
+        }
+    }
+
+    /// Live observer for announcements owned by the given manager.
+    /// Returns a listener registration so the caller can detach when
+    /// the view goes away.
+    @discardableResult
+    func observeAnnouncements(
+        managerUserId: String,
+        onChange: @escaping ([Announcement]) -> Void
+    ) -> ListenerRegistration {
+        return db.collection("users")
+            .document(managerUserId)
+            .collection("announcements")
+            .order(by: "sentAt", descending: true)
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("⚠️ Announcements observer error: \(error.localizedDescription)")
+                    return
+                }
+                guard let snapshot = snapshot else { return }
+                let announcements: [Announcement] = snapshot.documents.compactMap { doc in
+                    let data = doc.data()
+                    guard let title = data["title"] as? String,
+                          let body = data["body"] as? String,
+                          let authorId = data["authorId"] as? String,
+                          let recipientIds = data["recipientIds"] as? [String] else {
+                        return nil
+                    }
+                    let sentAt: Date = (data["sentAt"] as? Timestamp)?.dateValue()
+                        ?? (data["sentAt"] as? Date)
+                        ?? Date()
+                    let locationId = data["locationId"] as? String
+                    var readBy: [String: Date]? = nil
+                    if let raw = data["readBy"] as? [String: Timestamp] {
+                        readBy = raw.mapValues { $0.dateValue() }
+                    }
+                    return Announcement(
+                        id: doc.documentID,
+                        title: title,
+                        body: body,
+                        locationId: locationId,
+                        authorId: authorId,
+                        recipientIds: recipientIds,
+                        sentAt: sentAt,
+                        readBy: readBy
+                    )
+                }
+                onChange(announcements)
+            }
+    }
+
+    /// Mark a single announcement as read for the given user. Uses a
+    /// nested merge write so we never clobber other recipients'
+    /// timestamps. No-op if the user is already in `readBy`.
+    func markAnnouncementRead(
+        managerUserId: String,
+        announcementId: String,
+        userId: String
+    ) async throws {
+        try await db.collection("users")
+            .document(managerUserId)
+            .collection("announcements")
+            .document(announcementId)
+            .setData([
+                "readBy": [userId: FieldValue.serverTimestamp()]
+            ], merge: true)
+    }
+
     func fetchLotteryForms(userId: String, locationId: String) async throws -> [LotteryForm] {
         let snapshot = try await db.collection("users")
             .document(userId)

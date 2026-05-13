@@ -26,8 +26,21 @@ struct NotificationPermissionView: View {
 
     var body: some View {
         ZStack {
-            Theme.secondaryGradient
-                .ignoresSafeArea()
+            // Deep blue gradient that matches the login, sign-up, and
+            // role-selection auth screens — keeps the first-run flow
+            // visually consistent. Inlined (rather than added to Theme)
+            // because the same colors live inline across ~20 auth/manager
+            // screens; folding them into a Theme constant is a separate,
+            // app-wide refactor.
+            LinearGradient(
+                colors: [
+                    Color(red: 0.1, green: 0.3, blue: 0.6),
+                    Color(red: 0.15, green: 0.4, blue: 0.7)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
 
             VStack(spacing: 24) {
                 Spacer()

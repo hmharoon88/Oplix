@@ -179,6 +179,10 @@ struct EmployeeHomeContent: View {
     @EnvironmentObject var authViewModel: AuthViewModel
     @State private var selectedTab: EmployeeTab = .clockInOut
     @State private var showingRegisterError = false
+    // Bound path so the Needs Attention card can programmatically push
+    // a tab (e.g. tap "Pending tasks" → push the Tasks tab) without
+    // requiring the user to scroll back down to the tab buttons.
+    @State private var navPath = NavigationPath()
     /// Injected by `EmployeeHomeView` when the user is assigned to ≥ 2
     /// locations. Drives the optional "Switch Location" card on the home
     /// screen for everyone (employees + supervisors). When `nil` the
@@ -191,7 +195,7 @@ struct EmployeeHomeContent: View {
     }
     
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             ZStack {
                 Theme.secondaryGradient
                     .ignoresSafeArea()
@@ -338,6 +342,71 @@ struct EmployeeHomeContent: View {
                                     )
                                     .padding(.horizontal)
                                 }
+                                
+                                // Announcements card — newest broadcast
+                                // from the manager. Hidden when the
+                                // user has zero announcements so the
+                                // home stays uncluttered for fresh
+                                // employees + locations that don't use
+                                // broadcasts.
+                                if let latest = viewModel.latestAnnouncement {
+                                    EmployeeAnnouncementsCard(
+                                        latest: latest,
+                                        unreadCount: viewModel.unreadAnnouncementCount,
+                                        viewerUserId: user.id,
+                                        totalCount: viewModel.myAnnouncements.count,
+                                        onTap: { navPath.append(EmployeeTab.announcements) }
+                                    )
+                                }
+
+                                // Personal Needs Attention strip — shown
+                                // for everyone (employees + supervisors).
+                                // Hidden automatically when there's nothing
+                                // to surface (zero alerts → returns
+                                // EmptyView).
+                                EmployeeNeedsAttentionCard(
+                                    alerts: EmployeeAlertBuilder.alerts(
+                                        employeeId: user.id,
+                                        employee: viewModel.employee,
+                                        currentShift: viewModel.currentShift,
+                                        allShifts: viewModel.allShifts,
+                                        myTasks: viewModel.tasks
+                                    ),
+                                    onTapTasks: { navPath.append(EmployeeTab.tasks) },
+                                    onTapClock: { navPath.append(EmployeeTab.clockInOut) }
+                                )
+                                
+                                // Supervisor-only "Today at this location"
+                                // pulse — revenue, on-shift roster, task
+                                // completion %, and a cash variance flag.
+                                if let currentUser = authViewModel.currentUser,
+                                   currentUser.role == .supervisor,
+                                   let location = viewModel.location {
+                                    let snap = SupervisorTodaySnapshotBuilder.build(
+                                        allShifts: viewModel.allShifts,
+                                        allTasks: viewModel.allTasks,
+                                        allEmployees: viewModel.allEmployees
+                                    )
+                                    if !snap.isEmpty {
+                                        SupervisorTodayCard(
+                                            snapshot: snap,
+                                            locationName: location.name
+                                        )
+                                    }
+                                }
+                                
+                                // Recent lottery shifts (last 3) — visible
+                                // to everyone at the location (employee +
+                                // supervisor) whenever the location has
+                                // any lottery history. Hidden when
+                                // there's no lottery activity at all.
+                                if !viewModel.recentLotteryForms.isEmpty,
+                                   let location = viewModel.location {
+                                    LotteryTodayLocationCard(
+                                        forms: viewModel.recentLotteryForms,
+                                        locationName: location.name
+                                    )
+                                }
                             }
                             
                             // Tab Buttons
@@ -465,6 +534,15 @@ struct EmployeeHomeContent: View {
                     EmployeeScheduleView(viewModel: viewModel)
                 case .supervise:
                     SupervisorControlsView(viewModel: viewModel)
+                case .announcements:
+                    AnnouncementsListView(
+                        announcements: viewModel.myAnnouncements,
+                        viewerUserId: user.id,
+                        locationNames: viewModel.location.map { [$0.id: $0.name] } ?? [:],
+                        onMarkRead: { announcement in
+                            await viewModel.markAnnouncementRead(announcement)
+                        }
+                    )
                 }
             }
         }
@@ -480,7 +558,7 @@ struct EmployeeHomeContent: View {
 
 // MARK: - Employee Tab Enum
 enum EmployeeTab: String, Identifiable, Hashable {
-    case registerData, lottery, clockInOut, tasks, schedule, supervise
+    case registerData, lottery, clockInOut, tasks, schedule, supervise, announcements
     
     var id: String { rawValue }
 }
@@ -517,9 +595,7 @@ struct WeeklyStatsCard: View {
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .background(Theme.cloudWhite)
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+        .oplixCard()
     }
     
     private func formatCurrency(_ amount: Double) -> String {
@@ -662,34 +738,25 @@ struct PerformanceCard: View {
 }
 
 // MARK: - Employee Tab Button
+/// Home-screen tab tile (Register Data, Lottery, Tasks, Schedule,
+/// Supervisor). Now delegates to the shared `OplixActionTile` so the
+/// home tabs look identical to the Supervise screen tiles.
+///
+/// Callers pass `color: .gray` to indicate disabled state today, so
+/// we mirror that into `OplixActionTile.isEnabled` to keep visual
+/// behaviour (e.g. Register Data dimmed when not clocked in).
 struct EmployeeTabButton: View {
     let icon: String
     let title: String
     let color: Color
-    
+
     var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: icon)
-                .font(.system(size: 24))
-                .foregroundColor(.white)
-                .frame(width: 50, height: 50)
-                .background(color)
-                .cornerRadius(12)
-            
-            Text(title)
-                .font(.headline)
-                .foregroundColor(.black)
-            
-            Spacer()
-            
-            Image(systemName: "chevron.right")
-                .foregroundColor(Theme.darkGray)
-                .font(.caption)
-        }
-        .padding()
-        .background(Theme.cloudWhite)
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+        OplixActionTile(
+            icon: icon,
+            title: title,
+            color: color == .gray ? .gray : color,
+            isEnabled: color != .gray
+        )
     }
 }
 

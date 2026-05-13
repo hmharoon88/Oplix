@@ -790,5 +790,30 @@ class LocationDetailViewModel: ObservableObject {
         // waiting for the snapshot listener.
         location = updatedLocation
     }
+
+    /// Rename the location and/or change its address. We rebuild the
+    /// whole `Location` struct (rather than mutating in place) because
+    /// `name` and `address` are `let` properties on the model — keeping
+    /// them immutable everywhere else of the app means callers can't
+    /// accidentally rename a location mid-flow. We're explicit about it
+    /// here.
+    func updateLocationDetails(name: String, address: String) async throws {
+        guard let current = location else { return }
+        let updated = Location(
+            id: current.id,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            address: address.trimmingCharacters(in: .whitespacesAndNewlines),
+            managerId: current.managerId,
+            employees: current.employees,
+            tasks: current.tasks,
+            lotteryForms: current.lotteryForms,
+            lotteryTerminalCount: current.lotteryTerminalCount,
+            lotteryArchivedTerminals: current.lotteryArchivedTerminals
+        )
+        try await firebaseService.updateLocation(userId: userId, location: updated)
+        // Optimistic local update so the header re-renders without
+        // waiting for the snapshot listener.
+        location = updated
+    }
 }
 

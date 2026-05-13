@@ -10,13 +10,19 @@ import UIKit
 
 struct TaskImageCaptureView: View {
     let task: WorkTask
-    let onImagesCaptured: ([Data]) -> Void
+    let onImagesCaptured: ([Data], String?) -> Void
     let onCancel: () -> Void
     
     @State private var showingImagePicker = false
     @State private var capturedImages: [(id: UUID, image: UIImage)] = []
     @State private var previewImage: UIImage?
     @State private var showingPreview = false
+    @State private var note: String = ""
+    @FocusState private var noteFieldFocused: Bool
+    /// Max characters we accept on the note. Kept short on purpose so this
+    /// stays a quick "anything I should flag?" field instead of turning
+    /// into a long-form report — managers will skim these, not read essays.
+    private let noteCharacterLimit = 280
     
     var body: some View {
         NavigationStack {
@@ -108,25 +114,12 @@ struct TaskImageCaptureView: View {
                                 }
                                 .padding(.horizontal)
                             }
-                            
+
+                            // Optional note for the manager
+                            noteSection
+
                             // Submit Button
-                            Button(action: {
-                                // Convert all images to Data
-                                var imageDataList: [Data] = []
-                                for item in capturedImages {
-                                    // Resize to max 1024px and compress to 50% quality for faster upload
-                                    if let resizedImage = item.image.resizedAndCompressed(maxDimension: 1024),
-                                       let imageData = resizedImage.jpegData(compressionQuality: 0.5) {
-                                        imageDataList.append(imageData)
-                                    } else {
-                                        // Fallback: use original image with lower quality
-                                        if let imageData = item.image.jpegData(compressionQuality: 0.4) {
-                                            imageDataList.append(imageData)
-                                        }
-                                    }
-                                }
-                                onImagesCaptured(imageDataList)
-                            }) {
+                            Button(action: submit) {
                                 HStack {
                                     Image(systemName: "checkmark.circle.fill")
                                     Text("Done")
@@ -143,11 +136,16 @@ struct TaskImageCaptureView: View {
             }
             .navigationTitle("Task Completion")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         onCancel()
                     }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { noteFieldFocused = false }
                 }
             }
             .sheet(isPresented: $showingImagePicker) {
@@ -166,6 +164,71 @@ struct TaskImageCaptureView: View {
                 }
             }
         }
+    }
+
+    /// "Add a note (optional)" block beneath the photo grid. Kept compact
+    /// so it doesn't dominate the screen — it's a quick assist for the
+    /// manager during review, not the main event.
+    private var noteSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Note (optional)")
+                    .font(.headline)
+                    .foregroundColor(.black)
+                Spacer()
+                Text("\(note.count)/\(noteCharacterLimit)")
+                    .font(.caption2)
+                    .foregroundColor(note.count >= noteCharacterLimit ? .red : .gray)
+            }
+
+            ZStack(alignment: .topLeading) {
+                if note.isEmpty {
+                    Text("Anything the manager should know? e.g. ran out of paper towels, freezer at 8°F.")
+                        .font(.subheadline)
+                        .foregroundColor(.gray.opacity(0.7))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                }
+
+                TextEditor(text: $note)
+                    .focused($noteFieldFocused)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .frame(minHeight: 90)
+                    .onChange(of: note) { _, newValue in
+                        if newValue.count > noteCharacterLimit {
+                            note = String(newValue.prefix(noteCharacterLimit))
+                        }
+                    }
+            }
+            .background(Color.white)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+            )
+            .cornerRadius(10)
+        }
+        .padding(.horizontal)
+    }
+
+    private func submit() {
+        // Convert all images to Data
+        var imageDataList: [Data] = []
+        for item in capturedImages {
+            // Resize to max 1024px and compress to 50% quality for faster upload
+            if let resizedImage = item.image.resizedAndCompressed(maxDimension: 1024),
+               let imageData = resizedImage.jpegData(compressionQuality: 0.5) {
+                imageDataList.append(imageData)
+            } else {
+                // Fallback: use original image with lower quality
+                if let imageData = item.image.jpegData(compressionQuality: 0.4) {
+                    imageDataList.append(imageData)
+                }
+            }
+        }
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        onImagesCaptured(imageDataList, trimmed.isEmpty ? nil : trimmed)
     }
 }
 
@@ -295,7 +358,7 @@ extension UIImage {
             locationId: "loc1",
             employeeCompletions: [:]
         ),
-        onImagesCaptured: { _ in },
+        onImagesCaptured: { _, _ in },
         onCancel: { }
     )
 }
