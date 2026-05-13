@@ -19,7 +19,7 @@ struct ForgotPasswordView: View {
             Theme.primaryGradient
                 .ignoresSafeArea()
             
-            VStack(spacing: 30) {
+            VStack(spacing: 20) {
                 // Back button
                 HStack {
                     Button(action: {
@@ -42,27 +42,27 @@ struct ForgotPasswordView: View {
                 
                 Spacer()
                 
-                VStack(spacing: 16) {
+                VStack(spacing: 10) {
                     Image(systemName: "key.fill")
-                        .font(.system(size: 80))
+                        .font(.system(size: 52))
                         .foregroundColor(.white)
                     
                     Text("Reset Password")
-                        .font(.system(size: 36, weight: .bold))
+                        .font(.system(size: 28, weight: .bold))
                         .foregroundColor(.white)
-                    
-                    Text("Enter your email address and we'll send you a link to reset your password.")
-                        .font(.body)
-                        .foregroundColor(.white.opacity(0.9))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
                 }
                 
-                VStack(spacing: 20) {
+                VStack(spacing: 12) {
+                    Text("Enter your email address and we'll send you a link to reset your password.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                    
                     TextField("Email", text: $email)
-                        .textFieldStyle(.roundedBorder)
                         .autocapitalization(.none)
                         .keyboardType(.emailAddress)
+                        .oplixCompactFormField()
                     
                     Button(action: {
                         Task { @MainActor in
@@ -81,17 +81,19 @@ struct ForgotPasswordView: View {
                         }
                     }) {
                         Text("Send Reset Link")
+                            .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .foregroundColor(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 11)
                             .background(Theme.cloudBlue)
-                            .cornerRadius(12)
+                            .cornerRadius(11)
                             .shadow(color: Theme.cloudBlue.opacity(0.3), radius: 4, x: 0, y: 2)
                     }
                     .disabled(authViewModel.isLoading)
                 }
-                .padding(.horizontal, 40)
+                .oplixCompactGlassCard(maxWidth: 380)
+                .frame(maxWidth: .infinity, alignment: .center)
                 
                 Spacer()
             }

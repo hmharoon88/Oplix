@@ -53,27 +53,28 @@ struct ManagerSignUpView: View {
                 
                 Spacer()
                 
-                VStack(spacing: 16) {
+                VStack(spacing: 10) {
                     Image(systemName: "person.badge.shield.checkmark.fill")
-                        .font(.system(size: 80))
+                        .font(.system(size: 52))
                         .foregroundColor(.white)
                     
                     Text("Create Manager Account")
-                        .font(.system(size: 36, weight: .bold))
+                        .font(.system(size: 26, weight: .bold))
                         .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
                 }
                 
-                VStack(spacing: 20) {
+                VStack(spacing: 12) {
                     TextField("Email", text: $email)
-                        .textFieldStyle(.roundedBorder)
                         .autocapitalization(.none)
                         .keyboardType(.emailAddress)
+                        .oplixCompactFormField()
                     
                     SecureField("Password", text: $password)
-                        .textFieldStyle(.roundedBorder)
+                        .oplixCompactFormField()
                     
                     SecureField("Confirm Password", text: $confirmPassword)
-                        .textFieldStyle(.roundedBorder)
+                        .oplixCompactFormField()
                     
                     Button(action: {
                         Task { @MainActor in
@@ -107,17 +108,19 @@ struct ManagerSignUpView: View {
                         }
                     }) {
                         Text("Sign Up")
+                            .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .foregroundColor(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 11)
                             .background(Theme.cloudBlue)
-                            .cornerRadius(12)
+                            .cornerRadius(11)
                             .shadow(color: Theme.cloudBlue.opacity(0.3), radius: 4, x: 0, y: 2)
                     }
                     .disabled(authViewModel.isLoading)
                 }
-                .padding(.horizontal, 40)
+                .oplixCompactGlassCard(maxWidth: 380)
+                .frame(maxWidth: .infinity, alignment: .center)
                 
                 Spacer()
             }

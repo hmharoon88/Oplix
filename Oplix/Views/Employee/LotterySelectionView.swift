@@ -290,8 +290,7 @@ struct LastShiftSummarySheet: View {
                             HStack(spacing: 0) {
                                 binNumberCell(String(index + 1))
                                 readOnlyCell(formatValue(row.value))
-                                readOnlyCell(row.beginningNumber)
-                                // Get ending number from form data or template
+                                readOnlyCell(beginningNumberForHistory(for: row.id))
                                 readOnlyCell(getEndingNumber(for: row.id))
                             }
                             .background(index % 2 == 0 ? Theme.cloudWhite : Color.white)
@@ -448,13 +447,19 @@ struct LastShiftSummarySheet: View {
         }
     }
     
+    private func beginningNumberForHistory(for rowId: String) -> String {
+        let key = "begin_\(rowId)"
+        if let b = lotteryForm.formData[key], !b.isEmpty {
+            return b
+        }
+        return template.rows.first { $0.id == rowId }?.beginningNumber ?? ""
+    }
+
     private func getEndingNumber(for rowId: String) -> String {
-        // Form data stores ending numbers with key "row_\(rowId)"
         let key = "row_\(rowId)"
-        if let endingNumber = lotteryForm.formData[key] {
+        if let endingNumber = lotteryForm.formData[key], !endingNumber.isEmpty {
             return endingNumber
         }
-        // Fall back to template if not in form data
         return template.rows.first { $0.id == rowId }?.endingNumber ?? ""
     }
     
