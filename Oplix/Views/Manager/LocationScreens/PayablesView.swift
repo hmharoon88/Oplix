@@ -24,6 +24,10 @@ struct PayablesView: View {
     @State private var selectedPayableIds: Set<String> = []
     @State private var showingBulkDeleteConfirmation = false
     @State private var showingRecurringDeletePrompt = false
+    // Driving the edit sheet by an Identifiable value avoids the "stale binding"
+    // problem you'd get with a parallel Bool + payable pair (the sheet would
+    // otherwise capture an outdated payable on rapid taps).
+    @State private var payableToEdit: Payable?
     
     private var activePayables: [Payable] {
         payables.filter { !$0.isPaid }
@@ -66,6 +70,7 @@ struct PayablesView: View {
                         Text("History").tag(true)
                     }
                     .pickerStyle(.segmented)
+                    .oplixSegmentedPickerTint()
                     .padding(.horizontal)
                     .padding(.top, 12)
                     
@@ -110,6 +115,18 @@ struct PayablesView: View {
         }
         .sheet(isPresented: $showingAddPayable) {
             AddPayableView(userId: userId, locationId: locationId) {
+                Task {
+                    await loadPayables()
+                }
+            }
+        }
+        .sheet(item: $payableToEdit) { payable in
+            AddPayableView(
+                userId: userId,
+                locationId: locationId,
+                existing: payable,
+                siblings: payables
+            ) {
                 Task {
                     await loadPayables()
                 }
@@ -220,6 +237,7 @@ struct PayablesView: View {
                 onMarkPaid: showHistory ? nil : {
                     Task { await markAsPaid(payable) }
                 },
+                onEdit: { payableToEdit = payable },
                 showHistory: showHistory,
                 isSelectionMode: false,
                 isSelected: false
@@ -659,6 +677,7 @@ struct PayableRow: View {
     let payable: Payable
     let onDelete: (() -> Void)?
     let onMarkPaid: (() -> Void)?
+    var onEdit: (() -> Void)? = nil
     let showHistory: Bool
     var isSelectionMode: Bool = false
     var isSelected: Bool = false
@@ -694,6 +713,80 @@ struct PayableRow: View {
         return max(0, components.day ?? 0)
     }
     
+    // The "info" half of the row — everything except the Paid pill.
+    // Tapping anywhere inside this view triggers Edit when onEdit is set.
+    @ViewBuilder
+    private var infoContent: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(payable.payTo)
+                        .font(.headline)
+                        .foregroundColor(.black)
+                    
+                    if isOverdue {
+                        Text("MISSED")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.red)
+                            .cornerRadius(8)
+                    }
+                }
+                
+                if payable.frequency != .none {
+                    Text(payable.frequency.displayName)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.blue)
+                }
+                
+                if let dueDate = payable.dueDate {
+                    if isOverdue {
+                        Text("Due: \(dueDate, formatter: dateFormatter) · \(daysLate) day\(daysLate == 1 ? "" : "s") late")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.red)
+                    } else {
+                        Text("Due: \(dueDate, formatter: dateFormatter)")
+                            .font(.caption)
+                            .foregroundColor(Theme.darkGray)
+                    }
+                }
+                
+                if showHistory, let paidAt = payable.paidAt {
+                    HStack(spacing: 6) {
+                        Text("Paid: \(paidAt, formatter: dateFormatter)")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                        if paidLateDays > 0 {
+                            Text("(\(paidLateDays) day\(paidLateDays == 1 ? "" : "s") late)")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                }
+                
+                if let notes = payable.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(.caption)
+                        .foregroundColor(Theme.darkGray)
+                }
+            }
+            
+            Spacer()
+            
+            Text(formatCurrency(payable.amount))
+                .font(.headline)
+                .foregroundColor(showHistory ? .green : .red)
+        }
+        // Force the whole HStack (including the Spacer) to be hit-testable,
+        // so taps in the gap also register as Edit instead of falling through.
+        .contentShape(Rectangle())
+    }
+    
     var body: some View {
         HStack(spacing: 12) {
             if isSelectionMode {
@@ -704,70 +797,20 @@ struct PayableRow: View {
             }
             
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(payable.payTo)
-                            .font(.headline)
-                            .foregroundColor(.black)
-                        
-                        if isOverdue {
-                            Text("MISSED")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.red)
-                                .cornerRadius(8)
-                        }
+                // EDIT TAP TARGET — the info content half.
+                // Disabled in selection mode so the outer .onTapGesture
+                // (toggle selection) handles the tap instead.
+                if let onEdit = onEdit, !isSelectionMode {
+                    Button(action: onEdit) {
+                        infoContent
                     }
-                    
-                    if payable.frequency != .none {
-                        Text(payable.frequency.displayName)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.blue)
-                    }
-                    
-                    if let dueDate = payable.dueDate {
-                        if isOverdue {
-                            Text("Due: \(dueDate, formatter: dateFormatter) · \(daysLate) day\(daysLate == 1 ? "" : "s") late")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.red)
-                        } else {
-                            Text("Due: \(dueDate, formatter: dateFormatter)")
-                                .font(.caption)
-                                .foregroundColor(Theme.darkGray)
-                        }
-                    }
-                    
-                    if showHistory, let paidAt = payable.paidAt {
-                        HStack(spacing: 6) {
-                            Text("Paid: \(paidAt, formatter: dateFormatter)")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                            if paidLateDays > 0 {
-                                Text("(\(paidLateDays) day\(paidLateDays == 1 ? "" : "s") late)")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.orange)
-                            }
-                        }
-                    }
-                    
-                    if let notes = payable.notes, !notes.isEmpty {
-                        Text(notes)
-                            .font(.caption)
-                            .foregroundColor(Theme.darkGray)
-                    }
+                    .buttonStyle(.plain)
+                } else {
+                    infoContent
                 }
                 
-                Spacer()
-                
-                Text(formatCurrency(payable.amount))
-                    .font(.headline)
-                    .foregroundColor(showHistory ? .green : .red)
-                
+                // PAID TAP TARGET — its own sibling button, hit-tested
+                // independently from the edit area above.
                 if !showHistory && !isSelectionMode {
                     if let onMarkPaid = onMarkPaid {
                         Button(action: onMarkPaid) {
@@ -778,7 +821,13 @@ struct PayableRow: View {
                                     .font(.subheadline)
                                     .foregroundColor(.gray)
                             }
+                            // Give the Paid pill a generous tap area so users
+                            // don't accidentally hit the edit area when aiming
+                            // at the small circle icon.
+                            .padding(.leading, 8)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -817,6 +866,12 @@ struct PayableRow: View {
 struct AddPayableView: View {
     let userId: String
     let locationId: String
+    // When non-nil, the sheet runs in EDIT mode for this payable.
+    // When nil, it's CREATE mode (the original flow).
+    let existing: Payable?
+    // All other payables already loaded in the parent — used to find sibling
+    // items in the same recurring chain when the user picks "this and future".
+    let siblings: [Payable]
     let onSave: () -> Void
     @Environment(\.dismiss) var dismiss
     
@@ -829,6 +884,50 @@ struct AddPayableView: View {
     @State private var frequency: RecurringFrequency = .none
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var didPrefill = false
+    @State private var showingRecurringScopePrompt = false
+    
+    init(
+        userId: String,
+        locationId: String,
+        existing: Payable? = nil,
+        siblings: [Payable] = [],
+        onSave: @escaping () -> Void
+    ) {
+        self.userId = userId
+        self.locationId = locationId
+        self.existing = existing
+        self.siblings = siblings
+        self.onSave = onSave
+    }
+    
+    private var isEditing: Bool { existing != nil }
+    
+    // True only when the user is editing a still-unpaid recurring item that
+    // has siblings in its chain. Paid items have already been "spent" — we
+    // never propagate edits onto historical records.
+    private var canPropagateToFuture: Bool {
+        guard let existing = existing else { return false }
+        guard existing.frequency != .none, !existing.isPaid else { return false }
+        return !futureSiblings.isEmpty
+    }
+    
+    // All OTHER unpaid items in the same chain whose due-date is at or after
+    // the edited item's due-date (or all unpaid siblings if no due-date).
+    private var futureSiblings: [Payable] {
+        guard let existing = existing, existing.frequency != .none else { return [] }
+        let key = existing.originalPayableId ?? existing.id
+        return siblings.filter { other in
+            guard other.id != existing.id else { return false }
+            guard !other.isPaid else { return false }
+            let otherKey = other.originalPayableId ?? other.id
+            guard otherKey == key else { return false }
+            if let editedDue = existing.dueDate, let otherDue = other.dueDate {
+                return otherDue >= editedDue
+            }
+            return true
+        }
+    }
     
     var body: some View {
         NavigationStack {
@@ -861,7 +960,7 @@ struct AddPayableView: View {
                     }
                 }
             }
-            .navigationTitle("Add Payable")
+            .navigationTitle(isEditing ? "Edit Payable" : "Add Payable")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -870,9 +969,11 @@ struct AddPayableView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        Task {
-                            await savePayable()
+                    Button(isEditing ? "Update" : "Save") {
+                        if isEditing && canPropagateToFuture {
+                            showingRecurringScopePrompt = true
+                        } else {
+                            Task { await savePayable(propagateToFuture: false) }
                         }
                     }
                     .disabled(payTo.isEmpty || amount.isEmpty || isSaving)
@@ -887,10 +988,41 @@ struct AddPayableView: View {
                     Text(error)
                 }
             }
+            .confirmationDialog(
+                "This is a Recurring Payable",
+                isPresented: $showingRecurringScopePrompt,
+                titleVisibility: .visible
+            ) {
+                Button("Update Just This One") {
+                    Task { await savePayable(propagateToFuture: false) }
+                }
+                Button("Update This & \(futureSiblings.count) Future Item\(futureSiblings.count == 1 ? "" : "s")") {
+                    Task { await savePayable(propagateToFuture: true) }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Apply your changes to only this entry, or to all future unpaid entries in this recurring series? Past paid entries are never modified.")
+            }
+            .onAppear { prefillIfNeeded() }
         }
     }
     
-    private func savePayable() async {
+    private func prefillIfNeeded() {
+        guard !didPrefill, let existing = existing else { return }
+        payTo = existing.payTo
+        amount = String(format: "%.2f", existing.amount)
+        if let due = existing.dueDate {
+            hasDueDate = true
+            selectedDate = due
+        } else {
+            hasDueDate = false
+        }
+        notes = existing.notes ?? ""
+        frequency = existing.frequency
+        didPrefill = true
+    }
+    
+    private func savePayable(propagateToFuture: Bool) async {
         guard let amountValue = Double(amount), amountValue > 0 else {
             errorMessage = "Please enter a valid amount"
             return
@@ -898,15 +1030,57 @@ struct AddPayableView: View {
         
         isSaving = true
         do {
-            let payable = Payable(
-                locationId: locationId,
-                payTo: payTo,
-                amount: amountValue,
-                dueDate: hasDueDate ? selectedDate : nil,
-                notes: notes.isEmpty ? nil : notes,
-                frequency: frequency
-            )
-            try await FirebaseService.shared.savePayable(userId: userId, locationId: locationId, payable: payable)
+            if let existing = existing {
+                // EDIT — preserve id, locationId, createdAt, isPaid/paidAt,
+                // originalPayableId so we don't break the recurring chain or
+                // wipe out paid status of a historical entry.
+                let updated = Payable(
+                    id: existing.id,
+                    locationId: existing.locationId,
+                    payTo: payTo,
+                    amount: amountValue,
+                    dueDate: hasDueDate ? selectedDate : nil,
+                    createdAt: existing.createdAt,
+                    notes: notes.isEmpty ? nil : notes,
+                    frequency: frequency,
+                    isPaid: existing.isPaid,
+                    paidAt: existing.paidAt,
+                    originalPayableId: existing.originalPayableId
+                )
+                try await FirebaseService.shared.updatePayable(userId: userId, locationId: locationId, payable: updated)
+                
+                if propagateToFuture {
+                    // Apply payTo / amount / frequency / notes to every future
+                    // unpaid sibling. Each sibling keeps its own dueDate and
+                    // paid status (none here — futureSiblings filters those).
+                    for sibling in futureSiblings {
+                        let updatedSibling = Payable(
+                            id: sibling.id,
+                            locationId: sibling.locationId,
+                            payTo: payTo,
+                            amount: amountValue,
+                            dueDate: sibling.dueDate,
+                            createdAt: sibling.createdAt,
+                            notes: notes.isEmpty ? nil : notes,
+                            frequency: frequency,
+                            isPaid: sibling.isPaid,
+                            paidAt: sibling.paidAt,
+                            originalPayableId: sibling.originalPayableId
+                        )
+                        try await FirebaseService.shared.updatePayable(userId: userId, locationId: locationId, payable: updatedSibling)
+                    }
+                }
+            } else {
+                let payable = Payable(
+                    locationId: locationId,
+                    payTo: payTo,
+                    amount: amountValue,
+                    dueDate: hasDueDate ? selectedDate : nil,
+                    notes: notes.isEmpty ? nil : notes,
+                    frequency: frequency
+                )
+                try await FirebaseService.shared.savePayable(userId: userId, locationId: locationId, payable: payable)
+            }
             dismiss()
             onSave()
         } catch {

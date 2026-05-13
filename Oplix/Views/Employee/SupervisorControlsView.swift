@@ -36,77 +36,68 @@ struct SupervisorControlsView: View {
                         }
                         .padding(.top, 20)
                         
-                        // Control Cards based on permissions.
-                        //
+                        // Single-column list of identical-height rows.
                         // Note: the "Switch Location" affordance now
                         // lives on the home screen (visible to anyone
                         // assigned to ≥ 2 locations), so it's not
                         // duplicated here.
-                        VStack(spacing: 16) {
-                            // Edit Employee Schedules
+                        VStack(spacing: 12) {
                             if employee.canEditSchedules == true {
                                 NavigationLink(value: SupervisorControl.editSchedules) {
-                                    SupervisorControlCard(
+                                    SupervisorControlTile(
                                         icon: "calendar.badge.clock",
-                                        title: "Edit Employee Schedules",
-                                        description: "Change schedules for employees at this location",
+                                        title: "Edit Schedules",
                                         color: .indigo
                                     )
                                 }
+                                .buttonStyle(.plain)
                             }
                             
-                            // Task Check — full audit + manage. Same screen
-                            // the executive sees on their Task Check tab,
-                            // scoped to this location: lets the supervisor
-                            // add, edit, delete tasks AND approve /
-                            // disapprove employee completion photos.
+                            // Task Check — full audit + manage. Same
+                            // screen the executive sees on their Task
+                            // Check tab, scoped to this location: lets
+                            // the supervisor add, edit, delete tasks
+                            // AND approve / disapprove employee
+                            // completion photos.
                             if employee.canManageTasks == true {
                                 NavigationLink(value: SupervisorControl.taskCheck) {
-                                    SupervisorControlCard(
+                                    SupervisorControlTile(
                                         icon: "checklist.checked",
                                         title: "Task Check",
-                                        description: "Audit, approve photos, and manage all tasks at this location",
                                         color: .teal
                                     )
                                 }
+                                .buttonStyle(.plain)
                             }
                             
-                            // Manage Documents
                             if employee.canManageDocuments == true {
                                 NavigationLink(value: SupervisorControl.manageDocuments) {
-                                    SupervisorControlCard(
+                                    SupervisorControlTile(
                                         icon: "doc.fill",
-                                        title: "Manage Documents",
-                                        description: "Add and manage documents for this location",
+                                        title: "Documents",
                                         color: .orange
                                     )
                                 }
+                                .buttonStyle(.plain)
                             }
                             
-                            // Payables
-                            if let location = viewModel.location, let employee = viewModel.employee {
-                                NavigationLink(value: SupervisorControl.payables) {
-                                    SupervisorControlCard(
-                                        icon: "arrow.up.circle.fill",
-                                        title: "Payables",
-                                        description: "View and manage payables for this location",
-                                        color: .red
-                                    )
-                                }
+                            NavigationLink(value: SupervisorControl.payables) {
+                                SupervisorControlTile(
+                                    icon: "arrow.up.circle.fill",
+                                    title: "Payables",
+                                    color: .red
+                                )
                             }
+                            .buttonStyle(.plain)
                             
-                            // Receivables
-                            if let location = viewModel.location, let employee = viewModel.employee {
-                                NavigationLink(value: SupervisorControl.receivables) {
-                                    SupervisorControlCard(
-                                        icon: "arrow.down.circle.fill",
-                                        title: "Receivables",
-                                        description: "View and manage receivables for this location",
-                                        color: .blue
-                                    )
-                                }
+                            NavigationLink(value: SupervisorControl.receivables) {
+                                SupervisorControlTile(
+                                    icon: "arrow.down.circle.fill",
+                                    title: "Receivables",
+                                    color: .blue
+                                )
                             }
-                            
+                            .buttonStyle(.plain)
                         }
                         .padding(.horizontal)
                         .padding(.bottom, 20)
@@ -121,8 +112,8 @@ struct SupervisorControlsView: View {
                 }
             }
         }
-        .navigationTitle("Supervise")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             let appearance = UINavigationBarAppearance()
             appearance.configureWithTransparentBackground()
@@ -195,6 +186,21 @@ enum SupervisorControl: String, Identifiable, Hashable {
     var id: String { rawValue }
 }
 
+/// Thin compatibility wrapper around the app-wide `OplixActionTile`.
+/// Kept so any external references (and the existing call sites in
+/// this file) keep compiling.
+struct SupervisorControlTile: View {
+    let icon: String
+    let title: String
+    let color: Color
+    
+    var body: some View {
+        OplixActionTile(icon: icon, title: title, color: color)
+    }
+}
+
+/// Legacy single-row card kept for backwards compatibility — no longer
+/// used by `SupervisorControlsView` after the grid redesign.
 struct SupervisorControlCard: View {
     let icon: String
     let title: String
@@ -260,6 +266,7 @@ struct SupervisorViewSchedulesAndTasksView: View {
                 Text("Tasks").tag(ViewTab.tasks)
             }
             .pickerStyle(.segmented)
+            .oplixSegmentedPickerTint()
             .padding()
             
             // Content
