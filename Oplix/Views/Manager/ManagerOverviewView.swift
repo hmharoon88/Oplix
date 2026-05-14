@@ -96,6 +96,11 @@ struct ManagerOverviewView: View {
                     } else {
                         ScrollView {
                             VStack(spacing: 24) {
+                                if viewModel.isRefreshingHomeDetails {
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.bottom, 4)
+                                }
                                 // Greeting + date + meta-chips. Always shown —
                                 // it's the screen's identity (who you're
                                 // logged in as, today's date) and isn't
@@ -118,7 +123,7 @@ struct ManagerOverviewView: View {
                                 }
                             }
                             .padding(.top)
-                            .padding(.bottom, 100) // Add bottom padding to account for tab bar
+                            .padding(.bottom, 24) // Breathing room above the fixed custom tab bar
                         }
                         .scrollContentBackground(.hidden)
                     }

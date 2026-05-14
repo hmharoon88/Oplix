@@ -80,6 +80,9 @@ struct MultiTerminalLotteryFormSheet: View {
             .toolbarBackground(Theme.secondaryGradient, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
+        .task {
+            await viewModel.loadLotteryTemplate()
+        }
         .onAppear {
             // Default to the first active terminal so the picker has
             // a valid initial selection even after archives change.

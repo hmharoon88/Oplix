@@ -28,6 +28,7 @@ struct LocationDetailView: View {
     @State private var showingEditLocation = false
     @State private var recurringPayablesCount = 0
     @State private var recurringReceivablesCount = 0
+    @State private var openRemindersCount = 0
     // Target pushed programmatically when the user taps a Needs
     // Attention row. Distinct from the existing `NavigationLink(value:)`
     // flow that drives the icon grid. We use an enum (rather than two
@@ -222,6 +223,18 @@ struct LocationDetailView: View {
                                     title: "Documents",
                                     color: .indigo,
                                     count: 0,
+                                    showCount: false
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            NavigationLink(value: LocationSection.reminders) {
+                                SectionIconCard(
+                                    icon: "bell.fill",
+                                    title: "Reminders",
+                                    color: .pink,
+                                    count: 0,
+                                    badgeCount: openRemindersCount > 0 ? openRemindersCount : nil,
                                     showCount: false
                                 )
                             }
@@ -619,6 +632,10 @@ struct LocationDetailView: View {
             PayablesView(userId: userId, locationId: locationId)
         case .receivables:
             ReceivablesView(userId: userId, locationId: locationId)
+        case .reminders:
+            LocationRemindersView(userId: userId, locationId: locationId) {
+                Task { await loadRecurringCounts() }
+            }
         }
     }
 
@@ -631,6 +648,9 @@ struct LocationDetailView: View {
             let receivables = try await FirebaseService.shared.fetchReceivables(userId: userId, locationId: locationId)
             // Only count recurring items that are NOT received
             recurringReceivablesCount = receivables.filter { $0.frequency != .none && !$0.isReceived }.count
+
+            let reminders = try await FirebaseService.shared.fetchLocationReminders(userId: userId, locationId: locationId)
+            openRemindersCount = reminders.filter { !$0.isCompleted }.count
         } catch {
             print("Error loading recurring counts: \(error.localizedDescription)")
         }

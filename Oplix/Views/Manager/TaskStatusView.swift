@@ -171,8 +171,14 @@ struct TaskStatusView: View {
 
     // Bottom-anchored Done so it's reachable with one thumb from anywhere on
     // the audit hub, instead of stretching to the top-right toolbar.
+    // `onDone` dismisses the executive full-screen flow (Task Check tab).
+    // Supervisors don't pass `onDone`, so we always call `dismiss()` to pop
+    // this hub back to Supervisor Controls.
     private var doneBar: some View {
-        Button(action: onDone) {
+        Button(action: {
+            onDone()
+            dismiss()
+        }) {
             Text("Done")
                 .font(.headline)
                 .foregroundColor(.white)

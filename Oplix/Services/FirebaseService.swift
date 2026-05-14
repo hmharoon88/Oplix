@@ -1763,7 +1763,39 @@ class FirebaseService: ObservableObject {
             .document(receivableId)
             .delete()
     }
-    
+
+    // MARK: - Location reminders
+
+    func fetchLocationReminders(userId: String, locationId: String) async throws -> [LocationReminder] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("reminders")
+            .getDocuments()
+        return try snapshot.documents.compactMap { try $0.data(as: LocationReminder.self) }
+    }
+
+    func saveLocationReminder(userId: String, locationId: String, reminder: LocationReminder) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("reminders")
+            .document(reminder.id)
+            .setData(from: reminder, merge: true)
+    }
+
+    func deleteLocationReminder(userId: String, locationId: String, reminderId: String) async throws {
+        try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("reminders")
+            .document(reminderId)
+            .delete()
+    }
+
     // MARK: - Cleanup
     
     func removeAllListeners() {

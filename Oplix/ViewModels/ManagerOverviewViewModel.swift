@@ -7,6 +7,30 @@
 
 import Foundation
 
+// MARK: - Parallel Firestore fetch for manager home (per location)
+
+private struct ManagerOverviewLocationBundle {
+    let shifts: [Shift]
+    let lotteryForms: [LotteryForm]
+    let locationEmployees: [Employee]
+}
+
+fileprivate func managerOverviewFetchLocationBundle(userId: String, locationId: String) async -> ManagerOverviewLocationBundle? {
+    let fs = FirebaseService.shared
+    do {
+        async let shiftsTask = fs.fetchShifts(userId: userId, locationId: locationId)
+        async let lotteryFormsTask = fs.fetchLotteryForms(userId: userId, locationId: locationId)
+        async let locationEmployeesTask = fs.fetchEmployees(userId: userId, locationId: locationId)
+        let shifts = try await shiftsTask
+        let lotteryForms = try await lotteryFormsTask
+        let locationEmployees = try await locationEmployeesTask
+        return ManagerOverviewLocationBundle(shifts: shifts, lotteryForms: lotteryForms, locationEmployees: locationEmployees)
+    } catch {
+        print("⚠️ Failed to fetch overview stats for location id \(locationId): \(error.localizedDescription)")
+        return nil
+    }
+}
+
 struct LocationStats: Identifiable {
     let id: String
     let locationName: String
@@ -72,6 +96,9 @@ class ManagerOverviewViewModel: ObservableObject {
     @Published var locationStats: [LocationStats] = []
     @Published var locations: [Location] = []
     @Published var isLoading = false
+    /// True while month-to-date / today stats are still computing after the
+    /// quick header counts (locations / employees / tasks) are already shown.
+    @Published var isRefreshingHomeDetails = false
     @Published var errorMessage: String?
     @Published var expiringDocuments: [Document] = []
     @Published var todaySnapshot: TodaySnapshot = TodaySnapshot()
@@ -85,6 +112,7 @@ class ManagerOverviewViewModel: ObservableObject {
     
     func loadOverview() async {
         isLoading = true
+        isRefreshingHomeDetails = false
         errorMessage = nil
         
         do {
@@ -103,18 +131,22 @@ class ManagerOverviewViewModel: ObservableObject {
             totalTasks = tasks.count
             organizationName = user.organizationName
             self.locations = locations
-            
-            // Calculate location-specific stats — also accumulates today's
-            // snapshot data so we don't make a second pass over the shifts.
-            await calculateLocationStats(locations: locations, employees: employees, tasks: tasks)
-            
-            // Check for expiring documents
-            await checkExpiringDocuments()
+
+            // Show the home shell immediately; heavy per-location work runs next.
+            isLoading = false
+            isRefreshingHomeDetails = true
+
+            // Stats + document scan are independent — run together. Per-location
+            // Firestore reads inside `calculateLocationStats` are parallelized.
+            async let statsTask: Void = calculateLocationStats(locations: locations, employees: employees, tasks: tasks)
+            async let docsTask: Void = checkExpiringDocuments()
+            _ = await (statsTask, docsTask)
+            isRefreshingHomeDetails = false
         } catch {
             errorMessage = "Failed to load overview: \(error.localizedDescription)"
+            isLoading = false
+            isRefreshingHomeDetails = false
         }
-        
-        isLoading = false
     }
     
     private func checkExpiringDocuments() async {
@@ -156,25 +188,39 @@ class ManagerOverviewViewModel: ObservableObject {
         // Snapshot accumulators — filled in per-location below.
         var snapshot = TodaySnapshot()
         var clockedInLocationNames = Set<String>()
-        
-        print("🔵 Month-to-date calculation:")
-        print("   Month start: \(monthStart)")
-        print("   Month end: \(monthEnd)")
-        print("   Current date: \(now)")
-        
+
         // Create a dictionary of all employees (manager-level + location-specific) for quick lookup
         var allEmployeesDict: [String: Employee] = [:]
         for employee in employees {
             allEmployeesDict[employee.id] = employee
         }
-        
+
+        // Fetch every location's shifts / lottery / employees in parallel
+        // (serializing this loop was the main cost when a manager has many sites).
+        var bundlesById: [String: ManagerOverviewLocationBundle] = [:]
+        let uid = userId
+        await withTaskGroup(of: (String, ManagerOverviewLocationBundle?).self) { group in
+            for location in locations {
+                let lid = location.id
+                group.addTask {
+                    let b = await managerOverviewFetchLocationBundle(userId: uid, locationId: lid)
+                    return (lid, b)
+                }
+            }
+            for await (lid, bundle) in group {
+                if let b = bundle { bundlesById[lid] = b }
+            }
+        }
+
         for location in locations {
-            do {
-                // Fetch shifts and lottery forms for this location
-                let shifts = try await firebaseService.fetchShifts(userId: userId, locationId: location.id)
-                let lotteryForms = try await firebaseService.fetchLotteryForms(userId: userId, locationId: location.id)
-                let locationEmployees = try await firebaseService.fetchEmployees(userId: userId, locationId: location.id)
-                
+            guard let bundle = bundlesById[location.id] else {
+                print("⚠️ Missing overview data bundle for location \(location.name) (id: \(location.id))")
+                continue
+            }
+            let shifts = bundle.shifts
+            let lotteryForms = bundle.lotteryForms
+            let locationEmployees = bundle.locationEmployees
+
                 // Add location employees to dictionary if not already present
                 for employee in locationEmployees {
                     if allEmployeesDict[employee.id] == nil {
@@ -235,33 +281,12 @@ class ManagerOverviewViewModel: ObservableObject {
                 var monthToDateSales: Double = 0.0
                 var monthToDateFuelGallons: Double = 0.0
                 var monthToDateFuelDollars: Double = 0.0
-                
-                print("🔵 Calculating month-to-date for location: \(location.name)")
-                print("   Month start: \(monthStart)")
-                print("   Month end: \(monthEnd)")
-                print("   Total shifts fetched: \(shifts.count)")
-                
-                // Log all shifts first
-                for shift in shifts {
-                    let dateStr = (shift.registerClosedAt ?? shift.clockOutTime ?? shift.clockInTime)?.description ?? "no date"
-                    let hasData = shift.hasRegisterData ? "YES" : "NO"
-                    print("   Shift \(shift.id.prefix(8)): date=\(dateStr), hasRegisterData=\(hasData), registers.count=\(shift.registers.count)")
-                }
-                
-                var shiftsWithRegisterData = 0
-                var shiftsInMonth = 0
-                var shiftsSkippedNoDate = 0
-                var shiftsSkippedNoRegisterData = 0
-                
+
                 for shift in shifts {
                     // Check if shift has register data
                     if !shift.hasRegisterData {
-                        shiftsSkippedNoRegisterData += 1
                         continue
                     }
-                    
-                    shiftsWithRegisterData += 1
-                    
                     // Determine the date to use for month-to-date filtering
                     // Priority: registerClosedAt > clockOutTime > clockInTime (fallback)
                     var dateToCheck: Date?
@@ -275,10 +300,6 @@ class ManagerOverviewViewModel: ObservableObject {
                     }
                     
                     guard let date = dateToCheck else {
-                        print("⚠️ Shift \(shift.id.prefix(8)) has register data but no date available")
-                        print("   registerClosedAt: \(shift.registerClosedAt?.description ?? "nil")")
-                        print("   clockOutTime: \(shift.clockOutTime?.description ?? "nil")")
-                        print("   clockInTime: \(shift.clockInTime?.description ?? "nil")")
                         continue
                     }
                     
@@ -316,8 +337,6 @@ class ManagerOverviewViewModel: ObservableObject {
                                 monthToDateSales += cash + credit
                                 monthToDateFuelGallons += fuelGallons
                                 monthToDateFuelDollars += fuel
-                                
-                                print("🔵 Shift \(shift.id.prefix(8)) on \(date): Merch=$\(cash + credit), Fuel=$\(fuel)")
                             }
                         } else {
                             // Legacy single register (for backward compatibility).
@@ -325,20 +344,10 @@ class ManagerOverviewViewModel: ObservableObject {
                             let cash = shift.cashSale ?? 0.0
                             let credit = shift.creditCard ?? 0.0
                             monthToDateSales += cash + credit
-                            print("🔵 Legacy shift \(shift.id.prefix(8)) on \(date): Merch=$\(cash + credit)")
                         }
-                    } else {
-                        print("⚠️ Shift \(shift.id.prefix(8)) date \(date) is outside month range (before \(monthStart) or after \(monthEnd))")
                     }
                 }
-                
-                print("🔵 Summary for \(location.name):")
-                print("   Shifts with register data: \(shiftsWithRegisterData)")
-                print("   Shifts in current month: \(shiftsInMonth)")
-                print("   Shifts skipped (no date): \(shiftsSkippedNoDate)")
-                print("   Shifts skipped (no register data): \(shiftsSkippedNoRegisterData)")
-                print("   Final totals - Sales=$\(monthToDateSales), Fuel=$\(monthToDateFuelDollars), Gallons=\(monthToDateFuelGallons)")
-                
+
                 // Calculate month-to-date lottery sales
                 // Uses shiftSummary.totalSoldAmount which is: instantTotal + onlineTotal
                 var monthToDateLotterySales: Double = 0.0
@@ -434,18 +443,7 @@ class ManagerOverviewViewModel: ObservableObject {
                         }
                     }
                 }
-                
-                print("🔵 Expenses calculation for \(location.name):")
-                print("   Month-to-date shifts for expenses: \(monthToDateShifts.count)")
-                print("   Month-to-date expenses: $\(monthToDateExpenses)")
-                
-                // Debug logging for location stats
-                print("🔵 Location: \(location.name)")
-                print("   Month-to-date sales: $\(monthToDateSales)")
-                print("   Month-to-date fuel gallons: \(monthToDateFuelGallons)")
-                print("   Month-to-date fuel dollars: $\(monthToDateFuelDollars)")
-                print("   Shifts with register data: \(shifts.filter { $0.hasRegisterData }.count)")
-                
+
                 stats.append(LocationStats(
                     id: location.id,
                     locationName: location.name,
@@ -456,10 +454,6 @@ class ManagerOverviewViewModel: ObservableObject {
                     monthToDateFuelGallons: monthToDateFuelGallons,
                     monthToDateFuelDollars: monthToDateFuelDollars
                 ))
-            } catch {
-                // If fetching fails for a location, continue with others
-                print("⚠️ Failed to fetch stats for location \(location.name): \(error.localizedDescription)")
-            }
         }
         
         // -- Finalize today snapshot -------------------------------------

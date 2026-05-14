@@ -6,10 +6,9 @@
 //
 
 import SwiftUI
-import UIKit
 
 struct ManagerDashboardView: View {
-    /// Matches `UITabBar` / iPad custom bar so safe-area gaps read as brand blue.
+    /// Bottom chrome for the custom tab bar (shared iPhone + iPad).
     private static let managerTabChromeGradient = LinearGradient(
         colors: [
             Color(red: 0.1, green: 0.3, blue: 0.6),
@@ -29,363 +28,40 @@ struct ManagerDashboardView: View {
     @State private var locationRecurringCounts: [String: Int] = [:] // locationId: recurring count
     
     var body: some View {
-        ZStack {
-            if UIDevice.current.userInterfaceIdiom == .pad {
-                // iPad: Use custom layout with bottom bar
-                VStack(spacing: 0) {
-                    // Content
-                    Group {
-                        if selectedTab == 0 {
-                            locationsTabContent
-                        } else if selectedTab == 1, let userId = authViewModel.currentUser?.id {
-                            ManagerEmployeesView(userId: userId)
-                        } else if selectedTab == 2, let userId = authViewModel.currentUser?.id {
-                            ManagerOverviewView(userId: userId)
-                        } else if selectedTab == 3 {
-                            TaskCheckView()
-                                .environmentObject(authViewModel)
-                        } else if selectedTab == 4 {
-                            SettingsView()
-                                .environmentObject(authViewModel)
-                        }
-                    }
-                    
-                    // Custom bottom tab bar
-                    customBottomTabBar
-                }
-            } else {
-                // iPhone: System TabView (iOS 18+ floating bar). Appearance APIs
-                // tint the bar itself, not the strip below the home indicator —
-                // that shows the layer behind the TabView (default white). Paint
-                // full-screen chrome here so it matches iPad's blue tab chrome.
-                ZStack {
-                    Self.managerTabChromeGradient
-                        .ignoresSafeArea()
-                    standardTabView
-                }
-            }
-        }
-        .onAppear {
-            // Set tab bar appearance for the entire app
-            let appearance = UITabBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
-            
-            // Set icon and text colors
-            appearance.stackedLayoutAppearance.normal.iconColor = UIColor.white.withAlphaComponent(0.6)
-            appearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.white.withAlphaComponent(0.6)]
-            appearance.stackedLayoutAppearance.selected.iconColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
-            appearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)]
-            
-            UITabBar.appearance().standardAppearance = appearance
-            UITabBar.appearance().scrollEdgeAppearance = appearance
-            UITabBar.appearance().barTintColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
-            UITabBar.appearance().isTranslucent = false
+        // iOS 18+ floating `TabView` leaves a frosted strip over the window
+        // that `UITabBarAppearance` cannot fill. Use the same custom bar on
+        // all phones and tablets so bottom chrome is always our blue gradient.
+        VStack(spacing: 0) {
+            mainDashboardContent
+            customBottomTabBar
         }
     }
-    
-    private var standardTabView: some View {
-        TabView(selection: $selectedTab) {
-            // Locations Tab
-            NavigationStack {
-                ZStack {
-                    Theme.secondaryGradient
-                        .ignoresSafeArea()
-                    
-                    VStack(spacing: 0) {
-                        // Colored Header with App Logo
-                        HStack {
-                            Image(systemName: "cloud.fill")
-                                .font(.system(size: 28))
-                                .foregroundColor(.white)
-                            Text("Oplix")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(.white)
-                            Spacer()
-                            Button(action: {
-                                showingAddLocation = true
-                            }) {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.system(size: 28))
-                                    .foregroundColor(.white)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.1, green: 0.3, blue: 0.6),  // Dark blue
-                                    Color(red: 0.15, green: 0.4, blue: 0.7)   // Medium dark blue
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        
-                        // Content Area
-                        if viewModel.isLoading {
-                            Spacer()
-                            ProgressView()
-                                .padding()
-                            Spacer()
-                        } else if viewModel.locations.isEmpty {
-                            Spacer()
-                            VStack(spacing: 20) {
-                                Image(systemName: "building.2.fill")
-                                    .font(.system(size: 60))
-                                    .foregroundColor(Theme.cloudBlue)
-                                Text("No locations yet")
-                                    .font(.title2)
-                                    .foregroundColor(.gray)
-                                Button("Add First Location") {
-                                    showingAddLocation = true
-                                }
-                                .cloudButton()
-                            }
-                            .padding()
-                            Spacer()
-                        } else {
-                            List {
-                                ForEach(Array(viewModel.locations.enumerated()), id: \.element.id) { index, location in
-                                    Button(action: {
-                                        print("🟡 Tapped location: \(location.name) (ID: \(location.id))")
-                                        selectedLocation = location
-                                        print("🟡 selectedLocation set to: \(selectedLocation?.name ?? "nil")")
-                                    }) {
-                                        LocationRow(
-                                            location: location,
-                                            index: index,
-                                            userId: authViewModel.currentUser?.id,
-                                            recurringCount: locationRecurringCounts[location.id],
-                                            todayScore: viewModel.todayScore(for: location),
-                                            sevenDayScore: viewModel.sevenDayScore(for: location)
-                                        )
-                                    }
-                                    .listRowBackground(Color.clear)
-                                }
-                                .onDelete { indexSet in
-                                    if let index = indexSet.first {
-                                        locationToDelete = viewModel.locations[index]
-                                        showingDeleteConfirmation = true
-                                    }
-                                }
-                            }
-                            .listStyle(.plain)
-                            .scrollContentBackground(.hidden)
-                        }
-                    }
+
+    @ViewBuilder
+    private var mainDashboardContent: some View {
+        Group {
+            switch selectedTab {
+            case 0:
+                locationsTabContent
+            case 1:
+                if let userId = authViewModel.currentUser?.id {
+                    ManagerEmployeesView(userId: userId)
                 }
-                .navigationTitle("")
-                .navigationBarTitleDisplayMode(.inline)
-                .preferredColorScheme(.light)
-                .toolbarColorScheme(.dark, for: .navigationBar)
-                .toolbarBackground(.hidden, for: .navigationBar)
-                .onAppear {
-                    let appearance = UINavigationBarAppearance()
-                    appearance.configureWithTransparentBackground()
-                    appearance.backgroundColor = UIColor.clear
-                    appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.clear]
-                    appearance.titleTextAttributes = [.foregroundColor: UIColor.clear]
-                    UINavigationBar.appearance().standardAppearance = appearance
-                    UINavigationBar.appearance().scrollEdgeAppearance = appearance
-                    
-                    Task {
-                        await self.loadRecurringCountsForAllLocations()
-                    }
+            case 2:
+                if let userId = authViewModel.currentUser?.id {
+                    ManagerOverviewView(userId: userId)
                 }
-                .task {
-                    await self.loadRecurringCountsForAllLocations()
-                }
-                .toolbar {
-                    // Add button is now in the header
-                }
-                .sheet(isPresented: $showingAddLocation) {
-                    print("🟡 SHEET - AddLocationView PRESENTED (from ManagerDashboard)")
-                    return AddLocationView(viewModel: viewModel)
-                        .environmentObject(authViewModel)
-                }
-                .onChange(of: showingAddLocation) { oldValue, newValue in
-                    print("🟡 SHEET - showingAddLocation changed: \(oldValue) -> \(newValue)")
-                }
-                .fullScreenCover(item: $selectedLocation) { location in
-                    NavigationStack {
-                        Group {
-                            if let userId = authViewModel.currentUser?.id {
-                                // showsCloseButton renders the bottom-right
-                                // floating Done pill from inside the location
-                                // view itself, matching the trash FAB on the
-                                // bottom-left. We used to set an external
-                                // toolbar Done here too, which produced a
-                                // duplicate button in the top-right on iPhone
-                                // — removed.
-                                LocationDetailView(
-                                    userId: userId,
-                                    locationId: location.id,
-                                    showsCloseButton: true
-                                )
-                            } else {
-                                Text("Error: User not authenticated")
-                            }
-                        }
-                        .onAppear {
-                            print("🟡 fullScreenCover presenting - location: \(location.name)")
-                        }
-                    }
-                }
-                .alert("Delete Location", isPresented: $showingDeleteConfirmation) {
-                    Button("Cancel", role: .cancel) {
-                        locationToDelete = nil
-                    }
-                    Button("Delete", role: .destructive) {
-                        if let location = locationToDelete {
-                            Task {
-                                await viewModel.deleteLocation(location)
-                                locationToDelete = nil
-                            }
-                        }
-                    }
-                } message: {
-                    if let location = locationToDelete {
-                        Text("Are you sure you want to delete '\(location.name)'? This action cannot be undone.")
-                    }
-                }
-                .task {
-                    // Set userId from authenticated user
-                    if let userId = authViewModel.currentUser?.id {
-                        viewModel.userId = userId
-                    }
-                    await viewModel.loadLocations()
-                    viewModel.startObservingLocations()
-                }
-            }
-            .tabItem {
-                Label("Locations", systemImage: "building.2.fill")
-            }
-            .tag(0)
-            
-            // Employees Tab
-            if let userId = authViewModel.currentUser?.id {
-                ManagerEmployeesView(userId: userId)
-                    .tabItem {
-                        Label("Employees", systemImage: "person.2.fill")
-                    }
-                    .tag(1)
-            }
-            
-            // Home Tab (Overview) - Center position with larger icon
-            if let userId = authViewModel.currentUser?.id {
-                ManagerOverviewView(userId: userId)
-                    .tabItem {
-                        Label("Home", systemImage: "house.fill")
-                    }
-                    .tag(2)
-            }
-            
-            // Task Check Tab
-            TaskCheckView()
-                .environmentObject(authViewModel)
-                .tabItem {
-                    Label("Task Check", systemImage: "checkmark.circle.fill")
-                }
-                .tag(3)
-            
-            // Settings Tab
-            SettingsView()
-                .environmentObject(authViewModel)
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape.fill")
-                }
-                .tag(4)
-        }
-        .toolbarBackground(Self.managerTabChromeGradient, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
-        .toolbarColorScheme(.dark, for: .tabBar)
-        .onAppear {
-            // Set tab bar appearance to make icons white with dark blue background
-            let appearance = UITabBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            
-            // Dark blue background matching the header/footer
-            appearance.backgroundColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
-            
-            // Set unselected icon color to white with reduced opacity
-            appearance.stackedLayoutAppearance.normal.iconColor = UIColor.white.withAlphaComponent(0.6)
-            appearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.white.withAlphaComponent(0.6)]
-            
-            // Set selected icon color to bright yellow/gold for visibility
-            appearance.stackedLayoutAppearance.selected.iconColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0) // Gold/Yellow
-            appearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)]
-            
-            // Apply to both standard and scroll edge appearances
-            UITabBar.appearance().standardAppearance = appearance
-            UITabBar.appearance().scrollEdgeAppearance = appearance
-            
-            // Also set the background color directly
-            UITabBar.appearance().barTintColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
-            UITabBar.appearance().isTranslucent = false
-            
-            // Make Home tab icon bigger and others smaller
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let window = windowScene.windows.first {
-                    var tabBarController: UITabBarController?
-                    
-                    // Find tab bar controller
-                    if let root = window.rootViewController as? UITabBarController {
-                        tabBarController = root
-                    } else if let nav = window.rootViewController as? UINavigationController,
-                              let tab = nav.viewControllers.first as? UITabBarController {
-                        tabBarController = tab
-                    } else {
-                        // Search in children
-                        func findTabBarController(in viewController: UIViewController) -> UITabBarController? {
-                            if let tab = viewController as? UITabBarController {
-                                return tab
-                            }
-                            for child in viewController.children {
-                                if let tab = findTabBarController(in: child) {
-                                    return tab
-                                }
-                            }
-                            return nil
-                        }
-                        if let root = window.rootViewController {
-                            tabBarController = findTabBarController(in: root)
-                        }
-                    }
-                    
-                    guard let tabBarController = tabBarController,
-                          let tabBarItems = tabBarController.tabBar.items else { return }
-                    
-                    // Apply appearance to the actual tab bar
-                    tabBarController.tabBar.standardAppearance = appearance
-                    tabBarController.tabBar.scrollEdgeAppearance = appearance
-                    tabBarController.tabBar.barTintColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
-                    tabBarController.tabBar.isTranslucent = false
-                    
-                    // Make other icons smaller (pointSize 18)
-                    for (index, item) in tabBarItems.enumerated() where index != 2 {
-                        if let image = item.image {
-                            item.image = image.withConfiguration(UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
-                        }
-                        if let selectedImage = item.selectedImage {
-                            item.selectedImage = selectedImage.withConfiguration(UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
-                        }
-                    }
-                    
-                    // Make Home tab icon bigger (index 2, pointSize 32)
-                    if tabBarItems.count > 2 {
-                        let homeItem = tabBarItems[2]
-                        homeItem.image = UIImage(systemName: "house.fill")?.withConfiguration(UIImage.SymbolConfiguration(pointSize: 32, weight: .bold))
-                        homeItem.selectedImage = UIImage(systemName: "house.fill")?.withConfiguration(UIImage.SymbolConfiguration(pointSize: 32, weight: .bold))
-                    }
-                }
+            case 3:
+                TaskCheckView()
+                    .environmentObject(authViewModel)
+            case 4:
+                SettingsView()
+                    .environmentObject(authViewModel)
+            default:
+                EmptyView()
             }
         }
     }
-    
     private var locationsTabContent: some View {
         NavigationStack {
             ZStack {
@@ -477,6 +153,9 @@ struct ManagerDashboardView: View {
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .preferredColorScheme(.light)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingAddLocation) {
                 AddLocationView(viewModel: viewModel)
                     .environmentObject(authViewModel)
@@ -567,15 +246,8 @@ struct ManagerDashboardView: View {
         }
         .frame(height: 60)
         .background {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.1, green: 0.3, blue: 0.6),
-                    Color(red: 0.15, green: 0.4, blue: 0.7)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea(edges: .bottom)
+            Self.managerTabChromeGradient
+                .ignoresSafeArea(edges: .bottom)
         }
     }
     
@@ -758,47 +430,6 @@ struct LocationRow: View {
                 .frame(width: 86, alignment: .trailing)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-        }
-    }
-}
-
-// Helper view to force tab bar to bottom on iPad
-struct TabBarPositionFix: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> UIViewController {
-        let controller = UIViewController()
-        return controller
-    }
-    
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        DispatchQueue.main.async {
-            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-               let window = windowScene.windows.first {
-                findAndFixTabBar(in: window.rootViewController)
-            }
-        }
-    }
-    
-    private func findAndFixTabBar(in viewController: UIViewController?) {
-        guard let viewController = viewController else { return }
-        
-        if let tabBarController = viewController as? UITabBarController {
-            // Force tab bar to bottom on iPad
-            if UIDevice.current.userInterfaceIdiom == .pad {
-                tabBarController.tabBar.isHidden = false
-                // Ensure tab bar is at bottom
-                tabBarController.view.setNeedsLayout()
-                tabBarController.view.layoutIfNeeded()
-            }
-        }
-        
-        // Recursively check children
-        for child in viewController.children {
-            findAndFixTabBar(in: child)
-        }
-        
-        // Check presented view controllers
-        if let presented = viewController.presentedViewController {
-            findAndFixTabBar(in: presented)
         }
     }
 }

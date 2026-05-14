@@ -58,17 +58,20 @@ struct EmployeeLotteryFormView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 20) {
                 lotteryFormTable
-                additionalFieldsSection
+                onlineAndCashFieldsSection
             }
             .padding(.horizontal)
             .padding(.vertical)
         }
         .background(Theme.cloudWhite)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            lotteryPhotoAndCloseBar
+        }
         .onAppear {
             // Initialize row values from template (optimized batch operation)
             rowValues = Dictionary(uniqueKeysWithValues: template.rows.map { ($0.id, $0.endingNumber) })
         }
-        .sheet(isPresented: $showingCamera) {
+        .fullScreenCover(isPresented: $showingCamera) {
             LotteryCameraPickerView(imageData: $imageData, capturedImage: $capturedImage)
         }
         .alert("Error", isPresented: $showingError) {
@@ -148,9 +151,59 @@ struct EmployeeLotteryFormView: View {
         )
     }
     
+    private var onlineAndCashFieldsSection: some View {
+        VStack(spacing: 16) {
+            multipleFieldSection(
+                title: "Online Total",
+                values: $onlineTotals,
+                placeholder: "Enter amount"
+            )
+
+            multipleFieldSection(
+                title: "Online Cashes",
+                values: $onlineCashes,
+                placeholder: "Enter amount"
+            )
+
+            multipleFieldSection(
+                title: "Instant Cashes",
+                values: $instantCashes,
+                placeholder: "Enter amount"
+            )
+        }
+        .padding(.top, 20)
+    }
+
+    /// Pinned above the home indicator so "Take photo" / close are never
+    /// lost below a long bin grid (common after cold start + many rows).
+    private var lotteryPhotoAndCloseBar: some View {
+        VStack(spacing: 12) {
+            cameraButton
+            if let capturedImage = capturedImage {
+                Image(uiImage: capturedImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 160)
+                    .cornerRadius(12)
+            }
+            closeLotteryButton
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        .frame(maxWidth: .infinity)
+        .background(Theme.cloudWhite)
+        .shadow(color: Color.black.opacity(0.12), radius: 10, y: -4)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.gray.opacity(0.25))
+                .frame(height: 1)
+        }
+    }
+
     private var dataRowsView: some View {
         let allRowIds = template.rows.map { $0.id }
-        return LazyVStack(spacing: 0) {
+        return VStack(spacing: 0) {
             ForEach(Array(template.rows.enumerated()), id: \.element.id) { index, row in
                 lotteryFormRowView(
                     index: index,
@@ -198,46 +251,23 @@ struct EmployeeLotteryFormView: View {
             }
         }
     }
-    
-    private var additionalFieldsSection: some View {
-        VStack(spacing: 16) {
-            multipleFieldSection(
-                title: "Online Total",
-                values: $onlineTotals,
-                placeholder: "Enter amount"
-            )
-            
-            multipleFieldSection(
-                title: "Online Cashes",
-                values: $onlineCashes,
-                placeholder: "Enter amount"
-            )
-            
-            multipleFieldSection(
-                title: "Instant Cashes",
-                values: $instantCashes,
-                placeholder: "Enter amount"
-            )
-            
-            cameraButton
-            
-            if let capturedImage = capturedImage {
-                Image(uiImage: capturedImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 200)
-                    .cornerRadius(12)
-                    .padding(.horizontal)
-            }
-            
-            closeLotteryButton
-        }
-        .padding(.top, 20)
-    }
-    
+
     private var cameraButton: some View {
         Button(action: {
-            showingCamera = true
+            // Drop focus and dismiss the number pad before presenting the
+            // camera. A `.sheet` with UIImagePickerController often clipped
+            // the shutter / capture UI; `fullScreenCover` + a short delay
+            // after resignFirstResponder keeps the native controls visible.
+            focusedRowId = nil
+            UIApplication.shared.sendAction(
+                #selector(UIResponder.resignFirstResponder),
+                to: nil,
+                from: nil,
+                for: nil
+            )
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                showingCamera = true
+            }
         }) {
             HStack {
                 Image(systemName: capturedImage != nil ? "checkmark.circle.fill" : "camera.fill")
@@ -251,9 +281,8 @@ struct EmployeeLotteryFormView: View {
             .background(capturedImage != nil ? Color.green : Theme.cloudBlue)
             .cornerRadius(12)
         }
-        .padding(.horizontal)
     }
-    
+
     private var closeLotteryButton: some View {
         Button(action: {
             Task {
@@ -274,7 +303,6 @@ struct EmployeeLotteryFormView: View {
             .background(capturedImage != nil ? Color.red : Color.gray)
             .cornerRadius(12)
         }
-        .padding(.horizontal)
         .disabled(isSaving || capturedImage == nil)
     }
     
@@ -552,10 +580,17 @@ struct LotteryCameraPickerView: UIViewControllerRepresentable {
         picker.delegate = context.coordinator
         picker.sourceType = .camera
         picker.allowsEditing = false
+        picker.cameraCaptureMode = .photo
+        picker.showsCameraControls = true
+        // When this VC is embedded in SwiftUI, default modal style can
+        // still interact oddly; fullScreen is the safe default for camera.
+        picker.modalPresentationStyle = .fullScreen
         return picker
     }
-    
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
+        uiViewController.showsCameraControls = true
+    }
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)

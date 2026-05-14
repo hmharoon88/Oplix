@@ -303,7 +303,10 @@ struct TaskCategoryStatusScreen: View {
     }
 
     private var doneButton: some View {
-        Button(action: onDone) {
+        Button(action: {
+            onDone()
+            dismiss()
+        }) {
             Text("Done")
                 .font(.headline)
                 .foregroundColor(.white)

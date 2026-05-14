@@ -201,16 +201,18 @@ async function sendPushToUser({userId, category, title, body, data = {}}) {
         token,
         notification: {title, body},
         data: stringifiedData,
+        android: {
+          priority: 'high',
+        },
         apns: {
+          headers: {
+            'apns-priority': '10',
+            'apns-push-type': 'alert',
+          },
           payload: {
             aps: {
+              alert: {title, body},
               sound: 'default',
-              // iOS auto-increments the badge for any push that
-              // includes a notification block — `mutable-content`
-              // lets us add a service extension later if we ever
-              // need richer payload manipulation. Safe to leave at 0
-              // for plain alerts.
-              'mutable-content': 0,
             },
           },
         },
