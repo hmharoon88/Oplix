@@ -44,6 +44,7 @@ struct TaskCategoryStatusScreen: View {
     @State private var showingScopePrompt = false
     @State private var showingSingleLocationCreate = false
     @State private var showingMultiLocationCreate = false
+    @State private var listMode: TaskCategoryListMode = .current
 
     private var tasksInCategory: [WorkTask] {
         viewModel.tasks.filter { category.matches($0) }
@@ -69,7 +70,10 @@ struct TaskCategoryStatusScreen: View {
                 VStack(alignment: .leading, spacing: 16) {
                     headerCard
                     if !tasksInCategory.isEmpty {
-                        statsBanner
+                        listModePicker
+                        if listMode == .current {
+                            statsBanner
+                        }
                     }
 
                     if tasksInCategory.isEmpty {
@@ -77,27 +81,48 @@ struct TaskCategoryStatusScreen: View {
                             .frame(maxWidth: .infinity)
                             .padding(.top, 24)
                     } else {
-                        VStack(spacing: 12) {
-                            ForEach(tasksInCategory) { task in
-                                TaskStatusRow(
-                                    task: task,
-                                    employees: viewModel.employees + viewModel.supervisors,
-                                    onEditTap: { taskToEdit = task },
-                                    onReview: { employeeId, approved, note in
-                                        Task {
-                                            await viewModel.reviewCompletion(
-                                                task: task,
-                                                employeeId: employeeId,
-                                                approved: approved,
-                                                note: note,
-                                                reviewerId: effectiveReviewerId
-                                            )
+                        switch listMode {
+                        case .current:
+                            VStack(spacing: 12) {
+                                ForEach(tasksInCategory) { task in
+                                    TaskStatusRow(
+                                        task: task,
+                                        employees: viewModel.employees + viewModel.supervisors,
+                                        onEditTap: { taskToEdit = task },
+                                        onReview: { employeeId, approved, note in
+                                            Task {
+                                                await viewModel.reviewCompletion(
+                                                    task: task,
+                                                    employeeId: employeeId,
+                                                    approved: approved,
+                                                    note: note,
+                                                    reviewerId: effectiveReviewerId
+                                                )
+                                            }
                                         }
-                                    }
-                                )
+                                    )
+                                }
                             }
+                            .padding(.horizontal)
+                        case .history:
+                            TaskCompletionHistoryList(
+                                tasks: tasksInCategory,
+                                employees: viewModel.employees + viewModel.supervisors,
+                                categoryTint: category.tint,
+                                onReview: { task, employeeId, completionTimestamp, approved, note in
+                                    Task {
+                                        await viewModel.reviewCompletion(
+                                            task: task,
+                                            employeeId: employeeId,
+                                            approved: approved,
+                                            note: note,
+                                            reviewerId: effectiveReviewerId,
+                                            completionTimestamp: completionTimestamp
+                                        )
+                                    }
+                                }
+                            )
                         }
-                        .padding(.horizontal)
                     }
                 }
                 .padding(.top, 12)
@@ -198,6 +223,17 @@ struct TaskCategoryStatusScreen: View {
         .background(Theme.cloudWhite)
         .cornerRadius(16)
         .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 4)
+        .padding(.horizontal)
+    }
+
+    private var listModePicker: some View {
+        Picker("View", selection: $listMode) {
+            ForEach(TaskCategoryListMode.allCases, id: \.self) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .oplixSegmentedPickerTint()
         .padding(.horizontal)
     }
 

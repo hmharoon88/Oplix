@@ -483,24 +483,23 @@ class LocationDetailViewModel: ObservableObject {
         employeeId: String,
         approved: Bool,
         note: String?,
-        reviewerId: String
+        reviewerId: String,
+        /// When set (History tab), matches a specific archived submission.
+        /// When nil (Current tab), reviews the employee's active completion.
+        completionTimestamp: Date? = nil
     ) async {
-        guard var completion = task.employeeCompletions[employeeId] else {
+        var updatedTask = task
+        guard updatedTask.applyReview(
+            employeeId: employeeId,
+            completionTimestamp: completionTimestamp,
+            approved: approved,
+            note: note,
+            reviewerId: reviewerId
+        ) else {
             errorMessage = "Could not find a completion to review."
             return
         }
 
-        completion.isApproved = approved
-        completion.reviewedBy = reviewerId
-        completion.reviewedAt = Date()
-        completion.disapprovalNote = approved ? nil : note
-
-        var updatedTask = task
-        updatedTask.employeeCompletions[employeeId] = completion
-
-        // Keep an optimistic copy in our local in-memory store so the UI
-        // (status pill, score bars, employee row) reflects the review
-        // immediately without waiting for the round-trip + reload.
         if let index = tasks.firstIndex(where: { $0.id == updatedTask.id }) {
             tasks[index] = updatedTask
         }

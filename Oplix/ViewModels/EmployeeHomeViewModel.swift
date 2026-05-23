@@ -429,7 +429,7 @@ class EmployeeHomeViewModel: ObservableObject {
                 timestamp: Date(),
                 note: note
             )
-            updatedTask.employeeCompletions[employeeId] = completion
+            updatedTask.setEmployeeCompletion(completion)
             
             print("🟢 Updating task in Firestore...")
             try await firebaseService.updateTask(userId: managerUserId, locationId: locationId, task: updatedTask)
@@ -491,7 +491,7 @@ class EmployeeHomeViewModel: ObservableObject {
                     timestamp: Date(),
                     note: note
                 )
-                updatedTask.employeeCompletions[currentEmployeeId] = completion
+                updatedTask.setEmployeeCompletion(completion)
                 
                 print("🟢 Updating task in Firestore (background)...")
                 try await firebaseService.updateTask(userId: managerUserId, locationId: currentLocationId, task: updatedTask)

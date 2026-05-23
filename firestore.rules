@@ -1,9 +1,14 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read and write for everyone (authenticated or not)
+    // Simple: no Firebase Auth session → no access.
+    // Stops outsiders (web, scripts, random apps) without a logged-in user.
+    //
+    // Note: anyone who can sign into *your* Firebase project (e.g. creates an
+    // account) is still "authenticated" here. Tighter rules = per-path checks
+    // (e.g. only data under that user's uid). Add that when you want it.
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
   }
 }
