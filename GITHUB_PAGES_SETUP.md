@@ -1,108 +1,79 @@
-# Setting Up Support Page on GitHub Pages
+# Oplix — GitHub Pages setup
 
-## Step 1: Create a GitHub Repository
+The public website lives in the **`docs/`** folder so it does not mix with the Xcode project at the repo root.
 
-1. Go to [GitHub](https://github.com) and sign in
-2. Click the "+" icon in the top right → "New repository"
-3. Name it something like `oplix-support` or `oplix-website`
-4. Make it **Public** (required for free GitHub Pages)
-5. Click "Create repository"
+## Pages
 
-## Step 2: Upload the Support Page
+| File | URL path |
+|------|----------|
+| Home (marketing) | `/` |
+| Support | `/support.html` |
+| Privacy | `/privacy.html` |
 
-### Option A: Using GitHub Web Interface
+## Enable GitHub Pages (one time)
 
-1. In your new repository, click "Add file" → "Upload files"
-2. Drag and drop the `support.html` file
-3. Rename it to `index.html` (or keep it as `support.html`)
-4. Click "Commit changes"
+1. Open [github.com/hmharoon88/Oplix](https://github.com/hmharoon88/Oplix)
+2. **Settings** → **Pages** (left sidebar)
+3. Under **Build and deployment** → **Source**:
+   - **Deploy from a branch**
+   - Branch: `main` (or your default branch after merge)
+   - Folder: **`/docs`**
+4. Click **Save**
+5. Wait 1–5 minutes for the site to build
 
-### Option B: Using Git Command Line
+## Your live URLs
+
+After Pages is enabled:
+
+```
+https://hmharoon88.github.io/Oplix/
+https://hmharoon88.github.io/Oplix/support.html
+https://hmharoon88.github.io/Oplix/privacy.html
+```
+
+Use the **support** URL in App Store Connect → **Support URL**.
+
+Use the **privacy** URL for the privacy policy link if required.
+
+## Publish changes
+
+From the repo root:
 
 ```bash
-# Clone your repository
-git clone https://github.com/YOUR_USERNAME/oplix-support.git
-cd oplix-support
-
-# Copy support.html to the repository
-# Rename it to index.html (optional, but recommended)
-cp support.html index.html
-
-# Add, commit, and push
-git add index.html
-git commit -m "Add support page"
+git add docs/
+git commit -m "Update website"
 git push origin main
 ```
 
-## Step 3: Enable GitHub Pages
+Changes usually appear within a few minutes.
 
-1. Go to your repository on GitHub
-2. Click **Settings** (top menu)
-3. Scroll down to **Pages** (left sidebar)
-4. Under **Source**, select:
-   - Branch: `main` (or `master`)
-   - Folder: `/ (root)`
-5. Click **Save**
-6. Wait a few minutes for GitHub to build your site
+## App Store link
 
-## Step 4: Get Your Support URL
+When the app is on the App Store, edit `docs/index.html` and replace the placeholder download button with your real App Store URL:
 
-After GitHub Pages is enabled, your support page will be available at:
-
-```
-https://YOUR_USERNAME.github.io/oplix-support/
-```
-
-Or if you used a custom domain:
-```
-https://yourdomain.com
-```
-
-## Step 5: Use in App Store Connect
-
-1. Go to [App Store Connect](https://appstoreconnect.apple.com)
-2. Navigate to your app → App Information
-3. In the **Support URL** field, enter:
-   ```
-   https://YOUR_USERNAME.github.io/oplix-support/
-   ```
-4. Save your changes
-
-## Customization
-
-### Update Contact Email
-Edit `support.html` and change:
 ```html
-<p><strong>Email:</strong> support@oplix.app</p>
-```
-to your actual support email.
-
-### Add More FAQs
-Add more FAQ items in the "Frequently Asked Questions" section:
-```html
-<div class="faq-item">
-    <h3>Your Question Here</h3>
-    <p>Your answer here</p>
-</div>
+<a href="https://apps.apple.com/app/idYOUR_APP_ID" class="btn btn-primary">Download on the App Store</a>
 ```
 
-### Custom Domain (Optional)
-If you have a custom domain:
-1. In GitHub Pages settings, add your custom domain
-2. Update DNS records as instructed
-3. Use your custom domain in App Store Connect
+## Custom domain (optional)
 
-## Testing
+1. Buy a domain (e.g. `oplix.app`)
+2. In **Settings → Pages**, enter the custom domain
+3. Add the DNS records GitHub shows at your registrar
+4. Enable **Enforce HTTPS**
 
-Before submitting to App Store:
-1. Visit your GitHub Pages URL
-2. Test on mobile devices
-3. Ensure all links work
-4. Verify contact information is correct
+## Preview locally
+
+Open `docs/index.html` in a browser (double-click or drag into Chrome/Safari). For correct CSS paths, open from the `docs` folder or use a simple local server:
+
+```bash
+cd docs && python3 -m http.server 8080
+```
+
+Then visit `http://localhost:8080`
 
 ## Notes
 
-- GitHub Pages is free for public repositories
-- Changes may take a few minutes to appear after pushing
-- The page is automatically mobile-responsive
-- You can update the page anytime by editing the HTML file
+- `docs/.nojekyll` tells GitHub not to run Jekyll (avoids path issues)
+- Free GitHub Pages requires a **public** repository
+- iOS code in `Oplix/` is unaffected by website updates

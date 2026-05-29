@@ -33,6 +33,9 @@ struct Location: Identifiable, Codable {
     var lotteryTerminalCount: Int? // nil / missing == 1 (single-terminal, legacy behaviour)
     var lotteryArchivedTerminals: [Int]?
 
+    /// `"c_store"` (default) or `"c_store_gas"` — controls fuel / gas-sale fields in books and shift close.
+    var facilityType: String?
+
     /// Effective terminal count, defaulting to 1 for legacy records
     /// that were stored before multi-terminal support existed.
     var effectiveLotteryTerminalCount: Int {
@@ -49,6 +52,10 @@ struct Location: Identifiable, Codable {
     /// The terminal numbers an employee can close out today (1...count).
     var activeLotteryTerminalNumbers: [Int] {
         Array(1...effectiveLotteryTerminalCount)
+    }
+
+    var hasGasStation: Bool {
+        facilityType == "c_store_gas"
     }
 }
 

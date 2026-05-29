@@ -1,2 +1,6 @@
 # Local Xcode / SPM (optional isolated builds)
 .oplix-dd/
+
+# Firebase web (optional local overrides)
+docs/firebase-web-app-id.txt
+docs/js/firebase-config.override.js

@@ -1,0 +1,1046 @@
+/**
+ * Manager Home overview — mirrors iOS ManagerOverviewView + HomeAlertsViewModel.
+ */
+(function () {
+    const VARIANCE_THRESHOLD = 5;
+    const VARIANCE_CRITICAL = 20;
+    const UNCLOSED_SHIFT_HOURS = 12;
+    const VARIANCE_LOOKBACK_DAYS = 7;
+    const MISSING_REGISTER_LOOKBACK_DAYS = 7;
+    const LOTTERY_ACTIVITY_DAYS = 30;
+    const DOC_EXPIRY_DAYS = 30;
+
+    const WEEKDAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+    function toDate(value) {
+        if (!value) return null;
+        if (value instanceof Date) return value;
+        if (typeof value.toDate === "function") return value.toDate();
+        if (typeof value === "number") return new Date(value);
+        if (typeof value === "string") return new Date(value);
+        return null;
+    }
+
+    function startOfDay(d) {
+        const x = new Date(d);
+        x.setHours(0, 0, 0, 0);
+        return x;
+    }
+
+    function addDays(d, n) {
+        const x = new Date(d);
+        x.setDate(x.getDate() + n);
+        return x;
+    }
+
+    function dateParts(d) {
+        return { y: d.getFullYear(), m: d.getMonth() + 1, day: d.getDate() };
+    }
+
+    function isInDateRange(date, rangeStart, rangeEnd) {
+        const { y, m, day } = dateParts(date);
+        const s = dateParts(rangeStart);
+        const e = dateParts(rangeEnd);
+        const afterStart =
+            y > s.y || (y === s.y && m > s.m) || (y === s.y && m === s.m && day >= s.day);
+        const beforeEnd =
+            y < e.y || (y === e.y && m < e.m) || (y === e.y && m === e.m && day <= e.day);
+        return afterStart && beforeEnd;
+    }
+
+    function isInHalfOpenRange(date, start, endExclusive) {
+        return date >= start && date < endExclusive;
+    }
+
+    function greetingForHour(h) {
+        if (h >= 5 && h < 12) return "Good morning";
+        if (h >= 12 && h < 17) return "Good afternoon";
+        if (h >= 17 && h < 22) return "Good evening";
+        return "Hi";
+    }
+
+    function formatCurrency(amount, { maxFraction = 0 } = {}) {
+        return new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+            maximumFractionDigits: maxFraction,
+            minimumFractionDigits: maxFraction,
+        }).format(amount || 0);
+    }
+
+    function formatCurrencyCompact(amount) {
+        const abs = Math.abs(amount);
+        if (abs >= 1_000_000) return formatCurrency(amount / 1_000_000, { maxFraction: 1 }) + "M";
+        if (abs >= 10_000) return formatCurrency(amount / 1_000, { maxFraction: 1 }) + "K";
+        return formatCurrency(amount, { maxFraction: 0 });
+    }
+
+    function formatDateMedium(d) {
+        return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text == null ? "" : String(text);
+        return div.innerHTML;
+    }
+
+    function shiftIsActive(shift) {
+        return shift.clockInTime && !shift.clockOutTime;
+    }
+
+    function shiftHasRegisterData(shift) {
+        const regs = shift.registers || [];
+        return (
+            regs.length > 0 ||
+            shift.cashSale != null ||
+            shift.cashInHand != null ||
+            shift.overShort != null ||
+            shift.creditCard != null
+        );
+    }
+
+    function shiftHoursWorked(shift) {
+        const clockIn = toDate(shift.clockInTime);
+        if (!clockIn) return null;
+        let endTime;
+        if (shift.isAutoClockedOut && shift.scheduledEndTime) {
+            endTime = toDate(shift.scheduledEndTime);
+        } else if (shift.clockOutTime) {
+            endTime = toDate(shift.clockOutTime);
+        } else {
+            return null;
+        }
+        if (!endTime) return null;
+        const hours = (endTime - clockIn) / 3600000;
+        return hours > 0 ? hours : null;
+    }
+
+    function registerRevenue(register) {
+        return (register.cashSale || 0) + (register.creditCard || 0) + (register.fuelSaleDollars || 0);
+    }
+
+    function shiftMerchRevenue(shift) {
+        const regs = shift.registers || [];
+        if (regs.length) {
+            return regs.reduce((sum, r) => sum + (r.cashSale || 0) + (r.creditCard || 0), 0);
+        }
+        return (shift.cashSale || 0) + (shift.creditCard || 0);
+    }
+
+    function shiftDateRef(shift) {
+        return toDate(shift.registerClosedAt) || toDate(shift.clockOutTime) || toDate(shift.clockInTime);
+    }
+
+    function employeeWorksOn(employee, date) {
+        const schedule = employee.weeklySchedule;
+        if (!schedule) return false;
+        const key = WEEKDAY_KEYS[date.getDay()];
+        const day = schedule[key];
+        return day && day.isWorking !== false;
+    }
+
+    function getTaskCycleStart(task, now) {
+        const freq = task.frequency || "one_time";
+        if (freq === "one_time") return new Date(0);
+        if (freq === "daily") return startOfDay(now);
+        if (freq === "weekly") {
+            const d = new Date(now);
+            const day = d.getDay();
+            const diff = day === 0 ? 6 : day - 1;
+            d.setDate(d.getDate() - diff);
+            return startOfDay(d);
+        }
+        if (freq === "monthly") {
+            return new Date(now.getFullYear(), now.getMonth(), 1);
+        }
+        return startOfDay(now);
+    }
+
+    function taskHasCompletion(task, now) {
+        const freq = task.frequency || "one_time";
+        const completions = task.employeeCompletions || {};
+        const cycleStart = getTaskCycleStart(task, now);
+        return Object.values(completions).some((c) => {
+            if (c.isApproved === false) return false;
+            if (freq === "one_time") return true;
+            const ts = toDate(c.timestamp);
+            return ts && ts >= cycleStart;
+        });
+    }
+
+    function cashEnclosedFromSummary(summary) {
+        if (!summary) return 0;
+        return (summary.cashInBagNet || 0) + (summary.overShort || 0);
+    }
+
+    function lotterySoldAmount(form) {
+        const summary = form.shiftSummary;
+        if (summary && summary.totalSoldAmount != null) return summary.totalSoldAmount;
+        const fd = form.formData || {};
+        const raw = fd.amount || fd.sale || fd.total;
+        return raw != null ? Number(raw) || 0 : 0;
+    }
+
+    function getAcknowledgedSet(userId) {
+        try {
+            const raw = localStorage.getItem(`oplix.acknowledgedAlerts.${userId}`);
+            return raw ? new Set(JSON.parse(raw)) : new Set();
+        } catch {
+            return new Set();
+        }
+    }
+
+    function acknowledgeAlert(userId, alertId) {
+        const set = getAcknowledgedSet(userId);
+        set.add(alertId);
+        localStorage.setItem(`oplix.acknowledgedAlerts.${userId}`, JSON.stringify([...set]));
+    }
+
+    async function fetchSubcollection(userId, locationId, name) {
+        const snap = await window.oplixDb
+            .collection("users")
+            .doc(userId)
+            .collection("locations")
+            .doc(locationId)
+            .collection(name)
+            .get();
+        return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    }
+
+    async function fetchLocationBundle(userId, locationId) {
+        const [shifts, lotteryForms, payables, receivables, locationEmployees, documents] =
+            await Promise.all([
+                fetchSubcollection(userId, locationId, "shifts"),
+                fetchSubcollection(userId, locationId, "lotteryForms"),
+                fetchSubcollection(userId, locationId, "payables"),
+                fetchSubcollection(userId, locationId, "receivables"),
+                fetchSubcollection(userId, locationId, "employees"),
+                fetchSubcollection(userId, locationId, "documents"),
+            ]);
+        return { shifts, lotteryForms, payables, receivables, locationEmployees, documents };
+    }
+
+    function buildAlertsForLocation(location, bundle, nameLookup) {
+        const alerts = [];
+        const now = new Date();
+        const todayStart = startOfDay(now);
+        const tomorrowStart = addDays(todayStart, 1);
+        const cutoffUnclosed = new Date(now.getTime() - UNCLOSED_SHIFT_HOURS * 3600000);
+        const cutoffVariance = addDays(now, -VARIANCE_LOOKBACK_DAYS);
+        const cutoffRegister = addDays(now, -MISSING_REGISTER_LOOKBACK_DAYS);
+
+        for (const shift of bundle.shifts) {
+            const clockIn = toDate(shift.clockInTime);
+            if (shiftIsActive(shift) && clockIn && clockIn < cutoffUnclosed) {
+                const name = nameLookup[shift.employeeId] || "Employee";
+                const hours = Math.floor((now - clockIn) / 3600000);
+                alerts.push({
+                    id: `clockout_${shift.id}`,
+                    severity: 0,
+                    title: `${name} forgot to clock out`,
+                    subtitle: `${location.name} · clocked in ${hours}h ago`,
+                    sortKey: 0,
+                });
+            }
+
+            const clockOut = toDate(shift.clockOutTime);
+            if (clockOut && clockOut >= cutoffRegister && !shiftHasRegisterData(shift)) {
+                const hours = shiftHoursWorked(shift);
+                if (hours == null || hours >= 1) {
+                    const name = nameLookup[shift.employeeId] || "Employee";
+                    alerts.push({
+                        id: `noregister_${shift.id}`,
+                        severity: 0,
+                        title: `${location.name} — register data missing`,
+                        subtitle: `${name}'s shift · ${formatDateMedium(clockOut)}`,
+                        sortKey: 1,
+                    });
+                }
+            }
+
+            const dateRef = shiftDateRef(shift);
+            if (dateRef && dateRef >= cutoffVariance) {
+                const regs = shift.registers || [];
+                if (regs.length) {
+                    regs.forEach((reg, i) => {
+                        const v = reg.overShort;
+                        if (v != null && Math.abs(v) >= VARIANCE_THRESHOLD) {
+                            alerts.push(makeVarianceAlert(location, "register", v, dateRef, `regvar_${shift.id}_${i}`));
+                        }
+                    });
+                } else if (shift.overShort != null && Math.abs(shift.overShort) >= VARIANCE_THRESHOLD) {
+                    alerts.push(
+                        makeVarianceAlert(location, "register", shift.overShort, dateRef, `regvar_legacy_${shift.id}`)
+                    );
+                }
+            }
+        }
+
+        const forms = bundle.lotteryForms;
+        const activityCutoff = addDays(now, -LOTTERY_ACTIVITY_DAYS);
+        const hasLottery = forms.some((f) => {
+            const t = toDate(f.submittedAt);
+            return t && t >= activityCutoff;
+        });
+        if (hasLottery) {
+            const yesterday = addDays(todayStart, -1);
+            const submittedYesterday = forms.some((f) => {
+                const t = toDate(f.submittedAt);
+                return t && t >= yesterday && t < todayStart;
+            });
+            if (!submittedYesterday) {
+                alerts.push({
+                    id: `lotteryclose_${location.id}`,
+                    severity: 0,
+                    title: `${location.name} — lottery not closed`,
+                    subtitle: `No submission for ${formatDateMedium(yesterday)}`,
+                    sortKey: 2,
+                });
+            }
+        }
+
+        for (const form of forms) {
+            const submitted = toDate(form.submittedAt);
+            const v = form.shiftSummary?.overShort;
+            if (submitted && submitted >= cutoffVariance && v != null && Math.abs(v) >= VARIANCE_THRESHOLD) {
+                alerts.push(makeVarianceAlert(location, "lottery", v, submitted, `lotvar_${form.id}`));
+            }
+        }
+
+        const overdue = bundle.payables.filter((p) => {
+            if (p.isPaid) return false;
+            const due = toDate(p.dueDate);
+            return due && startOfDay(due) < todayStart;
+        });
+        if (overdue.length) {
+            const total = overdue.reduce((s, p) => s + (p.amount || 0), 0);
+            alerts.push({
+                id: `payables_${location.id}`,
+                severity: 2,
+                title: `${overdue.length} payable${overdue.length === 1 ? "" : "s"} overdue · ${formatCurrency(total)}`,
+                subtitle: location.name,
+                sortKey: 20,
+            });
+        }
+
+        return alerts;
+    }
+
+    function makeVarianceAlert(location, kind, value, date, id) {
+        const severity = Math.abs(value) >= VARIANCE_CRITICAL ? 0 : 1;
+        const label = value < 0 ? "SHORT" : "OVER";
+        return {
+            id,
+            severity,
+            title: `${location.name} ${kind} ${label} ${formatCurrency(Math.abs(value))}`,
+            subtitle: formatDateMedium(date),
+            sortKey: kind === "lottery" ? 11 : 10,
+        };
+    }
+
+    function computeWeeklyPulse(location, payables, receivables) {
+        const todayStart = startOfDay(new Date());
+        const windowEnd = addDays(todayStart, 7);
+        const slice = {
+            id: location.id,
+            name: location.name,
+            receivablesDue: 0,
+            receivablesCount: 0,
+            payablesDue: 0,
+            payablesCount: 0,
+        };
+        for (const p of payables) {
+            if (p.isPaid) continue;
+            const due = toDate(p.dueDate);
+            if (!due || due >= windowEnd) continue;
+            slice.payablesDue += p.amount || 0;
+            slice.payablesCount += 1;
+        }
+        for (const r of receivables) {
+            if (r.isReceived) continue;
+            const due = toDate(r.dueDate);
+            if (!due || due >= windowEnd) continue;
+            slice.receivablesDue += r.amount || 0;
+            slice.receivablesCount += 1;
+        }
+        return slice;
+    }
+
+    function computeLotteryToday(location, forms) {
+        const todayStart = startOfDay(new Date());
+        const tomorrowStart = addDays(todayStart, 1);
+        const row = {
+            id: location.id,
+            name: location.name,
+            formsCount: 0,
+            cashEnclosed: 0,
+            overShort: 0,
+            hadOverShortData: false,
+        };
+        for (const form of forms) {
+            const submitted = toDate(form.submittedAt);
+            if (!submitted || submitted < todayStart || submitted >= tomorrowStart) continue;
+            row.formsCount += 1;
+            const summary = form.shiftSummary;
+            if (summary) {
+                row.cashEnclosed += cashEnclosedFromSummary(summary);
+                if (summary.overShort != null) {
+                    row.overShort += summary.overShort;
+                    row.hadOverShortData = true;
+                }
+            }
+        }
+        return row;
+    }
+
+    function computeLocationStats(location, bundle, allEmployeesDict, now) {
+        const { shifts, lotteryForms } = bundle;
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+
+        const todayStart = startOfDay(now);
+        const tomorrowStart = addDays(todayStart, 1);
+        const lastWeekStart = addDays(todayStart, -7);
+        const lastWeekEnd = addDays(tomorrowStart, -7);
+
+        let monthToDateSales = 0;
+        let monthToDateFuelGallons = 0;
+        let monthToDateFuelDollars = 0;
+        let monthToDateLotterySales = 0;
+        let monthToDatePayroll = 0;
+        let monthToDateExpenses = 0;
+
+        const snapshotPart = { revenue: 0, revenueLastWeek: 0, clockedIn: 0 };
+
+        for (const shift of shifts) {
+            if (shiftIsActive(shift)) snapshotPart.clockedIn += 1;
+
+            const dateRef = shiftDateRef(shift);
+            if (dateRef && shiftHasRegisterData(shift)) {
+                if (isInHalfOpenRange(dateRef, todayStart, tomorrowStart)) {
+                    const regs = shift.registers || [];
+                    if (regs.length) {
+                        regs.forEach((r) => {
+                            snapshotPart.revenue += registerRevenue(r);
+                        });
+                    } else {
+                        snapshotPart.revenue += (shift.cashSale || 0) + (shift.creditCard || 0);
+                    }
+                } else if (isInHalfOpenRange(dateRef, lastWeekStart, lastWeekEnd)) {
+                    const regs = shift.registers || [];
+                    if (regs.length) {
+                        regs.forEach((r) => {
+                            snapshotPart.revenueLastWeek += registerRevenue(r);
+                        });
+                    } else {
+                        snapshotPart.revenueLastWeek += (shift.cashSale || 0) + (shift.creditCard || 0);
+                    }
+                }
+            }
+
+            if (!shiftHasRegisterData(shift)) continue;
+            const date = shiftDateRef(shift);
+            if (!date || !isInDateRange(date, monthStart, monthEnd)) continue;
+
+            const regs = shift.registers || [];
+            if (regs.length) {
+                regs.forEach((r) => {
+                    monthToDateSales += (r.cashSale || 0) + (r.creditCard || 0);
+                    monthToDateFuelGallons += r.fuelSaleGallons || 0;
+                    monthToDateFuelDollars += r.fuelSaleDollars || 0;
+                });
+            } else {
+                monthToDateSales += (shift.cashSale || 0) + (shift.creditCard || 0);
+            }
+        }
+
+        for (const form of lotteryForms) {
+            const submitted = toDate(form.submittedAt);
+            if (!submitted) continue;
+            const sold = lotterySoldAmount(form);
+            if (isInHalfOpenRange(submitted, todayStart, tomorrowStart)) {
+                snapshotPart.revenue += sold;
+            } else if (isInHalfOpenRange(submitted, lastWeekStart, lastWeekEnd)) {
+                snapshotPart.revenueLastWeek += sold;
+            }
+            if (isInDateRange(submitted, monthStart, monthEnd)) {
+                monthToDateLotterySales += sold;
+            }
+        }
+
+        const monthShifts = shifts.filter((s) => {
+            const d = shiftDateRef(s);
+            return d && isInDateRange(d, monthStart, monthEnd);
+        });
+
+        const byEmployee = {};
+        monthShifts.forEach((s) => {
+            if (!byEmployee[s.employeeId]) byEmployee[s.employeeId] = [];
+            byEmployee[s.employeeId].push(s);
+        });
+        Object.entries(byEmployee).forEach(([empId, empShifts]) => {
+            const emp = allEmployeesDict[empId];
+            if (!emp || emp.hourlyRate == null) return;
+            const hours = empShifts.reduce((sum, s) => sum + (shiftHoursWorked(s) || 0), 0);
+            monthToDatePayroll += hours * emp.hourlyRate;
+        });
+
+        monthShifts.forEach((shift) => {
+            (shift.expenses || []).forEach((e) => {
+                monthToDateExpenses += e.amount || 0;
+            });
+            (shift.registers || []).forEach((r) => {
+                if (r.cashExpenseAmounts) {
+                    monthToDateExpenses += r.cashExpenseAmounts.reduce((a, b) => a + b, 0);
+                } else if (r.cashExpense != null) {
+                    monthToDateExpenses += r.cashExpense;
+                }
+            });
+        });
+
+        return {
+            stats: {
+                id: location.id,
+                locationName: location.name,
+                monthToDateSales,
+                monthToDateLotterySales,
+                monthToDatePayroll,
+                monthToDateExpenses,
+                monthToDateFuelGallons,
+                monthToDateFuelDollars,
+            },
+            snapshotPart,
+            locationName: location.name,
+        };
+    }
+
+    function buildGlobalAlerts(employees, tasks, locations, allDocs) {
+        const alerts = [];
+        const now = new Date();
+        const todayStart = startOfDay(now);
+        const docCutoff = addDays(now, DOC_EXPIRY_DAYS);
+        const nameById = Object.fromEntries(locations.map((l) => [l.id, l.name]));
+
+        allDocs.forEach((doc) => {
+            const exp = toDate(doc.expiryDate);
+            if (!exp || exp < now || exp > docCutoff) return;
+            const days = Math.max(0, Math.floor((exp - now) / 86400000));
+            alerts.push({
+                id: `doc_${doc.id}`,
+                severity: days <= 7 ? 1 : 2,
+                title: `${doc.name || "Document"} expires in ${days} day${days === 1 ? "" : "s"}`,
+                subtitle: nameById[doc.locationId] || "Location",
+                sortKey: 21,
+            });
+        });
+
+        const weekStart = (() => {
+            const d = new Date(now);
+            const day = d.getDay();
+            const diff = day === 0 ? 6 : day - 1;
+            d.setDate(d.getDate() - diff);
+            return startOfDay(d);
+        })();
+
+        employees.forEach((emp) => {
+            if (!emp.weeklySchedule) return;
+            let workingDays = 0;
+            for (let i = 0; i < 7; i++) {
+                const day = addDays(weekStart, i);
+                if (employeeWorksOn(emp, day)) workingDays += 1;
+            }
+            if (workingDays === 0) {
+                alerts.push({
+                    id: `schedgap_${emp.id}`,
+                    severity: 2,
+                    title: `${emp.name || "Employee"} has no shifts this week`,
+                    subtitle: "",
+                    sortKey: 30,
+                });
+            }
+        });
+
+        const byLoc = {};
+        tasks.forEach((task) => {
+            if (!task.locationId) return;
+            const comps = task.employeeCompletions || {};
+            const hasDisapproved = Object.values(comps).some((c) => c.isApproved === false);
+            if (hasDisapproved) byLoc[task.locationId] = (byLoc[task.locationId] || 0) + 1;
+        });
+        Object.entries(byLoc).forEach(([locId, count]) => {
+            alerts.push({
+                id: `disapp_${locId}`,
+                severity: 1,
+                title: `${count} task${count === 1 ? "" : "s"} need rework`,
+                subtitle: nameById[locId] || "Location",
+                sortKey: 12,
+            });
+        });
+
+        return alerts;
+    }
+
+    async function loadOverview(userId, locations, employees, tasks, profile) {
+        const now = new Date();
+        const allEmployeesDict = {};
+        employees.forEach((e) => {
+            allEmployeesDict[e.id] = e;
+        });
+
+        const nameLookup = {};
+        employees.forEach((e) => {
+            nameLookup[e.id] = e.name || e.username || "Employee";
+        });
+
+        let alerts = [];
+        let weeklyPulse = { receivablesDue: 0, receivablesCount: 0, payablesDue: 0, payablesCount: 0 };
+        const lotteryToday = [];
+        const locationStats = [];
+        const todaySnapshot = {
+            revenue: 0,
+            revenueLastWeekSameDay: 0,
+            clockedInCount: 0,
+            scheduledTodayCount: 0,
+            clockedInLocationNames: new Set(),
+            tasksCompleted: 0,
+            tasksTotal: 0,
+        };
+
+        const allDocs = [];
+        const bundles = await Promise.all(
+            locations.map(async (loc) => {
+                const bundle = await fetchLocationBundle(userId, loc.id);
+                bundle.documents.forEach((d) => allDocs.push({ ...d, locationId: loc.id }));
+                bundle.locationEmployees.forEach((e) => {
+                    if (!allEmployeesDict[e.id]) allEmployeesDict[e.id] = e;
+                    nameLookup[e.id] = e.name || e.username || "Employee";
+                });
+                return { location: loc, bundle };
+            })
+        );
+
+        bundles.forEach(({ location, bundle }) => {
+            alerts = alerts.concat(buildAlertsForLocation(location, bundle, nameLookup));
+
+            const pulse = computeWeeklyPulse(location, bundle.payables, bundle.receivables);
+            weeklyPulse.receivablesDue += pulse.receivablesDue;
+            weeklyPulse.receivablesCount += pulse.receivablesCount;
+            weeklyPulse.payablesDue += pulse.payablesDue;
+            weeklyPulse.payablesCount += pulse.payablesCount;
+
+            lotteryToday.push(computeLotteryToday(location, bundle.lotteryForms));
+
+            const { stats, snapshotPart } = computeLocationStats(
+                location,
+                bundle,
+                allEmployeesDict,
+                now
+            );
+            locationStats.push(stats);
+            todaySnapshot.revenue += snapshotPart.revenue;
+            todaySnapshot.revenueLastWeekSameDay += snapshotPart.revenueLastWeek;
+            todaySnapshot.clockedInCount += snapshotPart.clockedIn;
+            if (snapshotPart.clockedIn > 0) todaySnapshot.clockedInLocationNames.add(location.name);
+        });
+
+        alerts = alerts.concat(buildGlobalAlerts(employees, tasks, locations, allDocs));
+        alerts.sort((a, b) => {
+            if (a.severity !== b.severity) return a.severity - b.severity;
+            return a.sortKey - b.sortKey;
+        });
+
+        lotteryToday.sort((a, b) => {
+            if (a.hadOverShortData !== b.hadOverShortData) return a.hadOverShortData ? -1 : 1;
+            if (a.hadOverShortData) {
+                const diff = Math.abs(b.overShort) - Math.abs(a.overShort);
+                if (diff !== 0) return diff;
+            }
+            return a.name.localeCompare(b.name);
+        });
+
+        employees.forEach((e) => {
+            if (employeeWorksOn(e, now)) todaySnapshot.scheduledTodayCount += 1;
+        });
+
+        tasks.forEach((task) => {
+            if (!task.locationId) return;
+            todaySnapshot.tasksTotal += 1;
+            if (taskHasCompletion(task, now)) todaySnapshot.tasksCompleted += 1;
+        });
+
+        const acknowledged = getAcknowledgedSet(userId);
+        alerts = alerts.filter((a) => !acknowledged.has(a.id));
+
+        weeklyPulse.net = weeklyPulse.receivablesDue - weeklyPulse.payablesDue;
+
+        return {
+            profile,
+            locations,
+            employees,
+            tasks,
+            alerts,
+            weeklyPulse,
+            lotteryToday,
+            locationStats,
+            todaySnapshot: {
+                ...todaySnapshot,
+                clockedInLocationNames: [...todaySnapshot.clockedInLocationNames].sort(),
+            },
+        };
+    }
+
+    function severityClass(severity) {
+        if (severity === 0) return "home-severity--critical";
+        if (severity === 1) return "home-severity--warning";
+        return "home-severity--info";
+    }
+
+    function renderGreeting(data) {
+        const hour = new Date().getHours();
+        const greeting = greetingForHour(hour);
+        const org = data.profile.organizationName;
+        const title = org ? `${greeting}, ${org}` : greeting;
+        const dateStr = new Date()
+            .toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })
+            .replace(",", " ·");
+        return `
+            <header class="home-greeting">
+                <h1 class="home-greeting-title">${escapeHtml(title)}</h1>
+                <p class="home-greeting-date">${escapeHtml(dateStr)}</p>
+            </header>`;
+    }
+
+    function renderNeedsAttention(alerts, userId, onAck) {
+        const header = `
+            <div class="home-card-header">
+                <span class="home-card-header-icon">⚠️</span>
+                <h2>Needs Attention</h2>
+                ${alerts.length ? `<span class="home-badge">${alerts.length}</span>` : ""}
+            </div>`;
+        let body;
+        if (!alerts.length) {
+            body = `
+                <div class="home-empty-row">
+                    <span class="home-empty-icon">✓</span>
+                    <div>
+                        <p class="home-empty-title">All caught up</p>
+                        <p class="home-empty-sub">Nothing needs you right now</p>
+                    </div>
+                </div>`;
+        } else {
+            const limit = 5;
+            const visible = alerts.slice(0, limit);
+            body = `
+                <ul class="home-alert-list" id="home-alert-list">
+                    ${visible
+                        .map(
+                            (a) => `
+                        <li class="home-alert-item">
+                            <button type="button" class="home-alert-main" data-goto="facilities">
+                                <span class="home-severity-dot ${severityClass(a.severity)}"></span>
+                                <span class="home-alert-text">
+                                    <span class="home-alert-title">${escapeHtml(a.title)}</span>
+                                    ${a.subtitle ? `<span class="home-alert-sub">${escapeHtml(a.subtitle)}</span>` : ""}
+                                </span>
+                            </button>
+                            <button type="button" class="home-alert-ack" data-alert-id="${escapeHtml(a.id)}" title="Acknowledge">✓</button>
+                        </li>`
+                        )
+                        .join("")}
+                </ul>
+                ${
+                    alerts.length > limit
+                        ? `<p class="home-more-note">${alerts.length - limit} more alert${alerts.length - limit === 1 ? "" : "s"} — open the iOS app for full list</p>`
+                        : ""
+                }`;
+        }
+        return `<div class="home-cc-block home-card">${header}${body}</div>`;
+    }
+
+    function renderToday(snapshot) {
+        let trend = "";
+        if (snapshot.revenueLastWeekSameDay > 0) {
+            const pct =
+                ((snapshot.revenue - snapshot.revenueLastWeekSameDay) / snapshot.revenueLastWeekSameDay) * 100;
+            const isFlat = Math.abs(pct) < 0.5;
+            const isUp = pct >= 0;
+            const weekday = new Date().toLocaleDateString("en-US", { weekday: "short" });
+            trend = `<span class="home-trend ${isFlat ? "home-trend--flat" : isUp ? "home-trend--up" : "home-trend--down"}">
+                ${isFlat ? "—" : isUp ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs last ${weekday}
+            </span>`;
+        }
+        const denom = Math.max(snapshot.scheduledTodayCount, snapshot.clockedInCount);
+        const clockPct = denom > 0 ? snapshot.clockedInCount / denom : 0;
+        const taskPct = snapshot.tasksTotal > 0 ? snapshot.tasksCompleted / snapshot.tasksTotal : 0;
+        let clockSub = "";
+        const names = snapshot.clockedInLocationNames;
+        if (!names.length) {
+            clockSub = snapshot.scheduledTodayCount > 0 ? "No one is on shift" : "";
+        } else if (names.length <= 2) {
+            clockSub = names.join(", ");
+        } else {
+            clockSub = `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
+        }
+        const taskSub =
+            snapshot.tasksTotal > 0 ? `${Math.round(taskPct * 100)}% done` : "No tasks today";
+
+        return `
+            <div class="home-cc-block">
+                <h2 class="home-cc-heading">Today at a glance</h2>
+                <div class="home-card home-today-revenue">
+                    <p class="home-today-amount">${formatCurrency(snapshot.revenue)}</p>
+                    <p class="home-today-meta">Revenue today ${trend}</p>
+                </div>
+                <div class="home-tiles">
+                    <div class="home-card home-tile">
+                        <p class="home-tile-label">Clocked in</p>
+                        <p class="home-tile-value">${snapshot.clockedInCount} / ${denom}</p>
+                        <div class="home-progress"><div class="home-progress-fill home-progress-fill--blue" style="width:${Math.min(clockPct * 100, 100)}%"></div></div>
+                        ${clockSub ? `<p class="home-tile-sub">${escapeHtml(clockSub)}</p>` : ""}
+                    </div>
+                    <div class="home-card home-tile">
+                        <p class="home-tile-label">Tasks</p>
+                        <p class="home-tile-value">${snapshot.tasksCompleted} / ${snapshot.tasksTotal}</p>
+                        <div class="home-progress"><div class="home-progress-fill home-progress-fill--orange" style="width:${Math.min(taskPct * 100, 100)}%"></div></div>
+                        <p class="home-tile-sub">${escapeHtml(taskSub)}</p>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    function renderThisWeek(pulse) {
+        const netPrefix = pulse.net >= 0 ? "+" : "-";
+        const netFormatted = `${netPrefix}${formatCurrency(Math.abs(pulse.net))}`;
+        const netClass = pulse.net >= 0 ? "home-amount--pos" : "home-amount--neg";
+        return `
+            <div class="home-cc-block">
+                <h2 class="home-cc-heading">This week</h2>
+                <div class="home-card home-stack">
+                    ${pulseRow("Receivables due", pulse.receivablesCount, pulse.receivablesDue, "pos")}
+                    ${pulseRow("Payables due", pulse.payablesCount, pulse.payablesDue, "neg")}
+                    <div class="home-stack-row home-stack-row--net">
+                        <span class="home-stack-label"><strong>Net</strong></span>
+                        <span class="home-stack-amount ${netClass}">${netFormatted}</span>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    function pulseRow(label, count, amount, tone) {
+        const sub =
+            count > 0
+                ? `${count} item${count === 1 ? "" : "s"} · next 7 days`
+                : "Nothing due in the next 7 days";
+        const amtClass = count > 0 ? (tone === "pos" ? "home-amount--pos" : "home-amount--neg") : "";
+        return `
+            <div class="home-stack-row">
+                <div>
+                    <p class="home-stack-label">${escapeHtml(label)}</p>
+                    <p class="home-stack-sub">${escapeHtml(sub)}</p>
+                </div>
+                <span class="home-stack-amount ${amtClass}">${formatCurrency(amount)}</span>
+            </div>`;
+    }
+
+    function lotteryStatus(row) {
+        if (!row.hadOverShortData) return { text: "—", class: "home-pill--muted" };
+        if (Math.abs(row.overShort) < 0.005) return { text: "Even", class: "home-pill--even" };
+        if (row.overShort > 0) return { text: `+${formatCurrency(row.overShort, { maxFraction: 2 })}`, class: "home-pill--pos" };
+        return { text: `-${formatCurrency(Math.abs(row.overShort), { maxFraction: 2 })}`, class: "home-pill--neg" };
+    }
+
+    function renderLotteryTable(rows) {
+        const sorted = [...rows].sort((a, b) => {
+            if (a.formsCount !== b.formsCount) return b.formsCount - a.formsCount;
+            return a.name.localeCompare(b.name);
+        });
+
+        if (!sorted.length) {
+            return `
+                <div class="home-cc-block">
+                    <h2 class="home-cc-heading">Lottery today</h2>
+                    <div class="home-card home-cc-empty">No facilities to show</div>
+                </div>`;
+        }
+
+        const active = sorted.filter((r) => r.formsCount > 0);
+        if (!active.length) {
+            return `
+                <div class="home-cc-block">
+                    <h2 class="home-cc-heading">Lottery today</h2>
+                    <div class="home-card home-cc-empty">No lottery shifts closed yet today (${sorted.length} facilit${sorted.length === 1 ? "y" : "ies"})</div>
+                </div>`;
+        }
+
+        const tableRows = active
+            .map((row) => {
+                const pill = lotteryStatus(row);
+                const shifts =
+                    row.formsCount === 0
+                        ? "—"
+                        : `${row.formsCount} shift${row.formsCount === 1 ? "" : "s"}`;
+                return `
+                <tr>
+                    <td>${escapeHtml(row.name)}</td>
+                    <td>${shifts}</td>
+                    <td class="home-cc-num"><span class="home-pill ${pill.class}">${pill.text}</span></td>
+                </tr>`;
+            })
+            .join("");
+
+        return `
+            <div class="home-cc-block">
+                <h2 class="home-cc-heading">Lottery today</h2>
+                <div class="home-card home-cc-table-wrap">
+                    <table class="home-cc-table">
+                        <thead>
+                            <tr>
+                                <th>Facility</th>
+                                <th>Shifts</th>
+                                <th>Over / short</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+    }
+
+    function renderQuickActions() {
+        const items = [
+            { panel: "facilities", label: "Facilities" },
+            { panel: "payroll", label: "Payroll" },
+            { panel: "tasks", label: "Tasks" },
+            { panel: "employees", label: "Employees" },
+            { panel: "reports", label: "Reports" },
+        ];
+        return `
+            <div class="home-cc-actions">
+                <span class="home-cc-actions-label">Quick actions</span>
+                <div class="home-cc-actions-btns">
+                    ${items
+                        .map(
+                            (s) =>
+                                `<button type="button" class="home-cc-action-btn" data-panel="${s.panel}">${escapeHtml(s.label)}</button>`
+                        )
+                        .join("")}
+                </div>
+            </div>`;
+    }
+
+    function renderMonthToDateTable(stats) {
+        if (!stats.length) return "";
+        const rows = [...stats]
+            .map((s) => {
+                const total = s.monthToDateSales + s.monthToDateFuelDollars + s.monthToDateLotterySales;
+                return { ...s, total };
+            })
+            .sort((a, b) => b.total - a.total);
+
+        return `
+            <div class="home-cc-block home-cc-full">
+                <h2 class="home-cc-heading">Month to date</h2>
+                <div class="home-card home-cc-table-wrap">
+                    <table class="home-cc-table home-cc-table--mtd">
+                        <thead>
+                            <tr>
+                                <th>Facility</th>
+                                <th class="home-cc-num">Revenue</th>
+                                <th class="home-cc-num">Merchandise</th>
+                                <th class="home-cc-num">Fuel</th>
+                                <th class="home-cc-num">Lottery</th>
+                                <th class="home-cc-num">Payroll</th>
+                                <th class="home-cc-num">Expenses</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows
+                                .map(
+                                    (s) => `
+                            <tr>
+                                <td><strong>${escapeHtml(s.locationName)}</strong></td>
+                                <td class="home-cc-num">${formatCurrencyCompact(s.total)}</td>
+                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDateSales)}</td>
+                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDateFuelDollars)}</td>
+                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDateLotterySales)}</td>
+                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDatePayroll)}</td>
+                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDateExpenses)}</td>
+                            </tr>`
+                                )
+                                .join("")}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+    }
+
+    function renderCommandCenter(data, userId) {
+        return `
+            ${renderGreeting(data)}
+            <div class="home-command-center">
+                <aside class="home-cc-col home-cc-col--aside">
+                    ${renderNeedsAttention(data.alerts, userId)}
+                    ${renderThisWeek(data.weeklyPulse)}
+                </aside>
+                <div class="home-cc-col home-cc-col--main">
+                    ${renderToday(data.todaySnapshot)}
+                    ${renderLotteryTable(data.lotteryToday)}
+                </div>
+            </div>
+            ${renderMonthToDateTable(data.locationStats)}
+            ${renderQuickActions()}`;
+    }
+
+    function render(data, userId) {
+        const html = renderCommandCenter(data, userId);
+
+        const el = document.getElementById("home-overview");
+        el.innerHTML = html;
+        el.hidden = false;
+
+        el.querySelectorAll(".home-alert-ack").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                acknowledgeAlert(userId, btn.dataset.alertId);
+                await window.OplixHomeOverview.reload(
+                    userId,
+                    data.locations,
+                    data.employees,
+                    data.tasks,
+                    data.profile
+                );
+            });
+        });
+
+        el.querySelectorAll(".home-cc-action-btn[data-panel], .home-alert-main[data-goto]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const panel = btn.dataset.panel || btn.dataset.goto;
+                if (panel && typeof window.showDashboardPanel === "function") {
+                    window.showDashboardPanel(panel);
+                }
+            });
+        });
+    }
+
+    window.OplixHomeOverview = {
+        async loadAndRender(userId, locations, employees, tasks, profile) {
+            const loading = document.getElementById("home-loading");
+            const overview = document.getElementById("home-overview");
+            loading.hidden = false;
+            overview.hidden = true;
+            try {
+                const data = await loadOverview(userId, locations, employees, tasks, profile);
+                loading.hidden = true;
+                render(data, userId);
+                window._oplixHomeData = data;
+            } catch (err) {
+                loading.innerHTML = `<p class="app-error">${escapeHtml(err.message || "Failed to load home overview.")}</p>`;
+            }
+        },
+        async reload(userId, locations, employees, tasks, profile) {
+            const data = await loadOverview(userId, locations, employees, tasks, profile);
+            render(data, userId);
+            window._oplixHomeData = data;
+        },
+    };
+})();

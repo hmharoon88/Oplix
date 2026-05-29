@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>Oplix</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../css/site.css">
+    <link rel="stylesheet" href="../css/dashboard-web.css">
+</head>
+<body class="dashboard-body">
+    <header class="dashboard-topbar">
+        <a href="../index.html" class="logo"><span>Oplix</span></a>
+        <button type="button" id="sign-out" class="btn btn-nav btn-nav-outline">Sign out</button>
+    </header>
+
+    <div id="app-loading" class="app-loading">Loading…</div>
+
+    <div id="app-content" class="dashboard-layout" hidden>
+        <aside class="dashboard-sidebar" aria-label="Main navigation">
+            <nav class="sidebar-nav" id="sidebar-nav">
+                <button type="button" class="sidebar-btn active" data-panel="home">Home</button>
+                <button type="button" class="sidebar-btn" data-panel="facilities">Facilities</button>
+                <button type="button" class="sidebar-btn" data-panel="employees">Employees</button>
+                <button type="button" class="sidebar-btn" data-panel="vendors">Vendors</button>
+                <button type="button" class="sidebar-btn" data-panel="payroll">Payroll</button>
+                <button type="button" class="sidebar-btn" data-panel="tasks">Task Management</button>
+                <button type="button" class="sidebar-btn" data-panel="data-input">Data input</button>
+                <button type="button" class="sidebar-btn" data-panel="analytics">Books summary</button>
+                <button type="button" class="sidebar-btn" data-panel="reports">Reports</button>
+            </nav>
+        </aside>
+
+        <main class="dashboard-main">
+            <section class="dashboard-panel active dashboard-panel--home" id="panel-home" data-panel="home">
+                <div id="home-loading" class="home-loading">Loading your overview…</div>
+                <div id="home-overview" class="home-overview" hidden></div>
+            </section>
+
+            <section class="dashboard-panel dashboard-panel--facilities" id="panel-facilities" data-panel="facilities" hidden>
+                <div id="facilities-list-view">
+                    <div class="fac-list-toolbar">
+                        <h1 class="panel-title">Facilities</h1>
+                        <button type="button" class="btn" id="fac-add-btn">Add facility</button>
+                    </div>
+                    <div id="facilities-create" class="fac-create-panel" hidden></div>
+                    <div id="facilities-loading" class="facilities-loading">Loading facilities…</div>
+                    <div id="facilities-empty" class="facilities-empty" hidden>
+                        <p class="facilities-empty-title">No facilities yet</p>
+                        <p class="facilities-empty-sub">Add your first facility below or in the Oplix iOS app.</p>
+                    </div>
+                    <div id="facilities-list" class="facilities-list"></div>
+                </div>
+                <div id="location-detail-view" class="location-detail-view" hidden>
+                    <button type="button" id="location-detail-back" class="fac-detail-back" hidden>← Facilities</button>
+                    <button type="button" id="location-section-back" class="fac-detail-back" hidden>← Back</button>
+                    <div id="location-detail-loading" class="facilities-loading">Loading location…</div>
+                    <div id="location-detail-main" class="location-detail-main" hidden></div>
+                    <div id="location-section-panel" class="location-section-panel" hidden>
+                        <div id="location-section-content"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="dashboard-panel" id="panel-employees" data-panel="employees" hidden>
+                <h1 class="panel-title">Employees</h1>
+                <ul id="employees-list" class="data-list"></ul>
+            </section>
+
+            <section class="dashboard-panel" id="panel-vendors" data-panel="vendors" hidden>
+                <h1 class="panel-title">Vendors</h1>
+                <div class="panel-placeholder" id="vendors-content"></div>
+            </section>
+
+            <section class="dashboard-panel" id="panel-payroll" data-panel="payroll" hidden>
+                <h1 class="panel-title">Payroll</h1>
+                <div class="panel-placeholder" id="payroll-content"></div>
+            </section>
+
+            <section class="dashboard-panel" id="panel-tasks" data-panel="tasks" hidden>
+                <h1 class="panel-title">Task Management</h1>
+                <div class="panel-placeholder" id="tasks-content"></div>
+            </section>
+
+            <section class="dashboard-panel dashboard-panel--wide" id="panel-data-input" data-panel="data-input" hidden>
+                <h1 class="panel-title">Data input</h1>
+                <div id="data-input-root"></div>
+            </section>
+
+            <section class="dashboard-panel dashboard-panel--wide" id="panel-analytics" data-panel="analytics" hidden>
+                <h1 class="panel-title">Books summary</h1>
+                <p class="panel-lead books-intro">Compare months, facilities, or a single utility across sites.</p>
+                <div id="analytics-root"></div>
+            </section>
+
+            <section class="dashboard-panel" id="panel-reports" data-panel="reports" hidden>
+                <h1 class="panel-title">Reports</h1>
+                <div class="panel-placeholder" id="reports-content"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="../js/firebase-config.js"></script>
+    <script src="../js/firebase-config.override.js" onerror=""></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <script src="../js/firebase-init.js"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/task-progress.js"></script>
+    <script src="../js/location-alerts.js"></script>
+    <script src="../js/home-overview.js"></script>
+    <script src="../js/books-model.js"></script>
+    <script src="../js/location-directory-model.js"></script>
+    <script src="../js/location-directory-store.js"></script>
+    <script src="../js/facility-directory-ui.js"></script>
+    <script src="../js/compliance-model.js"></script>
+    <script src="../js/compliance-store.js"></script>
+    <script src="../js/compliance-ui.js"></script>
+    <script src="../js/location-store.js"></script>
+    <script src="../js/facilities.js"></script>
+    <script src="../js/books-store.js"></script>
+    <script src="../js/data-input.js"></script>
+    <script src="../js/analytics-books.js"></script>
+    <script src="../js/app-dashboard.js"></script>
+</body>
+</html>
