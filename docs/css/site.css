@@ -77,6 +77,32 @@ a {
     line-height: 1.15;
 }
 
+/* Name left, tagline right — split header row */
+.brand-header {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    gap: 20px;
+}
+
+.brand-header .logo {
+    flex-shrink: 0;
+}
+
+.brand-header .logo-mark {
+    border-right: none;
+    padding-right: 0;
+    margin-right: 0;
+}
+
+.brand-header .logo-tagline {
+    margin-left: auto;
+    text-align: right;
+    padding-left: 20px;
+    border-left: 1px solid rgba(26, 107, 181, 0.22);
+}
+
 .logo-mark {
     flex-shrink: 0;
     font-size: 1.5rem;
@@ -120,6 +146,10 @@ a {
 }
 
 @media (max-width: 640px) {
+    .brand-header .logo-tagline {
+        display: none;
+    }
+
     .logo-tagline {
         display: none;
     }
