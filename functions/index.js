@@ -17,6 +17,10 @@ exports.onTaskReviewed = onTaskReviewed;
 exports.onEmployeeProfileChanged = onEmployeeProfileChanged;
 exports.onRoleChanged = onRoleChanged;
 
+// Callable functions invoked directly from the iOS client.
+const {sendAnnouncement} = require('./announcements/sendAnnouncement');
+exports.sendAnnouncement = sendAnnouncement;
+
 /**
  * Cloud Function to delete Firebase Auth user when User document is deleted
  * This is triggered when a User document is deleted from Firestore

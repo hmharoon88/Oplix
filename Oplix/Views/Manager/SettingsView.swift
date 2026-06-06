@@ -95,12 +95,47 @@ struct SettingsView: View {
                         }
                         
                         Section("Preferences") {
+                            if let userId = authViewModel.currentUser?.id,
+                               authViewModel.currentUser?.role == .manager {
+                                NavigationLink {
+                                    ReportsHubView(
+                                        userId: userId,
+                                        organizationName: authViewModel.currentUser?.organizationName
+                                    )
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "doc.text.magnifyingglass")
+                                        Text("Reports")
+                                    }
+                                }
+                            }
                             NavigationLink {
                                 NotificationSettingsView()
                             } label: {
                                 HStack {
                                     Image(systemName: "bell.badge")
                                     Text("Notifications")
+                                }
+                            }
+                            // Lazy-init the store so we don't allocate one
+                            // unless the user actually navigates here. Keyed
+                            // by userId — falls back to a stable "guest" key
+                            // if for some reason the user isn't loaded yet
+                            // (defensive; in practice this view is gated).
+                            if let userId = authViewModel.currentUser?.id {
+                                NavigationLink {
+                                    // Same shared instance the manager Home
+                                    // observes — guarantees toggles here
+                                    // filter the Action Center on Home
+                                    // immediately (no relaunch needed).
+                                    HomeCustomizationView(
+                                        store: HomeLayoutStore.shared(userId: userId)
+                                    )
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "rectangle.3.group")
+                                        Text("Home Layout")
+                                    }
                                 }
                             }
                         }

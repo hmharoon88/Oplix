@@ -151,125 +151,18 @@ struct EditManagerEmployeeView: View {
                 .ignoresSafeArea()
             
             Form {
-                    // Conflict Warning Section
-                    if hasScheduleConflicts {
-                        Section {
-                            HStack {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundColor(.orange)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Schedule Conflicts Detected")
-                                        .font(.headline)
-                                        .foregroundColor(.orange)
-                                    Text("Please resolve overlapping schedules before saving.")
-                                        .font(.caption)
-                                        .foregroundColor(.black)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                    
-                    Section("Employee Details") {
-                        TextField("Employee Name", text: $name)
-                            .textInputAutocapitalization(.words)
-                        HStack(spacing: 8) {
-                            Group {
-                                if showPlaintextPassword {
-                                    TextField("Password", text: $password)
-                                        .textContentType(.password)
-                                        .autocorrectionDisabled()
-                                        .textInputAutocapitalization(.never)
-                                } else {
-                                    SecureField("Password", text: $password)
-                                }
-                            }
-                            Button {
-                                showPlaintextPassword.toggle()
-                            } label: {
-                                Image(systemName: showPlaintextPassword ? "eye.slash.fill" : "eye.fill")
-                                    .foregroundColor(.secondary)
-                                    .accessibilityLabel(showPlaintextPassword ? "Hide password" : "Show password")
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    
-                    Section("Assign to Locations") {
-                        if viewModel.locations.isEmpty {
-                            Text("No locations available")
-                                .font(.caption)
-                                .foregroundColor(Theme.darkGray)
-                        } else {
-                            // Show selected locations first with their schedules
-                            ForEach(Array(selectedLocationIds).sorted(), id: \.self) { locationId in
-                                if let location = viewModel.locations.first(where: { $0.id == locationId }) {
-                                    locationScheduleRow(for: location)
-                                }
-                            }
-                            
-                            // Show unselected locations below
-                            ForEach(viewModel.locations.filter { !selectedLocationIds.contains($0.id) }) { location in
-                                Toggle(location.name, isOn: Binding(
-                                    get: { selectedLocationIds.contains(location.id) },
-                                    set: { isOn in
-                                        if isOn {
-                                            selectedLocationIds.insert(location.id)
-                                            // Initialize schedule for this location
-                                            if locationSchedules[location.id] == nil {
-                                                locationSchedules[location.id] = employee.weeklySchedule ?? WeeklySchedule()
-                                                locationUseWeeklySchedule[location.id] = employee.weeklySchedule != nil
-                                                locationHasWorkingHours[location.id] = employee.workingHoursStart != nil && employee.workingHoursEnd != nil
-                                                if let startTime = employee.workingHoursStart, let endTime = employee.workingHoursEnd {
-                                                    locationWorkingHoursStart[location.id] = parseTimeString(startTime)
-                                                    locationWorkingHoursEnd[location.id] = parseTimeString(endTime)
-                                                }
-                                            }
-                                            // Check for conflicts with other locations
-                                            checkConflicts(for: location.id)
-                                        } else {
-                                            selectedLocationIds.remove(location.id)
-                                            locationSchedules.removeValue(forKey: location.id)
-                                            locationUseWeeklySchedule.removeValue(forKey: location.id)
-                                            locationHasWorkingHours.removeValue(forKey: location.id)
-                                            locationWorkingHoursStart.removeValue(forKey: location.id)
-                                            locationWorkingHoursEnd.removeValue(forKey: location.id)
-                                            scheduleConflicts.removeValue(forKey: location.id)
-                                            // Recheck conflicts for remaining locations
-                                            for remainingLocationId in selectedLocationIds {
-                                                checkConflicts(for: remainingLocationId)
-                                            }
-                                        }
-                                    }
-                                ))
-                            }
-                        }
-                    }
-                    
-                    Section("Schedule Settings") {
-                        Toggle("24/7", isOn: $is24Hours)
-                            .onChange(of: is24Hours) { _, newValue in
-                                // When 24/7 is enabled, disable weekly schedule for all locations
-                                if newValue {
-                                    for locationId in selectedLocationIds {
-                                        locationUseWeeklySchedule[locationId] = false
-                                    }
-                                }
-                            }
-                    }
-                    
-                    Section("Compensation") {
-                        TextField("Hourly Rate (e.g., 25.50)", text: $hourlyRate)
-                            .keyboardType(.decimalPad)
-                    }
-                    
-                    roleSection
-                    permissionsSection
-                    if isSupervisor {
-                        supervisorPermissionsSection
-                    }
-                    loginCredentialsSection
+                scheduleConflictBannerSection
+                employeeDetailsSection
+                assignToLocationsSection
+                scheduleSettingsSection
+                compensationSection
+                roleSection
+                permissionsSection
+                if isSupervisor {
+                    supervisorPermissionsSection
                 }
+                loginCredentialsSection
+            }
         }
         .sheet(isPresented: $showingChangePassword) {
             ChangePasswordView(
@@ -425,6 +318,128 @@ struct EditManagerEmployeeView: View {
     // single expression. With every section inline, body got past the
     // "unable to type-check this expression in reasonable time" cliff.
 
+    /// Selected locations in stable id order, resolved up front so `ForEach`
+    /// does not nest `if let` + `locationScheduleRow` in one huge builder.
+    private var selectedLocationsForEditor: [Location] {
+        Array(selectedLocationIds)
+            .sorted()
+            .compactMap { id in viewModel.locations.first { $0.id == id } }
+    }
+
+    private var unselectedLocationsForEditor: [Location] {
+        viewModel.locations.filter { !selectedLocationIds.contains($0.id) }
+    }
+
+    @ViewBuilder
+    private var scheduleConflictBannerSection: some View {
+        if hasScheduleConflicts {
+            Section {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Schedule Conflicts Detected")
+                            .font(.headline)
+                            .foregroundColor(.orange)
+                        Text("Fix overlapping shift times between locations before saving.")
+                            .font(.caption)
+                            .foregroundColor(.black)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var employeeDetailsSection: some View {
+        Section("Employee Details") {
+            TextField("Employee Name", text: $name)
+                .textInputAutocapitalization(.words)
+            HStack(spacing: 8) {
+                Group {
+                    if showPlaintextPassword {
+                        TextField("Password", text: $password)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    } else {
+                        SecureField("Password", text: $password)
+                    }
+                }
+                Button {
+                    showPlaintextPassword.toggle()
+                } label: {
+                    Image(systemName: showPlaintextPassword ? "eye.slash.fill" : "eye.fill")
+                        .foregroundColor(.secondary)
+                        .accessibilityLabel(showPlaintextPassword ? "Hide password" : "Show password")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var assignToLocationsSection: some View {
+        Section("Assign to Locations") {
+            if viewModel.locations.isEmpty {
+                Text("No locations available")
+                    .font(.caption)
+                    .foregroundColor(Theme.darkGray)
+            } else {
+                assignToLocationsSelectedRows
+                assignToLocationsUnselectedRows
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var assignToLocationsSelectedRows: some View {
+        ForEach(selectedLocationsForEditor) { location in
+            locationScheduleRow(for: location)
+        }
+    }
+
+    @ViewBuilder
+    private var assignToLocationsUnselectedRows: some View {
+        ForEach(unselectedLocationsForEditor) { location in
+            Toggle(location.name, isOn: locationSelectionBinding(for: location))
+        }
+    }
+
+    @ViewBuilder
+    private var scheduleSettingsSection: some View {
+        Section {
+            Toggle("24/7", isOn: $is24Hours)
+                .onChange(of: is24Hours) { _, newValue in
+                    if newValue {
+                        scheduleConflicts.removeAll()
+                        for locationId in selectedLocationIds {
+                            locationUseWeeklySchedule[locationId] = false
+                        }
+                    } else {
+                        for locationId in selectedLocationIds {
+                            checkConflicts(for: locationId)
+                        }
+                    }
+                }
+        } header: {
+            Text("Schedule Settings")
+        } footer: {
+            if is24Hours {
+                Text("24/7 shift time allows this employee at multiple locations without overlap warnings.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var compensationSection: some View {
+        Section("Compensation") {
+            TextField("Hourly Rate (e.g., 25.50)", text: $hourlyRate)
+                .keyboardType(.decimalPad)
+        }
+    }
+
     @ViewBuilder
     private var roleSection: some View {
         Section {
@@ -433,6 +448,7 @@ struct EditManagerEmployeeView: View {
                 Text("Supervisor").tag(User.UserRole.supervisor)
             }
             .pickerStyle(.segmented)
+            .oplixSegmentedPickerTint()
         } header: {
             Text("Role")
         } footer: {
@@ -572,6 +588,42 @@ struct EditManagerEmployeeView: View {
         }
         return Calendar.current.date(from: dateComponents) ?? Date()
     }
+
+    /// Selection + schedule side effects for a location toggle. Pulled out of
+    /// the view tree so SwiftUI's type checker is not asked to infer a huge
+    /// nested `Binding` inside `ForEach` / `locationScheduleRow`.
+    private func locationSelectionBinding(for location: Location) -> Binding<Bool> {
+        Binding(
+            get: { selectedLocationIds.contains(location.id) },
+            set: { isOn in
+                if isOn {
+                    selectedLocationIds.insert(location.id)
+                    if locationSchedules[location.id] == nil {
+                        locationSchedules[location.id] = employee.weeklySchedule ?? WeeklySchedule()
+                        locationUseWeeklySchedule[location.id] = employee.weeklySchedule != nil
+                        locationHasWorkingHours[location.id] =
+                            employee.workingHoursStart != nil && employee.workingHoursEnd != nil
+                        if let startTime = employee.workingHoursStart, let endTime = employee.workingHoursEnd {
+                            locationWorkingHoursStart[location.id] = parseTimeString(startTime)
+                            locationWorkingHoursEnd[location.id] = parseTimeString(endTime)
+                        }
+                    }
+                    checkConflicts(for: location.id)
+                } else {
+                    selectedLocationIds.remove(location.id)
+                    locationSchedules.removeValue(forKey: location.id)
+                    locationUseWeeklySchedule.removeValue(forKey: location.id)
+                    locationHasWorkingHours.removeValue(forKey: location.id)
+                    locationWorkingHoursStart.removeValue(forKey: location.id)
+                    locationWorkingHoursEnd.removeValue(forKey: location.id)
+                    scheduleConflicts.removeValue(forKey: location.id)
+                    for remainingLocationId in selectedLocationIds {
+                        checkConflicts(for: remainingLocationId)
+                    }
+                }
+            }
+        )
+    }
     
     private func updateEmployee() async {
         do {
@@ -694,36 +746,7 @@ struct EditManagerEmployeeView: View {
     private func locationScheduleRow(for location: Location) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // Location Toggle
-            Toggle(location.name, isOn: Binding(
-                get: { selectedLocationIds.contains(location.id) },
-                set: { isOn in
-                    if isOn {
-                        selectedLocationIds.insert(location.id)
-                        if locationSchedules[location.id] == nil {
-                            locationSchedules[location.id] = employee.weeklySchedule ?? WeeklySchedule()
-                            locationUseWeeklySchedule[location.id] = employee.weeklySchedule != nil
-                            locationHasWorkingHours[location.id] = employee.workingHoursStart != nil && employee.workingHoursEnd != nil
-                            if let startTime = employee.workingHoursStart, let endTime = employee.workingHoursEnd {
-                                locationWorkingHoursStart[location.id] = parseTimeString(startTime)
-                                locationWorkingHoursEnd[location.id] = parseTimeString(endTime)
-                            }
-                        }
-                        checkConflicts(for: location.id)
-                    } else {
-                        selectedLocationIds.remove(location.id)
-                        locationSchedules.removeValue(forKey: location.id)
-                        locationUseWeeklySchedule.removeValue(forKey: location.id)
-                        locationHasWorkingHours.removeValue(forKey: location.id)
-                        locationWorkingHoursStart.removeValue(forKey: location.id)
-                        locationWorkingHoursEnd.removeValue(forKey: location.id)
-                        scheduleConflicts.removeValue(forKey: location.id)
-                        // Recheck conflicts for remaining locations
-                        for remainingLocationId in selectedLocationIds {
-                            checkConflicts(for: remainingLocationId)
-                        }
-                    }
-                }
-            ))
+            Toggle(location.name, isOn: locationSelectionBinding(for: location))
             
             // Schedule Editor (shown when location is selected)
             VStack(alignment: .leading, spacing: 12) {
@@ -739,7 +762,9 @@ struct EditManagerEmployeeView: View {
                     Spacer()
                     
                     // Show conflict warning
-                    if let locationConflicts = scheduleConflicts[location.id], !locationConflicts.isEmpty {
+                    if !is24Hours,
+                       let locationConflicts = scheduleConflicts[location.id],
+                       !locationConflicts.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(.orange)
@@ -848,10 +873,15 @@ struct EditManagerEmployeeView: View {
     }
     
     private var hasScheduleConflicts: Bool {
-        !scheduleConflicts.isEmpty
+        !is24Hours && !scheduleConflicts.isEmpty
     }
     
     private func checkConflicts(for locationId: String) {
+        if is24Hours {
+            scheduleConflicts.removeValue(forKey: locationId)
+            return
+        }
+
         var conflicts: [String] = []
         
         guard viewModel.locations.first(where: { $0.id == locationId }) != nil else { return }

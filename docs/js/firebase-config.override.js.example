@@ -1,0 +1,4 @@
+// Optional: copy to firebase-config.override.js to patch config without re-running the sync script.
+// window.OPLIX_FIREBASE_CONFIG_OVERRIDE = {
+//     appId: "1:102947106270:web:YOUR_WEB_APP_ID"
+// };

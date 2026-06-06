@@ -58,6 +58,9 @@ struct WorkTask: Identifiable, Codable {
     // (pre-this-field) decodes cleanly — nil falls back to "task has been
     // around forever", same behaviour as before this field shipped.
     var createdAt: Date?
+    /// Prior submissions kept when an employee completes again (e.g. a new
+    /// daily cycle). Powers the date-grouped History tab on Task Check.
+    var completionHistory: [TaskCompletion]
 
     // Custom decoding to handle missing fields
     enum CodingKeys: String, CodingKey {
@@ -70,6 +73,7 @@ struct WorkTask: Identifiable, Codable {
         case frequency
         case crossLocationGroupId
         case createdAt
+        case completionHistory
     }
     
     init(from decoder: Decoder) throws {
@@ -84,6 +88,7 @@ struct WorkTask: Identifiable, Codable {
         frequency = try container.decodeIfPresent(TaskFrequency.self, forKey: .frequency) ?? .oneTime
         crossLocationGroupId = try container.decodeIfPresent(String.self, forKey: .crossLocationGroupId)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        completionHistory = try container.decodeIfPresent([TaskCompletion].self, forKey: .completionHistory) ?? []
     }
     
     func encode(to encoder: Encoder) throws {
@@ -97,6 +102,7 @@ struct WorkTask: Identifiable, Codable {
         try container.encode(frequency, forKey: .frequency)
         try container.encodeIfPresent(crossLocationGroupId, forKey: .crossLocationGroupId)
         try container.encodeIfPresent(createdAt, forKey: .createdAt)
+        try container.encode(completionHistory, forKey: .completionHistory)
     }
     
     init(
@@ -108,7 +114,8 @@ struct WorkTask: Identifiable, Codable {
         employeeCompletions: [String: TaskCompletion] = [:],
         frequency: TaskFrequency = .oneTime,
         crossLocationGroupId: String? = nil,
-        createdAt: Date? = Date()
+        createdAt: Date? = Date(),
+        completionHistory: [TaskCompletion] = []
     ) {
         self.id = id
         self.description = description
@@ -119,6 +126,7 @@ struct WorkTask: Identifiable, Codable {
         self.frequency = frequency
         self.crossLocationGroupId = crossLocationGroupId
         self.createdAt = createdAt
+        self.completionHistory = completionHistory
     }
     
     // Legacy support - for backward compatibility with old Firestore data
@@ -212,5 +220,504 @@ struct WorkTask: Identifiable, Codable {
     
     func isAssignedTo(employeeId: String) -> Bool {
         return assignedEmployeeIds.contains(employeeId)
+    }
+
+    // MARK: - Completion history
+
+    /// Stores a new completion and archives the employee's previous
+    /// submission (if any) so Task Check History can show past cycles.
+    mutating func setEmployeeCompletion(_ completion: TaskCompletion) {
+        let employeeId = completion.employeeId
+        if let previous = employeeCompletions[employeeId] {
+            appendToCompletionHistory(previous)
+        }
+        employeeCompletions[employeeId] = completion
+    }
+
+    private mutating func appendToCompletionHistory(_ completion: TaskCompletion) {
+        let alreadyStored = completionHistory.contains { stored in
+            stored.employeeId == completion.employeeId
+                && abs(stored.timestamp.timeIntervalSince(completion.timestamp)) < 1
+        }
+        if !alreadyStored {
+            completionHistory.append(completion)
+        }
+    }
+
+    /// Updates approval on the active completion or a matching history row.
+    mutating func applyReview(
+        employeeId: String,
+        completionTimestamp: Date?,
+        approved: Bool,
+        note: String?,
+        reviewerId: String
+    ) -> Bool {
+        func stamp(_ completion: inout TaskCompletion) {
+            completion.isApproved = approved
+            completion.reviewedBy = reviewerId
+            completion.reviewedAt = Date()
+            completion.disapprovalNote = approved ? nil : note
+        }
+
+        if let timestamp = completionTimestamp {
+            if let current = employeeCompletions[employeeId],
+               abs(current.timestamp.timeIntervalSince(timestamp)) < 1 {
+                var updated = current
+                stamp(&updated)
+                employeeCompletions[employeeId] = updated
+                return true
+            }
+            if let index = completionHistory.firstIndex(where: {
+                $0.employeeId == employeeId
+                    && abs($0.timestamp.timeIntervalSince(timestamp)) < 1
+            }) {
+                var updated = completionHistory[index]
+                stamp(&updated)
+                completionHistory[index] = updated
+                return true
+            }
+            return false
+        }
+
+        guard var completion = employeeCompletions[employeeId] else { return false }
+        stamp(&completion)
+        employeeCompletions[employeeId] = completion
+        return true
+    }
+
+    /// Every stored completion for the History tab (archived cycles plus
+    /// current `employeeCompletions`, deduplicated by employee + time).
+    func allCompletionsForHistory() -> [TaskCompletion] {
+        var entries = completionHistory
+        entries.append(contentsOf: employeeCompletions.values)
+        return Self.deduplicatedCompletions(entries)
+            .sorted { $0.timestamp > $1.timestamp }
+    }
+
+    private static func deduplicatedCompletions(_ completions: [TaskCompletion]) -> [TaskCompletion] {
+        var seen = Set<String>()
+        var result: [TaskCompletion] = []
+        for completion in completions {
+            let key = "\(completion.employeeId)-\(Int(completion.timestamp.timeIntervalSince1970))"
+            if seen.insert(key).inserted {
+                result.append(completion)
+            }
+        }
+        return result
+    }
+}
+
+// MARK: - History list helpers (Task Check)
+
+struct TaskCompletionHistoryEntry: Identifiable {
+    let id: String
+    let task: WorkTask
+    let completion: TaskCompletion
+
+    init(task: WorkTask, completion: TaskCompletion) {
+        self.task = task
+        self.completion = completion
+        id = "\(task.id)-\(completion.employeeId)-\(Int(completion.timestamp.timeIntervalSince1970))"
+    }
+}
+
+// MARK: - Assignment audit (Task Check History)
+
+/// Per-day assigned / done / missed breakdown for managers and supervisors.
+enum TaskAssignmentAudit {
+    static let lookbackDays = 30
+
+    struct MissedSlot: Identifiable {
+        let id: String
+        let task: WorkTask
+        let employeeId: String
+    }
+
+    struct DaySection: Identifiable {
+        let id: Date
+        let date: Date
+        let assignedCount: Int
+        let doneCount: Int
+        let missedCount: Int
+        let doneEntries: [TaskCompletionHistoryEntry]
+        let missedSlots: [MissedSlot]
+
+        var hasContent: Bool {
+            assignedCount > 0 || !doneEntries.isEmpty
+        }
+    }
+
+    /// One recurring task the employee did not complete on a past calendar day.
+    struct EmployeeMissedRecurringItem: Identifiable {
+        let id: String
+        let date: Date
+        let task: WorkTask
+
+        init(date: Date, task: WorkTask, employeeId: String) {
+            self.date = date
+            self.task = task
+            self.id = "\(task.id)-\(employeeId)-\(Int(date.timeIntervalSince1970))"
+        }
+    }
+
+    /// Recurring assignments this employee missed on days before today (same rules as Task Check History).
+    static func missedRecurringItems(
+        for employeeId: String,
+        from tasks: [WorkTask],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [EmployeeMissedRecurringItem] {
+        let recurring = tasks.filter {
+            $0.frequency.isRecurring && $0.assignedEmployeeIds.contains(employeeId)
+        }
+        guard !recurring.isEmpty else { return [] }
+
+        let todayStart = calendar.startOfDay(for: now)
+        guard let rangeStart = calendar.date(byAdding: .day, value: -(lookbackDays - 1), to: todayStart) else {
+            return []
+        }
+
+        var items: [EmployeeMissedRecurringItem] = []
+        var cursor = rangeStart
+        while cursor < todayStart {
+            let dayStart = cursor
+            guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { break }
+
+            for task in recurring {
+                guard isExpected(
+                    task: task,
+                    employeeId: employeeId,
+                    dayStart: dayStart,
+                    dayEnd: dayEnd,
+                    todayStart: todayStart,
+                    calendar: calendar
+                ) else { continue }
+                guard isMissed(
+                    task: task,
+                    employeeId: employeeId,
+                    dayStart: dayStart,
+                    dayEnd: dayEnd,
+                    todayStart: todayStart,
+                    calendar: calendar
+                ) else { continue }
+                items.append(EmployeeMissedRecurringItem(date: dayStart, task: task, employeeId: employeeId))
+            }
+
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+
+        return items.sorted { lhs, rhs in
+            if lhs.date != rhs.date { return lhs.date > rhs.date }
+            return lhs.task.description.localizedCaseInsensitiveCompare(rhs.task.description) == .orderedAscending
+        }
+    }
+
+    static func sections(
+        from tasks: [WorkTask],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [DaySection] {
+        let assignedTasks = tasks.filter { !$0.assignedEmployeeIds.isEmpty }
+        guard !assignedTasks.isEmpty else { return [] }
+
+        let todayStart = calendar.startOfDay(for: now)
+        guard let rangeStart = calendar.date(byAdding: .day, value: -(lookbackDays - 1), to: todayStart) else {
+            return []
+        }
+
+        var dayStarts: [Date] = []
+        var cursor = rangeStart
+        while cursor <= todayStart {
+            dayStarts.append(cursor)
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+
+        return dayStarts.reversed().compactMap { dayStart in
+            buildSection(
+                dayStart: dayStart,
+                tasks: assignedTasks,
+                now: now,
+                todayStart: todayStart,
+                calendar: calendar
+            )
+        }
+        .filter(\.hasContent)
+    }
+
+    private static func buildSection(
+        dayStart: Date,
+        tasks: [WorkTask],
+        now: Date,
+        todayStart: Date,
+        calendar: Calendar
+    ) -> DaySection? {
+        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return nil }
+
+        var assignedCount = 0
+        var doneCount = 0
+        var missedCount = 0
+        var doneEntries: [TaskCompletionHistoryEntry] = []
+        var missedSlots: [MissedSlot] = []
+        var doneEntryKeys = Set<String>()
+
+        for task in tasks {
+            for employeeId in task.assignedEmployeeIds {
+                guard isExpected(
+                    task: task,
+                    employeeId: employeeId,
+                    dayStart: dayStart,
+                    dayEnd: dayEnd,
+                    todayStart: todayStart,
+                    calendar: calendar
+                ) else { continue }
+
+                assignedCount += 1
+
+                if let completion = qualifyingCompletion(
+                    task: task,
+                    employeeId: employeeId,
+                    dayStart: dayStart,
+                    dayEnd: dayEnd,
+                    todayStart: todayStart,
+                    calendar: calendar
+                ) {
+                    doneCount += 1
+                    let entry = TaskCompletionHistoryEntry(task: task, completion: completion)
+                    let key = entry.id
+                    if doneEntryKeys.insert(key).inserted {
+                        doneEntries.append(entry)
+                    }
+                } else if isMissed(
+                    task: task,
+                    employeeId: employeeId,
+                    dayStart: dayStart,
+                    dayEnd: dayEnd,
+                    todayStart: todayStart,
+                    calendar: calendar
+                ) {
+                    missedCount += 1
+                    missedSlots.append(
+                        MissedSlot(
+                            id: "\(task.id)-\(employeeId)-\(Int(dayStart.timeIntervalSince1970))",
+                            task: task,
+                            employeeId: employeeId
+                        )
+                    )
+                }
+            }
+
+            for completion in task.allCompletionsForHistory()
+                where task.assignedEmployeeIds.contains(completion.employeeId)
+                    && calendar.isDate(completion.timestamp, inSameDayAs: dayStart) {
+                let entry = TaskCompletionHistoryEntry(task: task, completion: completion)
+                if doneEntryKeys.insert(entry.id).inserted {
+                    doneEntries.append(entry)
+                    if completion.countsAsCompleted {
+                        doneCount += 1
+                    }
+                }
+            }
+        }
+
+        doneEntries.sort { $0.completion.timestamp > $1.completion.timestamp }
+        missedSlots.sort { $0.task.description.localizedCaseInsensitiveCompare($1.task.description) == .orderedAscending }
+
+        let section = DaySection(
+            id: dayStart,
+            date: dayStart,
+            assignedCount: assignedCount,
+            doneCount: doneCount,
+            missedCount: missedCount,
+            doneEntries: doneEntries,
+            missedSlots: missedSlots
+        )
+        return section.hasContent ? section : nil
+    }
+
+    private static func isExpected(
+        task: WorkTask,
+        employeeId: String,
+        dayStart: Date,
+        dayEnd: Date,
+        todayStart: Date,
+        calendar: Calendar
+    ) -> Bool {
+        guard taskExisted(task: task, onOrBefore: dayEnd, calendar: calendar) else { return false }
+
+        switch task.frequency {
+        case .daily:
+            return true
+        case .weekly:
+            return isLastDayOfWeek(dayStart, calendar: calendar)
+        case .monthly:
+            return isLastDayOfMonth(dayStart, calendar: calendar)
+        case .oneTime:
+            return !hasQualifyingCompletion(
+                task: task,
+                employeeId: employeeId,
+                before: dayEnd
+            )
+        }
+    }
+
+    private static func isMissed(
+        task: WorkTask,
+        employeeId: String,
+        dayStart: Date,
+        dayEnd: Date,
+        todayStart: Date,
+        calendar: Calendar
+    ) -> Bool {
+        switch task.frequency {
+        case .daily:
+            return !hasQualifyingCompletion(
+                task: task,
+                employeeId: employeeId,
+                onSameDayAs: dayStart,
+                calendar: calendar
+            )
+        case .weekly:
+            guard let interval = calendar.dateInterval(of: .weekOfYear, for: dayStart) else { return false }
+            return !hasQualifyingCompletion(
+                task: task,
+                employeeId: employeeId,
+                in: interval.start ..< interval.end
+            )
+        case .monthly:
+            guard let interval = calendar.dateInterval(of: .month, for: dayStart) else { return false }
+            return !hasQualifyingCompletion(
+                task: task,
+                employeeId: employeeId,
+                in: interval.start ..< interval.end
+            )
+        case .oneTime:
+            return !hasQualifyingCompletion(
+                task: task,
+                employeeId: employeeId,
+                onSameDayAs: dayStart,
+                calendar: calendar
+            )
+        }
+    }
+
+    private static func qualifyingCompletion(
+        task: WorkTask,
+        employeeId: String,
+        dayStart: Date,
+        dayEnd: Date,
+        todayStart: Date,
+        calendar: Calendar
+    ) -> TaskCompletion? {
+        switch task.frequency {
+        case .daily:
+            return firstQualifyingCompletion(
+                task: task,
+                employeeId: employeeId,
+                onSameDayAs: dayStart,
+                calendar: calendar
+            )
+        case .weekly:
+            guard let interval = calendar.dateInterval(of: .weekOfYear, for: dayStart) else { return nil }
+            return firstQualifyingCompletion(
+                task: task,
+                employeeId: employeeId,
+                in: interval.start ..< interval.end
+            )
+        case .monthly:
+            guard let interval = calendar.dateInterval(of: .month, for: dayStart) else { return nil }
+            return firstQualifyingCompletion(
+                task: task,
+                employeeId: employeeId,
+                in: interval.start ..< interval.end
+            )
+        case .oneTime:
+            return firstQualifyingCompletion(
+                task: task,
+                employeeId: employeeId,
+                onSameDayAs: dayStart,
+                calendar: calendar
+            )
+        }
+    }
+
+    private static func taskExisted(task: WorkTask, onOrBefore dayEnd: Date, calendar: Calendar) -> Bool {
+        guard let created = task.createdAt else { return true }
+        return calendar.startOfDay(for: created) < dayEnd
+    }
+
+    private static func isLastDayOfWeek(_ day: Date, calendar: Calendar) -> Bool {
+        guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { return false }
+        return !calendar.isDate(day, equalTo: next, toGranularity: .weekOfYear)
+    }
+
+    private static func isLastDayOfMonth(_ day: Date, calendar: Calendar) -> Bool {
+        guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { return false }
+        return !calendar.isDate(day, equalTo: next, toGranularity: .month)
+    }
+
+    private static func hasQualifyingCompletion(
+        task: WorkTask,
+        employeeId: String,
+        before dayEnd: Date
+    ) -> Bool {
+        task.allCompletionsForHistory().contains {
+            $0.employeeId == employeeId
+                && $0.countsAsCompleted
+                && $0.timestamp < dayEnd
+        }
+    }
+
+    private static func hasQualifyingCompletion(
+        task: WorkTask,
+        employeeId: String,
+        onSameDayAs dayStart: Date,
+        calendar: Calendar
+    ) -> Bool {
+        firstQualifyingCompletion(
+            task: task,
+            employeeId: employeeId,
+            onSameDayAs: dayStart,
+            calendar: calendar
+        ) != nil
+    }
+
+    private static func hasQualifyingCompletion(
+        task: WorkTask,
+        employeeId: String,
+        in range: Range<Date>
+    ) -> Bool {
+        firstQualifyingCompletion(task: task, employeeId: employeeId, in: range) != nil
+    }
+
+    private static func firstQualifyingCompletion(
+        task: WorkTask,
+        employeeId: String,
+        onSameDayAs dayStart: Date,
+        calendar: Calendar
+    ) -> TaskCompletion? {
+        task.allCompletionsForHistory()
+            .filter {
+                $0.employeeId == employeeId
+                    && $0.countsAsCompleted
+                    && calendar.isDate($0.timestamp, inSameDayAs: dayStart)
+            }
+            .max(by: { $0.timestamp < $1.timestamp })
+    }
+
+    private static func firstQualifyingCompletion(
+        task: WorkTask,
+        employeeId: String,
+        in range: Range<Date>
+    ) -> TaskCompletion? {
+        task.allCompletionsForHistory()
+            .filter {
+                $0.employeeId == employeeId
+                    && $0.countsAsCompleted
+                    && $0.timestamp >= range.lowerBound
+                    && $0.timestamp < range.upperBound
+            }
+            .max(by: { $0.timestamp < $1.timestamp })
     }
 }

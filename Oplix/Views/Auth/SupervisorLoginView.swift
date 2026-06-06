@@ -49,27 +49,27 @@ struct SupervisorLoginView: View {
                 
                 Spacer()
                 
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
                     Image(systemName: "person.badge.key.fill")
-                        .font(.system(size: 80))
+                        .font(.system(size: 56))
                         .foregroundColor(.white)
                     
                     Text("Supervisor Login")
-                        .font(.system(size: 36, weight: .bold))
+                        .font(.system(size: 28, weight: .bold))
                         .foregroundColor(.white)
                 }
                 
-                VStack(spacing: 20) {
+                VStack(spacing: 12) {
                     TextField("Username", text: $username)
-                        .textFieldStyle(.roundedBorder)
                         .autocapitalization(.none)
+                        .oplixCompactFormField()
                     
                     SecureField("Password", text: $password)
-                        .textFieldStyle(.roundedBorder)
+                        .oplixCompactFormField()
                     
                     Text("Login as: \(username.isEmpty ? "username" : username)@oplix.app")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.8))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     
                     Button(action: {
                         Task { @MainActor in
@@ -83,17 +83,19 @@ struct SupervisorLoginView: View {
                         }
                     }) {
                         Text("Sign In")
+                            .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .foregroundColor(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 11)
                             .background(Color.purple)
-                            .cornerRadius(12)
+                            .cornerRadius(11)
                             .shadow(color: Color.purple.opacity(0.3), radius: 4, x: 0, y: 2)
                     }
                     .disabled(authViewModel.isLoading || username.isEmpty)
                 }
-                .padding(.horizontal, 40)
+                .oplixCompactGlassCard(maxWidth: 380)
+                .frame(maxWidth: .infinity, alignment: .center)
                 
                 Spacer()
             }

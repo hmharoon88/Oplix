@@ -290,8 +290,7 @@ struct LastShiftSummarySheet: View {
                             HStack(spacing: 0) {
                                 binNumberCell(String(index + 1))
                                 readOnlyCell(formatValue(row.value))
-                                readOnlyCell(row.beginningNumber)
-                                // Get ending number from form data or template
+                                readOnlyCell(beginningNumberForHistory(for: row.id))
                                 readOnlyCell(getEndingNumber(for: row.id))
                             }
                             .background(index % 2 == 0 ? Theme.cloudWhite : Color.white)
@@ -337,54 +336,8 @@ struct LastShiftSummarySheet: View {
                                 ShiftSummaryRow(label: "Total Books", value: "\(summary.totalBooks)")
                             }
                             
-                            Divider()
-                            
-                            // Sales Summary
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Sales Summary")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.secondary)
-                                
-                                ShiftSummaryRow(label: "Instant Total", value: formatCurrency(summary.instantTotal))
-                                ShiftSummaryRow(label: "Online Total", value: formatCurrency(summary.onlineTotal))
-                                ShiftSummaryRow(label: "Total Sold Amount", value: formatCurrency(summary.totalSoldAmount))
-                            }
-                            
-                            Divider()
-                            
-                            // Cash Summary
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Cash Summary")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.secondary)
-                                
-                                ShiftSummaryRow(label: "Register Cash", value: formatCurrency(summary.registerCash))
-                                ShiftSummaryRow(label: "Total Cash", value: formatCurrency(summary.totalCash))
-                                ShiftSummaryRow(label: "Online Cashes", value: formatCurrency(summary.onlineCashes))
-                                ShiftSummaryRow(label: "Instant Cashes", value: formatCurrency(summary.instantCashes))
-                                ShiftSummaryRow(label: "Total Cashes", value: formatCurrency(summary.totalCashes))
-                                
-                                Divider()
-                                
-                                ShiftSummaryRow(label: "Remaining Cash", value: formatCurrency(summary.cashInBag), isHighlighted: true)
-                                ShiftSummaryRow(label: "Shift End Cash", value: formatCurrency(summary.cashInBagNet), isHighlighted: true, isNet: true)
-                                
-                                // Over/Short (if available)
-                                if let overShort = summary.overShort {
-                                    Divider()
-                                    ShiftSummaryRow(
-                                        label: "Over/Short",
-                                        value: formatCurrency(overShort),
-                                        isHighlighted: true
-                                    )
-                                }
-                            }
+                            LotteryCashFlowSummaryView(summary: summary)
                         }
-                        .padding()
-                        .background(Color(red: 0.95, green: 0.95, blue: 1.0))
-                        .cornerRadius(12)
                         .padding(.horizontal, 20)
                     }
                     
@@ -448,13 +401,19 @@ struct LastShiftSummarySheet: View {
         }
     }
     
+    private func beginningNumberForHistory(for rowId: String) -> String {
+        let key = "begin_\(rowId)"
+        if let b = lotteryForm.formData[key], !b.isEmpty {
+            return b
+        }
+        return template.rows.first { $0.id == rowId }?.beginningNumber ?? ""
+    }
+
     private func getEndingNumber(for rowId: String) -> String {
-        // Form data stores ending numbers with key "row_\(rowId)"
         let key = "row_\(rowId)"
-        if let endingNumber = lotteryForm.formData[key] {
+        if let endingNumber = lotteryForm.formData[key], !endingNumber.isEmpty {
             return endingNumber
         }
-        // Fall back to template if not in form data
         return template.rows.first { $0.id == rowId }?.endingNumber ?? ""
     }
     

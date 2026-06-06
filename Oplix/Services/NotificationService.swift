@@ -113,6 +113,11 @@ final class NotificationService: ObservableObject {
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .badge, .sound])
             await refreshAuthStatus()
+            if granted {
+                // After opt-in, explicitly re-register so APNs hands a token to
+                // FirebaseMessaging (especially important for production builds).
+                UIApplication.shared.registerForRemoteNotifications()
+            }
             return granted
         } catch {
             print("⚠️ requestAuthorization failed: \(error.localizedDescription)")

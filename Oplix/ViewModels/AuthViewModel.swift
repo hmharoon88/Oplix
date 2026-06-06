@@ -170,6 +170,25 @@ class AuthViewModel: ObservableObject {
         user.notificationPrefs = prefs
         currentUser = user
     }
+
+    /// Dismiss a Needs Attention alert from Home / Location screens.
+    func acknowledgeAlert(_ alertId: String) async {
+        guard var user = currentUser else { return }
+        guard !user.resolvedAcknowledgedAlertIds.contains(alertId) else { return }
+        do {
+            try await firebaseService.acknowledgeAlert(userId: user.id, alertId: alertId)
+            var ids = user.resolvedAcknowledgedAlertIds
+            ids.append(alertId)
+            user.acknowledgedAlertIds = ids
+            currentUser = user
+        } catch {
+            print("🔴 Failed to acknowledge alert: \(error.localizedDescription)")
+        }
+    }
+
+    var acknowledgedAlertIdSet: Set<String> {
+        Set(currentUser?.resolvedAcknowledgedAlertIds ?? [])
+    }
     
     func deleteAccount(password: String) async throws {
         guard let userId = currentUser?.id else {

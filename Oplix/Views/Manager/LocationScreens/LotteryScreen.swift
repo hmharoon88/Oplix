@@ -11,6 +11,7 @@ struct LotteryScreen: View {
     @ObservedObject var viewModel: LocationDetailViewModel
     @State private var showingCustomization = false
     @State private var showingGameDatabase = false
+    @State private var openedLotteryDateKeys: Set<String> = []
     
     var body: some View {
         ZStack {
@@ -114,7 +115,13 @@ struct LotteryScreen: View {
                             }
                             
                             ForEach(sortedDateKeys, id: \.self) { dateKey in
-                                CollapsibleDateSection(dateKey: dateKey, forms: groupedForms[dateKey] ?? [], viewModel: viewModel)
+                                CollapsibleDateSection(
+                                    dateKey: dateKey,
+                                    forms: groupedForms[dateKey] ?? [],
+                                    viewModel: viewModel,
+                                    isDateOpened: openedLotteryDateKeys.contains(dateKey),
+                                    onDateOpened: { markLotteryDateOpened(dateKey) }
+                                )
                             }
                             .padding(.horizontal)
                         }
@@ -131,11 +138,30 @@ struct LotteryScreen: View {
         .fullScreenCover(isPresented: $showingGameDatabase) {
             GameDatabaseView()
         }
-        .onAppear {
-            Task {
-                await viewModel.loadData()
-            }
+        .task {
+            await viewModel.loadData()
+            refreshOpenedLotteryDates()
         }
+        .onChange(of: viewModel.lotteryForms.count) { _, _ in
+            refreshOpenedLotteryDates()
+        }
+    }
+
+    private var lotteryPrefsLocationId: String {
+        viewModel.location?.id ?? viewModel.lotteryForms.first?.locationId ?? ""
+    }
+
+    private func refreshOpenedLotteryDates() {
+        let locId = lotteryPrefsLocationId
+        guard !locId.isEmpty else { return }
+        openedLotteryDateKeys = LotteryOpenedDatesStore.load(locationId: locId)
+    }
+
+    private func markLotteryDateOpened(_ dateKey: String) {
+        let locId = lotteryPrefsLocationId
+        guard !locId.isEmpty else { return }
+        guard openedLotteryDateKeys.insert(dateKey).inserted else { return }
+        LotteryOpenedDatesStore.save(openedLotteryDateKeys, locationId: locId)
     }
 }
 
@@ -147,6 +173,7 @@ struct PreviousLotteryShiftCard: View {
     @State private var template: LotteryFormTemplate?
     @State private var isLoadingTemplate = false
     @State private var showingFullScreenImage = false
+    @State private var isBinTableExpanded = false
 
     /// Whether this card belongs to a multi-terminal location. Used
     /// only to drive whether we render a "Terminal N" badge — for
@@ -193,173 +220,13 @@ struct PreviousLotteryShiftCard: View {
             }
             
             Divider()
-            
-            // Lottery Form Data Table
-            if let template = template, !template.rows.isEmpty {
-                VStack(spacing: 0) {
-                    // Header Row
-                    HStack(spacing: 0) {
-                        headerCell("Bin #")
-                        headerCell("Value")
-                        headerCell("Begin #")
-                        headerCell("End #")
-                    }
-                    .background(Theme.cloudBlue.opacity(0.2))
-                    
-                    // Data Rows
-                    ForEach(Array(template.rows.enumerated()), id: \.element.id) { index, row in
-                        HStack(spacing: 0) {
-                            binNumberCell(String(index + 1))
-                            readOnlyCell(formatValue(row.value))
-                            readOnlyCell(row.beginningNumber)
-                            // Get ending number from form data
-                            readOnlyCell(getEndingNumber(for: row.id))
-                        }
-                        .background(index % 2 == 0 ? Theme.cloudWhite : Color.white)
-                        .overlay(
-                            Rectangle()
-                                .frame(height: 1)
-                                .foregroundColor(.gray.opacity(0.5)),
-                            alignment: .bottom
-                        )
-                    }
-                }
-                .overlay(
-                    Rectangle()
-                        .frame(width: 1)
-                        .foregroundColor(.gray.opacity(0.5)),
-                    alignment: .leading
-                )
-                .overlay(
-                    Rectangle()
-                        .frame(width: 1)
-                        .foregroundColor(.gray.opacity(0.5)),
-                    alignment: .trailing
-                )
-                .cornerRadius(8)
-                .padding(.vertical, 8)
-            } else if isLoadingTemplate {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
-                }
-                .padding(.vertical, 8)
-            }
-            
-            // Shift Summary Report (if available)
-            if let summary = form.shiftSummary {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Shift Summary Report")
-                        .font(.headline)
-                        .foregroundColor(.black)
-                    
-                    // Template Totals
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Lottery Form Totals")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
-                        
-                        SummaryRow(label: "Total Sold Tickets", value: "\(summary.totalSold)")
-                        SummaryRow(label: "Total Dollars", value: formatCurrency(summary.totalDollars))
-                        SummaryRow(label: "Total Books", value: "\(summary.totalBooks)")
-                    }
-                    
-                    Divider()
-                    
-                    // Sales Summary
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Sales Summary")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
-                        
-                        SummaryRow(label: "Instant Total", value: formatCurrency(summary.instantTotal))
-                        SummaryRow(label: "Online Total", value: formatCurrency(summary.onlineTotal))
-                        SummaryRow(label: "Total Sold Amount", value: formatCurrency(summary.totalSoldAmount))
-                    }
-                    
-                    Divider()
-                    
-                    // Cash Summary
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Cash Summary")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
-                        
-                        SummaryRow(label: "Register Cash", value: formatCurrency(summary.registerCash))
-                        SummaryRow(label: "Total Cash", value: formatCurrency(summary.totalCash))
-                        SummaryRow(label: "Online Cashes", value: formatCurrency(summary.onlineCashes))
-                        SummaryRow(label: "Instant Cashes", value: formatCurrency(summary.instantCashes))
-                        SummaryRow(label: "Total Cashes", value: formatCurrency(summary.totalCashes))
-                        
-                        Divider()
-                        
-                        SummaryRow(label: "Remaining Cash", value: formatCurrency(summary.cashInBag))
-                            .font(.headline)
-                        SummaryRow(label: "Shift End Cash", value: formatCurrency(summary.cashInBagNet))
-                            .font(.headline)
-                            .foregroundColor(summary.cashInBagNet >= 0 ? .green : .red)
-                        
-                        // Over/Short (if available)
-                        if let overShort = summary.overShort {
-                            Divider()
-                            SummaryRow(
-                                label: overShort >= 0 ? "Over" : "Short",
-                                value: formatCurrency(overShort)
-                            )
-                            .font(.headline)
-                            .foregroundColor(overShort >= 0 ? .green : .red)
-                        }
-                    }
-                }
-                .padding()
-                .background(Color(red: 0.95, green: 0.95, blue: 1.0))
-                .cornerRadius(12)
-            }
-            
-            // Form Data Summary (fallback if no summary)
-            if form.shiftSummary == nil {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let onlineTotal = getFormValue(key: "online_total_0") {
-                        SummaryRow(label: "Online Total", value: onlineTotal)
-                    }
-                    
-                    if let onlineCash = getFormValue(key: "online_cash_0") {
-                        SummaryRow(label: "Online Cash", value: onlineCash)
-                    }
-                    
-                    if let instantCash = getFormValue(key: "instant_cash_0") {
-                        SummaryRow(label: "Instant Cash", value: instantCash)
-                    }
-                    
-                    // Show additional entries if they exist
-                    let additionalOnlineTotals = getAllFormValues(prefix: "online_total_")
-                    let additionalOnlineCashes = getAllFormValues(prefix: "online_cash_")
-                    let additionalInstantCashes = getAllFormValues(prefix: "instant_cash_")
-                    
-                    ForEach(Array(additionalOnlineTotals.enumerated()), id: \.offset) { index, value in
-                        if index > 0 {
-                            SummaryRow(label: "Online Total \(index + 1)", value: value)
-                        }
-                    }
-                    
-                    ForEach(Array(additionalOnlineCashes.enumerated()), id: \.offset) { index, value in
-                        if index > 0 {
-                            SummaryRow(label: "Online Cash \(index + 1)", value: value)
-                        }
-                    }
-                    
-                    ForEach(Array(additionalInstantCashes.enumerated()), id: \.offset) { index, value in
-                        if index > 0 {
-                            SummaryRow(label: "Instant Cash \(index + 1)", value: value)
-                        }
-                    }
-                }
-            }
-            
+
+            shiftSummarySection
+
+            legacyFormDataSection
+
+            collapsibleBinTableSection
+
             // Image if available
             if let imageURL = form.formData["imageURL"], !imageURL.isEmpty {
                 if isLoadingImage {
@@ -407,6 +274,164 @@ struct PreviousLotteryShiftCard: View {
         }
     }
     
+    @ViewBuilder
+    private var shiftSummarySection: some View {
+        if let summary = form.shiftSummary {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Shift Summary")
+                    .font(.headline)
+                    .foregroundColor(.black)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Lottery Form Totals")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+
+                    SummaryRow(label: "Total Sold Tickets", value: "\(summary.totalSold)")
+                    SummaryRow(label: "Total Dollars", value: formatCurrency(summary.totalDollars))
+                    SummaryRow(label: "Total Books", value: "\(summary.totalBooks)")
+                }
+
+                Divider()
+
+                LotteryCashFlowSummaryView(summary: summary)
+            }
+            .padding(.horizontal, 0)
+        }
+    }
+
+    @ViewBuilder
+    private var legacyFormDataSection: some View {
+        if form.shiftSummary == nil {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Shift Data")
+                    .font(.headline)
+                    .foregroundColor(.black)
+
+                if let onlineTotal = getFormValue(key: "online_total_0") {
+                    SummaryRow(label: "Online Total", value: onlineTotal)
+                }
+
+                if let onlineCash = getFormValue(key: "online_cash_0") {
+                    SummaryRow(label: "Online Cash", value: onlineCash)
+                }
+
+                if let instantCash = getFormValue(key: "instant_cash_0") {
+                    SummaryRow(label: "Instant Cash", value: instantCash)
+                }
+
+                let additionalOnlineTotals = getAllFormValues(prefix: "online_total_")
+                let additionalOnlineCashes = getAllFormValues(prefix: "online_cash_")
+                let additionalInstantCashes = getAllFormValues(prefix: "instant_cash_")
+
+                ForEach(Array(additionalOnlineTotals.enumerated()), id: \.offset) { index, value in
+                    if index > 0 {
+                        SummaryRow(label: "Online Total \(index + 1)", value: value)
+                    }
+                }
+
+                ForEach(Array(additionalOnlineCashes.enumerated()), id: \.offset) { index, value in
+                    if index > 0 {
+                        SummaryRow(label: "Online Cash \(index + 1)", value: value)
+                    }
+                }
+
+                ForEach(Array(additionalInstantCashes.enumerated()), id: \.offset) { index, value in
+                    if index > 0 {
+                        SummaryRow(label: "Instant Cash \(index + 1)", value: value)
+                    }
+                }
+            }
+            .padding()
+            .background(Color(red: 0.95, green: 0.95, blue: 1.0))
+            .cornerRadius(12)
+        }
+    }
+
+    @ViewBuilder
+    private var collapsibleBinTableSection: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isBinTableExpanded.toggle()
+                }
+            } label: {
+                HStack {
+                    Text("Bin, value, begin & end numbers")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(Theme.cloudBlue)
+                        .rotationEffect(.degrees(isBinTableExpanded ? 90 : 0))
+                }
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isBinTableExpanded {
+                if let template = template, !template.rows.isEmpty {
+                    VStack(spacing: 0) {
+                        HStack(spacing: 0) {
+                            headerCell("Bin #")
+                            headerCell("Value")
+                            headerCell("Begin #")
+                            headerCell("End #")
+                        }
+                        .background(Theme.cloudBlue.opacity(0.2))
+
+                        ForEach(Array(template.rows.enumerated()), id: \.element.id) { index, row in
+                            HStack(spacing: 0) {
+                                binNumberCell(String(index + 1))
+                                readOnlyCell(formatValue(row.value))
+                                readOnlyCell(beginningNumberForHistory(for: row.id))
+                                readOnlyCell(getEndingNumber(for: row.id))
+                            }
+                            .background(index % 2 == 0 ? Theme.cloudWhite : Color.white)
+                            .overlay(
+                                Rectangle()
+                                    .frame(height: 1)
+                                    .foregroundColor(.gray.opacity(0.5)),
+                                alignment: .bottom
+                            )
+                        }
+                    }
+                    .overlay(
+                        Rectangle()
+                            .frame(width: 1)
+                            .foregroundColor(.gray.opacity(0.5)),
+                        alignment: .leading
+                    )
+                    .overlay(
+                        Rectangle()
+                            .frame(width: 1)
+                            .foregroundColor(.gray.opacity(0.5)),
+                        alignment: .trailing
+                    )
+                    .cornerRadius(8)
+                    .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                } else if isLoadingTemplate {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                } else {
+                    Text("No book rows configured for this terminal.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.bottom, 8)
+                }
+            }
+        }
+    }
+
     private func loadTemplate() {
         guard template == nil && !isLoadingTemplate else { return }
         isLoadingTemplate = true
@@ -442,13 +467,20 @@ struct PreviousLotteryShiftCard: View {
         }
     }
     
+    /// Opening numbers for *this* submitted shift (prefer snapshot on the form).
+    private func beginningNumberForHistory(for rowId: String) -> String {
+        let key = "begin_\(rowId)"
+        if let b = form.formData[key], !b.isEmpty {
+            return b
+        }
+        return template?.rows.first { $0.id == rowId }?.beginningNumber ?? ""
+    }
+
     private func getEndingNumber(for rowId: String) -> String {
-        // Form data stores ending numbers with key "row_\(rowId)"
         let key = "row_\(rowId)"
         if let endingNumber = form.formData[key], !endingNumber.isEmpty {
             return endingNumber
         }
-        // Fall back to template if not in form data
         return template?.rows.first { $0.id == rowId }?.endingNumber ?? ""
     }
     
@@ -642,22 +674,54 @@ private func parseDateKey(_ dateKey: String) -> Date? {
     return formatter.date(from: dateKey)
 }
 
+// Persists which Previous Shifts date sections the manager has expanded.
+enum LotteryOpenedDatesStore {
+    private static func key(locationId: String) -> String {
+        "lotteryOpenedDateKeys_\(locationId)"
+    }
+
+    static func load(locationId: String) -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: key(locationId: locationId)) ?? [])
+    }
+
+    static func save(_ opened: Set<String>, locationId: String) {
+        UserDefaults.standard.set(Array(opened), forKey: key(locationId: locationId))
+    }
+}
+
 // Collapsible date section
 struct CollapsibleDateSection: View {
     let dateKey: String
     let forms: [LotteryForm]
     let viewModel: LocationDetailViewModel
+    let isDateOpened: Bool
+    let onDateOpened: () -> Void
     @State private var isExpanded = false
+
+    private var showsUnreadDot: Bool {
+        !isDateOpened
+    }
     
     var body: some View {
         VStack(spacing: 0) {
             // Date header (always visible)
             Button(action: {
-                withAnimation {
-                    isExpanded.toggle()
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    let willExpand = !isExpanded
+                    isExpanded = willExpand
+                    if willExpand {
+                        onDateOpened()
+                    }
                 }
             }) {
-                HStack {
+                HStack(spacing: 10) {
+                    if showsUnreadDot {
+                        Circle()
+                            .fill(Theme.cloudBlue)
+                            .frame(width: 8, height: 8)
+                            .accessibilityLabel("Not reviewed yet")
+                    }
+
                     Text(dateKey)
                         .font(.headline)
                         .foregroundColor(.black)

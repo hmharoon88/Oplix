@@ -8,7 +8,7 @@
 import SwiftUI
 
 enum LocationSection: String, Identifiable, Hashable {
-    case employees, supervisors, tasks, shifts, lottery, documents, payroll, salesExpenses, payables, receivables
+    case employees, supervisors, tasks, shifts, lottery, documents, reminders, payroll, salesExpenses, payables, receivables
     
     var id: String { rawValue }
     
@@ -20,6 +20,7 @@ enum LocationSection: String, Identifiable, Hashable {
         case .shifts: return "Shift Manager"
         case .lottery: return "Lottery"
         case .documents: return "Documents"
+        case .reminders: return "Reminders"
         case .payroll: return "Payroll"
         case .salesExpenses: return "Sales & Expenses"
         case .payables: return "Payables"
@@ -35,6 +36,7 @@ enum LocationSection: String, Identifiable, Hashable {
         case .shifts: return "clock.fill"
         case .lottery: return "ticket.fill"
         case .documents: return "doc.fill"
+        case .reminders: return "bell.fill"
         case .payroll: return "dollarsign.circle.fill"
         case .salesExpenses: return "chart.bar.fill"
         case .payables: return "arrow.up.circle.fill"
@@ -50,6 +52,7 @@ enum LocationSection: String, Identifiable, Hashable {
         case .shifts: return .purple
         case .lottery: return .orange
         case .documents: return .indigo
+        case .reminders: return .pink
         case .payroll: return .green
         case .salesExpenses: return .teal
         case .payables: return .red

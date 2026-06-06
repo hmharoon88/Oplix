@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Oplix — operations software for multi-location convenience stores. Tasks, lottery, sales, shifts, and reporting in one platform.">
+    <title>Oplix — Operations Platform for Multi-Location Stores</title>
+    <link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+    <nav class="site-nav">
+        <div class="site-nav-inner">
+            <a href="index.html" class="logo"><span>Oplix</span></a>
+            <div class="nav-links">
+                <a href="index.html" class="active">Home</a>
+                <a href="features.html">Features</a>
+                <a href="support.html">Support</a>
+                <a href="login.html" class="nav-login">Log in</a>
+                <a href="#download" class="btn btn-nav">Get the App</a>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero hero-large">
+        <div class="hero-inner">
+            <p class="hero-eyebrow">Built for convenience &amp; multi-site retail</p>
+            <h1>Run every store from one place</h1>
+            <p class="tagline">
+                Streamline daily execution across facilities—shifts, tasks, lottery, register data, and reporting. Improve compliance, elevate team performance, and drive consistency at every site.
+            </p>
+            <div class="hero-actions">
+                <a href="#download" class="btn btn-primary">Get the App</a>
+                <a href="login.html" class="btn btn-secondary">Log in</a>
+            </div>
+        </div>
+    </header>
+
+    <section class="section" id="platform">
+        <h2 class="section-title">How Oplix helps</h2>
+        <p class="section-subtitle">Select an area to learn more.</p>
+        <div class="platform-tabs-wrap" role="tablist" aria-label="Oplix capabilities" id="platform-tabs"></div>
+        <div class="platform-panel" id="platform-panel" role="tabpanel"></div>
+    </section>
+
+    <section class="section platform-section" id="capabilities">
+        <h2 class="section-title">Capabilities by area</h2>
+        <p class="section-subtitle">Every part of the Oplix toolkit—use what fits your business.</p>
+        <div id="home-features-root"></div>
+        <p class="section-cta"><a href="features.html">Browse all categories →</a></p>
+    </section>
+
+    <section class="section challenges-section">
+        <div class="challenges-grid">
+            <div class="challenges-copy">
+                <p class="section-eyebrow">Common pain points</p>
+                <h2>Consistency at every site, every shift</h2>
+                <p>Spreadsheets, paper checklists, and group chats make it hard to know what actually happened on the floor.</p>
+                <a href="#download" class="btn btn-primary">Get started</a>
+            </div>
+            <div class="compare-grid">
+                <article class="compare-card compare-problem">
+                    <h3>Without a system</h3>
+                    <ul>
+                        <li>Manual paperwork slows down staff</li>
+                        <li>Lottery and register issues surface too late</li>
+                        <li>Tasks get lost in calls and messages</li>
+                        <li>No single view across locations</li>
+                    </ul>
+                </article>
+                <article class="compare-card compare-solution">
+                    <h3>With Oplix</h3>
+                    <ul>
+                        <li>Mobile checklists and photo-verified tasks</li>
+                        <li>Shift lottery and register reconciliation</li>
+                        <li>Announcements and alerts in one place</li>
+                        <li>Owner dashboard across all facilities</li>
+                    </ul>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="section steps-section">
+        <h2 class="section-title">How teams use Oplix</h2>
+        <p class="section-subtitle">From setup to improvement—how teams use Oplix.</p>
+        <div class="steps-grid" id="how-it-works"></div>
+    </section>
+
+    <section class="section industry-section">
+        <div class="industry-card">
+            <p class="section-eyebrow">Convenience stores</p>
+            <h2>Drive store-level execution, inspections, and daily checklists</h2>
+            <p>Connect your entire staff in real time—fuel, lottery, register close, tasks, and compliance built for c-store operators.</p>
+            <div class="industry-tags">
+                <span>Daily checklists</span>
+                <span>Lottery reconciliation</span>
+                <span>Register &amp; fuel</span>
+                <span>Shift tracking</span>
+                <span>Multi-store overview</span>
+                <span>PDF reporting</span>
+            </div>
+            <a href="features.html" class="btn btn-secondary">Explore features</a>
+        </div>
+    </section>
+
+    <section class="cta-band" id="download">
+        <h2>Run organized teams at every location</h2>
+        <p>Get Oplix on iPhone and iPad—cloud sync, role-based access, and operations built for the frontline.</p>
+        <a href="#" class="btn btn-secondary" aria-disabled="true" onclick="return false;" title="Add your App Store link when the app is published">
+            App Store <span class="coming-soon">link coming soon</span>
+        </a>
+        <p class="cta-sub">
+            Already have an account? <a href="login.html">Log in</a>
+        </p>
+    </section>
+
+    <footer class="site-footer site-footer-columns">
+        <div class="footer-grid">
+            <div class="footer-brand">
+                <a href="index.html" class="logo"><span>Oplix</span></a>
+                <p>Operations platform for multi-location convenience and retail.</p>
+            </div>
+            <div>
+                <h4>Product</h4>
+                <a href="features.html">Features</a>
+                <a href="login.html">Log in</a>
+                <a href="#download">Get the App</a>
+            </div>
+            <div>
+                <h4>Support</h4>
+                <a href="support.html">Help center</a>
+                <a href="mailto:support@oplix.app">Contact</a>
+            </div>
+            <div>
+                <h4>Legal</h4>
+                <a href="privacy.html">Privacy policy</a>
+            </div>
+        </div>
+        <p class="footer-copy">&copy; 2026 Oplix. All rights reserved.</p>
+    </footer>
+
+    <script src="js/features-data.js"></script>
+    <script src="js/features-render.js"></script>
+    <script src="js/platform-modules.js"></script>
+    <script src="js/platform-tabs.js"></script>
+    <script>initFeaturesUI("home-features-root");</script>
+</body>
+</html>

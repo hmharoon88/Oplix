@@ -74,6 +74,7 @@ struct PayrollView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .oplixSegmentedPickerTint()
             .padding(.horizontal)
             .onChange(of: viewModel.selectedPeriod) {
                 Task {

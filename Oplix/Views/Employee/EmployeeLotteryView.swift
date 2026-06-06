@@ -10,6 +10,7 @@ import UIKit
 
 struct EmployeeLotteryView: View {
     @ObservedObject var viewModel: EmployeeHomeViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isLoading = true
     @State private var showingLotterySelection = false
 
@@ -61,6 +62,11 @@ struct EmployeeLotteryView: View {
         }
         .navigationTitle("Lottery")
         .navigationBarTitleDisplayMode(.large)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await viewModel.loadLotteryTemplate() }
+            }
+        }
         .onAppear {
             // Configure navigation bar appearance for visible text
             let appearance = UINavigationBarAppearance()

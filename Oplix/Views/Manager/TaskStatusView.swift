@@ -171,8 +171,14 @@ struct TaskStatusView: View {
 
     // Bottom-anchored Done so it's reachable with one thumb from anywhere on
     // the audit hub, instead of stretching to the top-right toolbar.
+    // `onDone` dismisses the executive full-screen flow (Task Check tab).
+    // Supervisors don't pass `onDone`, so we always call `dismiss()` to pop
+    // this hub back to Supervisor Controls.
     private var doneBar: some View {
-        Button(action: onDone) {
+        Button(action: {
+            onDone()
+            dismiss()
+        }) {
             Text("Done")
                 .font(.headline)
                 .foregroundColor(.white)
@@ -533,62 +539,82 @@ struct TaskCompletionCard: View {
     @State private var isLoading = true
 
     var body: some View {
-        HStack(spacing: 12) {
-            Button(action: onImageTap) {
-                Group {
-                    if let image = previewImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                    } else if isLoading {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.gray.opacity(0.2))
-                            .overlay(ProgressView().scaleEffect(0.8))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Button(action: onImageTap) {
+                    Group {
+                        if let image = previewImage {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                        } else if isLoading {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.gray.opacity(0.2))
+                                .overlay(ProgressView().scaleEffect(0.8))
+                        } else {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.gray.opacity(0.2))
+                                .overlay(
+                                    Image(systemName: "photo")
+                                        .foregroundColor(.gray)
+                                )
+                        }
+                    }
+                    .frame(width: 80, height: 80)
+                    .cornerRadius(8)
+                    .clipped()
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Completed by \(employeeName)")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                    }
+
+                    Text(completion.timestamp, style: .date)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Text(completion.timestamp, style: .time)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if completion.imageURLs.count > 1 {
+                        Text("\(completion.imageURLs.count) photos - Tap to view")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
                     } else {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.gray.opacity(0.2))
-                            .overlay(
-                                Image(systemName: "photo")
-                                    .foregroundColor(.gray)
-                            )
+                        Text("Tap photo to view full size")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
                     }
                 }
-                .frame(width: 80, height: 80)
-                .cornerRadius(8)
-                .clipped()
+
+                Spacer()
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
+            if let note = completion.note?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !note.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "text.bubble.fill")
                         .font(.caption)
-                    Text("Completed by \(employeeName)")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                        .foregroundColor(Theme.cloudBlue)
+                        .padding(.top, 2)
+                    Text(note)
+                        .font(.caption)
                         .foregroundColor(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Text(completion.timestamp, style: .date)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Text(completion.timestamp, style: .time)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                if completion.imageURLs.count > 1 {
-                    Text("\(completion.imageURLs.count) photos - Tap to view")
-                        .font(.caption2)
-                        .foregroundColor(.blue)
-                } else {
-                    Text("Tap photo to view full size")
-                        .font(.caption2)
-                        .foregroundColor(.blue)
-                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.cloudBlue.opacity(0.08))
+                .cornerRadius(8)
             }
-
-            Spacer()
         }
         .padding(12)
         .background(Color.gray.opacity(0.1))

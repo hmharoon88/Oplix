@@ -249,7 +249,8 @@ struct EditTaskView: View {
             employeeCompletions: task.employeeCompletions,
             frequency: frequency,
             crossLocationGroupId: task.crossLocationGroupId,
-            createdAt: task.createdAt
+            createdAt: task.createdAt,
+            completionHistory: task.completionHistory
         )
         await viewModel.updateTask(updated)
         if let error = viewModel.errorMessage {
@@ -301,7 +302,8 @@ struct EditTaskView: View {
                             employeeCompletions: sibling.employeeCompletions, // unchanged
                             frequency: newFrequency,
                             crossLocationGroupId: sibling.crossLocationGroupId,
-                            createdAt: sibling.createdAt // unchanged
+                            createdAt: sibling.createdAt, // unchanged
+                            completionHistory: sibling.completionHistory
                         )
                         do {
                             try await FirebaseService.shared.updateTask(
