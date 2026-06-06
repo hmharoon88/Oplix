@@ -10,6 +10,7 @@
     let tasksCache = [];
     let profileCache = null;
     let activePanelId = null;
+    const initializedPanels = new Set();
 
     const PLACEHOLDER_SECTIONS = [];
     const PANEL_KEY = "oplix.dashboard.panel";
@@ -110,20 +111,43 @@
         if (panel) panel.scrollTop = 0;
     }
 
-    function showPanel(panelId) {
-        const reselect = activePanelId === panelId;
-        if (reselect) {
-            resetPanelToRoot(panelId);
-        }
+    async function ensurePanelInitialized(panelId) {
+        if (!currentUserId || initializedPanels.has(panelId)) return;
+        const uid = currentUserId;
+        const locs = locationsCache;
 
-        document.querySelectorAll(".dashboard-panel").forEach((panel) => {
-            const active = panel.dataset.panel === panelId;
-            panel.hidden = !active;
-            panel.classList.toggle("active", active);
-        });
-        document.querySelectorAll(".sidebar-btn").forEach((btn) => {
-            btn.classList.toggle("active", btn.dataset.panel === panelId);
-        });
+        switch (panelId) {
+            case "data-input":
+                if (window.OplixDataInput) OplixDataInput.init(uid, locs);
+                break;
+            case "analytics":
+                if (window.OplixAnalytics) OplixAnalytics.init(uid, locs);
+                break;
+            case "reports":
+                if (window.OplixReports) OplixReports.init(uid, locs);
+                break;
+            case "payroll":
+                await runModuleInit("Payroll", () => OplixPayrollUI.init(uid, locs));
+                break;
+            case "tasks":
+                await runModuleInit("Tasks", () => OplixTaskCheckUI.init(uid, locs));
+                break;
+            case "settings":
+                await runModuleInit("Settings", () => OplixSettingsUI.init(uid));
+                break;
+            case "vendors":
+                await runModuleInit("Vendors", () => OplixVendorsUI.init(uid, locs));
+                break;
+            case "employees":
+                await runModuleInit("Employees", () => OplixEmployeesUI.init(uid, locs));
+                break;
+            default:
+                break;
+        }
+        initializedPanels.add(panelId);
+    }
+
+    function panelOnShow(panelId) {
         if (panelId === "facilities" && window.OplixFacilities) {
             OplixFacilities.ensureLoaded();
         }
@@ -151,11 +175,64 @@
         if (panelId === "employees" && window.OplixEmployeesUI) {
             OplixEmployeesUI.onShow();
         }
+    }
+
+    async function showPanel(panelId) {
+        const reselect = activePanelId === panelId;
+        if (reselect) {
+            resetPanelToRoot(panelId);
+        }
+
+        document.querySelectorAll(".dashboard-panel").forEach((panel) => {
+            const active = panel.dataset.panel === panelId;
+            panel.hidden = !active;
+            panel.classList.toggle("active", active);
+        });
+        document.querySelectorAll(".sidebar-btn").forEach((btn) => {
+            btn.classList.toggle("active", btn.dataset.panel === panelId);
+        });
+
+        await ensurePanelInitialized(panelId);
+        panelOnShow(panelId);
+
         activePanelId = panelId;
         savePanel(panelId);
     }
 
     window.showDashboardPanel = showPanel;
+
+    function refreshInitializedModules() {
+        if (!currentUserId) return;
+        const uid = currentUserId;
+        const locs = locationsCache;
+        if (initializedPanels.has("data-input") && window.OplixDataInput) {
+            OplixDataInput.init(uid, locs);
+        }
+        if (initializedPanels.has("analytics") && window.OplixAnalytics) {
+            OplixAnalytics.init(uid, locs);
+        }
+        if (initializedPanels.has("reports") && window.OplixReports) {
+            OplixReports.init(uid, locs);
+        }
+        if (initializedPanels.has("payroll") && window.OplixPayrollUI) {
+            OplixPayrollUI.init(uid, locs);
+        }
+        if (initializedPanels.has("tasks") && window.OplixTaskCheckUI) {
+            OplixTaskCheckUI.setLocations(locs);
+        }
+        if (initializedPanels.has("tasks") && window.OplixTasksUI?.setLocations) {
+            OplixTasksUI.setLocations(locs);
+        }
+        if (initializedPanels.has("settings") && window.OplixSettingsUI) {
+            OplixSettingsUI.init(uid);
+        }
+        if (initializedPanels.has("vendors") && window.OplixVendorsUI) {
+            OplixVendorsUI.setLocations(locs);
+        }
+        if (initializedPanels.has("employees") && window.OplixEmployeesUI) {
+            OplixEmployeesUI.setLocations(locs);
+        }
+    }
 
     async function reloadLocations() {
         if (!currentUserId) return locationsCache;
@@ -166,33 +243,7 @@
         if (window.OplixFacilities) {
             await OplixFacilities.refresh(currentUserId, locationsCache, tasksCache);
         }
-        if (window.OplixDataInput) {
-            OplixDataInput.init(currentUserId, locationsCache);
-        }
-        if (window.OplixAnalytics) {
-            OplixAnalytics.init(currentUserId, locationsCache);
-        }
-        if (window.OplixReports) {
-            OplixReports.init(currentUserId, locationsCache);
-        }
-        if (window.OplixPayrollUI) {
-            OplixPayrollUI.init(currentUserId, locationsCache);
-        }
-        if (window.OplixTaskCheckUI) {
-            OplixTaskCheckUI.setLocations(locationsCache);
-        }
-        if (window.OplixTasksUI?.setLocations) {
-            OplixTasksUI.setLocations(locationsCache);
-        }
-        if (window.OplixSettingsUI) {
-            OplixSettingsUI.init(currentUserId);
-        }
-        if (window.OplixVendorsUI) {
-            OplixVendorsUI.setLocations(locationsCache);
-        }
-        if (window.OplixEmployeesUI) {
-            OplixEmployeesUI.setLocations(locationsCache);
-        }
+        refreshInitializedModules();
         if (window.OplixHomeOverview && profileCache) {
             await OplixHomeOverview.loadAndRender(
                 currentUserId,
@@ -292,48 +343,27 @@
                 loadTasks(user.uid),
             ]);
 
-            await Promise.all([
-                window.OplixHomeOverview
-                    ? OplixHomeOverview.loadAndRender(
-                          user.uid,
-                          locationsCache,
-                          employeesCache,
-                          tasksCache,
-                          profile
-                      )
-                    : Promise.resolve(),
-                window.OplixFacilities
-                    ? OplixFacilities.refresh(user.uid, locationsCache, tasksCache)
-                    : Promise.resolve(),
-            ]);
-
-            if (window.OplixDataInput) {
-                OplixDataInput.init(user.uid, locationsCache);
-            }
-            if (window.OplixAnalytics) {
-                OplixAnalytics.init(user.uid, locationsCache);
-            }
-            if (window.OplixReports) {
-                OplixReports.init(user.uid, locationsCache);
-            }
-            if (window.OplixPayrollUI) {
-                await runModuleInit("Payroll", () => OplixPayrollUI.init(user.uid, locationsCache));
-            }
-            if (window.OplixTaskCheckUI) {
-                await runModuleInit("Tasks", () => OplixTaskCheckUI.init(user.uid, locationsCache));
-            }
-            if (window.OplixSettingsUI) {
-                await runModuleInit("Settings", () => OplixSettingsUI.init(user.uid));
-            }
-            if (window.OplixVendorsUI) {
-                await runModuleInit("Vendors", () => OplixVendorsUI.init(user.uid, locationsCache));
-            }
-            if (window.OplixEmployeesUI) {
-                await runModuleInit("Employees", () => OplixEmployeesUI.init(user.uid, locationsCache));
-            }
-
+            const initialPanel = restorePanel();
             showContent();
-            showPanel(restorePanel());
+            await showPanel(initialPanel);
+
+            const homeLoad = window.OplixHomeOverview
+                ? OplixHomeOverview.loadAndRender(
+                      user.uid,
+                      locationsCache,
+                      employeesCache,
+                      tasksCache,
+                      profile,
+                      { deferHeavy: true }
+                  )
+                : Promise.resolve();
+            const facilitiesLoad = window.OplixFacilities
+                ? OplixFacilities.refresh(user.uid, locationsCache, tasksCache)
+                : Promise.resolve();
+
+            Promise.all([homeLoad, facilitiesLoad]).catch((err) => {
+                console.error("[Oplix] Background dashboard load failed:", err);
+            });
         } catch (err) {
             showError(err.message || "Unable to load your account.");
         }

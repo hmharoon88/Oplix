@@ -372,7 +372,7 @@
                 </ul>
                 ${
                     alerts.length > limit
-                        ? `<p class="home-more-note">Show ${alerts.length - limit} more in the iOS app</p>`
+                        ? `<p class="home-more-note">Show ${alerts.length - limit} more</p>`
                         : ""
                 }
             </section>`;
@@ -622,7 +622,7 @@
                     })
                     .join("")}
             </ul>
-            <p class="loc-subhint">Older shifts — open the iOS app for full history.</p>`;
+            <p class="loc-subhint">Older shifts — full history available in location records.</p>`;
     }
 
     function renderLotteryScreen(data) {
@@ -725,7 +725,7 @@
     function renderComingSoonSection(title) {
         return `
             <h2 class="loc-section-heading">${escapeHtml(title)}</h2>
-            <p class="data-list-empty">Full ${escapeHtml(title.toLowerCase())} tools are in the Oplix iOS app. Use the app to add or edit data.</p>`;
+            <p class="data-list-empty">Full ${escapeHtml(title.toLowerCase())} tools are not available on web yet.</p>`;
     }
 
     function updateNav(mode) {

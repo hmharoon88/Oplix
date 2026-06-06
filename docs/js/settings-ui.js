@@ -1,5 +1,5 @@
 /**
- * Web Settings — mirrors iOS SettingsView (organization, notifications, home layout, about, account).
+ * Web Settings — organization, notifications, home layout, about, and account.
  */
 (function () {
     const Store = () => window.OplixSettingsStore;
@@ -111,7 +111,7 @@
             <button type="button" class="settings-back" data-settings-view="main">← Settings</button>
             ${renderStatus()}
             <h2 class="settings-page-title">Notifications</h2>
-            <p class="books-hint">Same preferences as the iOS app — saved to your account and used by email/push services.</p>
+            <p class="books-hint">Saved to your account and used by email/push services.</p>
             <div class="settings-section">
                 <h3 class="settings-section-title">How</h3>
                 <div class="books-panel settings-card settings-toggles">
@@ -152,7 +152,7 @@
             <button type="button" class="settings-back" data-settings-view="main">← Settings</button>
             ${renderStatus()}
             <h2 class="settings-page-title">Home layout</h2>
-            <p class="books-hint">Show, hide, and reorder Home sections. Saved per browser (iOS uses per-device storage).</p>
+            <p class="books-hint">Show, hide, and reorder Home sections. Saved per browser.</p>
             <div class="settings-section">
                 <div class="settings-link-list" style="margin-bottom:12px">
                     <button type="button" class="settings-link-row" data-settings-view="homeLayoutAlerts">

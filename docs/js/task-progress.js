@@ -1,5 +1,5 @@
 /**
- * Task completion scoring — mirrors Oplix/Models/TaskProgress.swift
+ * Task completion scoring and progress helpers.
  */
 (function () {
     function toDate(value) {

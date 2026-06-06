@@ -1,5 +1,5 @@
 /**
- * Facility Documents — upload, view, and delete (parity with iOS DocumentsScreen).
+ * Facility Documents — upload, view, and delete.
  */
 (function () {
     const Store = () => window.OplixDocumentsStore;
@@ -95,7 +95,7 @@
                     <input type="file" class="books-input doc-file-input" name="file" required
                         accept="image/*,.pdf,application/pdf,.doc,.docx">
                 </label>
-                <p class="books-hint">PDF, Word, or image — max 10 MB. Same storage as the iOS app.</p>
+                <p class="books-hint">PDF, Word, or image — max 10 MB.</p>
                 <label class="books-label doc-expiry-toggle">
                     <input type="checkbox" name="hasExpiry" data-doc-has-expiry>
                     Has expiry date

@@ -1,5 +1,5 @@
 /**
- * Location payables — same Firestore shape as iOS (users/.../locations/.../payables).
+ * Location payables — users/.../locations/.../payables.
  */
 (function () {
     const FREQUENCIES = [

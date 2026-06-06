@@ -1,5 +1,5 @@
 /**
- * Per-day assigned / done / missed breakdown — mirrors TaskAssignmentAudit (Swift).
+ * Per-day assigned / done / missed breakdown for task audits.
  */
 (function () {
     const TP = () => window.OplixTaskProgress;

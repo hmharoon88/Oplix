@@ -1,5 +1,5 @@
 /**
- * Per-facility directory records (web-first; same paths for future iOS).
+ * Per-facility directory records.
  *
  * Firestore (new subcollections only — does not touch books, shifts, payables, etc.):
  *   users/{uid}/locations/{locationId}/vendors/{id}

@@ -1,5 +1,5 @@
 /**
- * Task helpers — mirrors iOS WorkTask / TaskCategory behavior.
+ * Task helpers — categories, completions, and scheduling.
  */
 (function () {
     const TP = () => window.OplixTaskProgress;
@@ -88,7 +88,7 @@
         );
     }
 
-    /** Preserve completions and createdAt when editing (matches iOS EditTaskView). */
+    /** Preserve completions and createdAt when editing. */
     function mergeTaskUpdate(existing, updates, locationId) {
         return normalizeTask(
             {

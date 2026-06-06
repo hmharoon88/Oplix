@@ -1,5 +1,5 @@
 /**
- * Web dashboard — distinct from iOS: calmer surfaces, editorial type, SaaS layout.
+ * Web dashboard — calmer surfaces, editorial type, SaaS layout.
  * Loads after site.css on app pages only.
  */
 
@@ -2722,7 +2722,7 @@
     margin-top: 8px;
 }
 
-/* Tasks — mirrors iOS TasksScreen / TaskCategoryListScreen */
+/* Tasks */
 .tasks-toolbar {
     margin-bottom: 12px;
 }
@@ -3564,7 +3564,7 @@
     line-height: 1.35;
 }
 
-/* Task Check (mirrors iOS Task Check tab) */
+/* Task Check */
 .tc-loc-list .tc-loc-row {
     display: flex;
     flex-direction: column;

@@ -1,5 +1,5 @@
 /**
- * Tasks sidebar — mirrors iOS Task Check tab (TaskCheckView → TaskStatusView).
+ * Tasks sidebar — review completions, photos, and history by facility.
  */
 (function () {
     const M = () => window.OplixTasksModel;

@@ -1,5 +1,5 @@
 /**
- * Firestore CRUD + Firebase Storage for facility documents (matches iOS paths).
+ * Firestore CRUD + Firebase Storage for facility documents.
  */
 (function () {
     const MAX_BYTES = 10 * 1024 * 1024;

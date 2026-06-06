@@ -792,7 +792,7 @@
         if (!root) return;
 
         if (!locations.length) {
-            root.innerHTML = '<p class="data-list-empty">Add a facility first (Facilities tab or iOS app).</p>';
+            root.innerHTML = '<p class="data-list-empty">Add a facility first (Facilities tab).</p>';
             return;
         }
 

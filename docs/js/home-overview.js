@@ -1,5 +1,5 @@
 /**
- * Manager Home overview — mirrors iOS ManagerOverviewView + HomeAlertsViewModel.
+ * Manager Home overview — alerts, pulse, lottery, and month-to-date stats.
  */
 (function () {
     const VARIANCE_THRESHOLD = 5;
@@ -280,7 +280,23 @@
         return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     }
 
-    async function fetchLocationBundle(userId, locationId) {
+    async function fetchLocationBundle(userId, locationId, options = {}) {
+        if (options.light) {
+            const [shifts, lotteryForms, locationEmployees] = await Promise.all([
+                fetchSubcollection(userId, locationId, "shifts"),
+                fetchSubcollection(userId, locationId, "lotteryForms"),
+                fetchSubcollection(userId, locationId, "employees"),
+            ]);
+            return {
+                shifts,
+                lotteryForms,
+                locationEmployees,
+                payables: [],
+                receivables: [],
+                documents: [],
+            };
+        }
+
         const [shifts, lotteryForms, payables, receivables, locationEmployees, documents] =
             await Promise.all([
                 fetchSubcollection(userId, locationId, "shifts"),
@@ -439,6 +455,7 @@
 
     let needsAttentionExpanded = false;
     let lastHomeUserId = null;
+    let lastBundlesByLocationId = {};
 
     function computeWeeklyPulse(location, payables, receivables) {
         const todayStart = startOfDay(new Date());
@@ -710,7 +727,8 @@
         return alerts;
     }
 
-    async function loadOverview(userId, locations, employees, tasks, profile) {
+    async function loadOverview(userId, locations, employees, tasks, profile, options = {}) {
+        const light = options.light === true;
         const now = new Date();
         const allEmployeesDict = {};
         employees.forEach((e) => {
@@ -750,22 +768,32 @@
 
         const bundles = await Promise.all(
             locations.map(async (loc) => {
-                const [bundle, books, prevBooks] = await Promise.all([
-                    fetchLocationBundle(userId, loc.id),
+                const monthLoads = [
+                    fetchLocationBundle(userId, loc.id, { light }),
                     window.OplixBooksStore
                         ? window.OplixBooksStore.loadMonth(userId, loc.id, monthId).catch(() => ({
                               daysById: {},
                           }))
                         : Promise.resolve({ daysById: {} }),
-                    window.OplixBooksStore
-                        ? window.OplixBooksStore.loadMonth(userId, loc.id, prevMonthId).catch(() => ({
-                              daysById: {},
-                          }))
-                        : Promise.resolve({ daysById: {} }),
-                ]);
+                ];
+                if (!light) {
+                    monthLoads.push(
+                        window.OplixBooksStore
+                            ? window.OplixBooksStore.loadMonth(userId, loc.id, prevMonthId).catch(() => ({
+                                  daysById: {},
+                              }))
+                            : Promise.resolve({ daysById: {} })
+                    );
+                }
+                const results = await Promise.all(monthLoads);
+                const bundle = results[0];
+                const books = results[1];
+                const prevBooks = light ? { daysById: {} } : results[2];
                 booksDaysByLocation[loc.id] = books.daysById || {};
                 booksDaysByLocationPrev[loc.id] = prevBooks.daysById || {};
-                bundle.documents.forEach((d) => allDocs.push({ ...d, locationId: loc.id }));
+                if (!light) {
+                    bundle.documents.forEach((d) => allDocs.push({ ...d, locationId: loc.id }));
+                }
                 bundle.locationEmployees.forEach((e) => {
                     if (!allEmployeesDict[e.id]) allEmployeesDict[e.id] = e;
                     nameLookup[e.id] = e.name || e.username || "Employee";
@@ -774,7 +802,9 @@
             })
         );
 
+        lastBundlesByLocationId = {};
         bundles.forEach(({ location, bundle }) => {
+            lastBundlesByLocationId[location.id] = bundle;
             alerts = alerts.concat(buildAlertsForLocation(location, bundle, nameLookup));
 
             const pulse = computeWeeklyPulse(location, bundle.payables, bundle.receivables);
@@ -792,13 +822,18 @@
                 allEmployeesDict,
                 now
             );
-            stats.prevMtd = computeMtdMetrics(
-                location,
-                bundle,
-                booksDaysByLocationPrev[location.id],
-                allEmployeesDict,
-                prevAsOf
-            );
+            if (light) {
+                stats.prevMtd = {};
+                stats.prevMtdPending = true;
+            } else {
+                stats.prevMtd = computeMtdMetrics(
+                    location,
+                    bundle,
+                    booksDaysByLocationPrev[location.id],
+                    allEmployeesDict,
+                    prevAsOf
+                );
+            }
             locationStats.push(stats);
             todaySnapshot.revenue += snapshotPart.revenue;
             todaySnapshot.revenueLastWeekSameDay += snapshotPart.revenueLastWeek;
@@ -850,6 +885,92 @@
                 clockedInLocationNames: [...todaySnapshot.clockedInLocationNames].sort(),
             },
         };
+    }
+
+    async function enrichOverview(userId, locations, employees, tasks, profile, data) {
+        const now = new Date();
+        const prevAsOf = sameDayPriorMonth(now);
+        const M = window.OplixBooksModel;
+        const prevMonthId = M
+            ? M.monthIdFromDate(prevAsOf)
+            : `${prevAsOf.getFullYear()}-${String(prevAsOf.getMonth() + 1).padStart(2, "0")}`;
+
+        const allEmployeesDict = {};
+        employees.forEach((e) => {
+            allEmployeesDict[e.id] = e;
+        });
+        Object.values(lastBundlesByLocationId).forEach((bundle) => {
+            bundle.locationEmployees.forEach((e) => {
+                if (!allEmployeesDict[e.id]) allEmployeesDict[e.id] = e;
+            });
+        });
+
+        let weeklyPulse = {
+            receivablesDue: 0,
+            receivablesCount: 0,
+            payablesDue: 0,
+            payablesCount: 0,
+        };
+        const allDocs = [];
+
+        await Promise.all(
+            locations.map(async (loc) => {
+                const [payables, receivables, documents, prevBooks] = await Promise.all([
+                    fetchSubcollection(userId, loc.id, "payables"),
+                    fetchSubcollection(userId, loc.id, "receivables"),
+                    fetchSubcollection(userId, loc.id, "documents"),
+                    window.OplixBooksStore
+                        ? window.OplixBooksStore.loadMonth(userId, loc.id, prevMonthId).catch(() => ({
+                              daysById: {},
+                          }))
+                        : Promise.resolve({ daysById: {} }),
+                ]);
+
+                const bundle = lastBundlesByLocationId[loc.id];
+                if (bundle) {
+                    bundle.payables = payables;
+                    bundle.receivables = receivables;
+                    bundle.documents = documents;
+                }
+
+                documents.forEach((d) => allDocs.push({ ...d, locationId: loc.id }));
+
+                const pulse = computeWeeklyPulse(loc, payables, receivables);
+                weeklyPulse.receivablesDue += pulse.receivablesDue;
+                weeklyPulse.receivablesCount += pulse.receivablesCount;
+                weeklyPulse.payablesDue += pulse.payablesDue;
+                weeklyPulse.payablesCount += pulse.payablesCount;
+
+                const stat = data.locationStats.find((s) => s.id === loc.id);
+                if (stat && bundle) {
+                    stat.prevMtd = computeMtdMetrics(
+                        loc,
+                        bundle,
+                        prevBooks.daysById || {},
+                        allEmployeesDict,
+                        prevAsOf
+                    );
+                    delete stat.prevMtdPending;
+                }
+            })
+        );
+
+        weeklyPulse.net = weeklyPulse.receivablesDue - weeklyPulse.payablesDue;
+        data.weeklyPulse = weeklyPulse;
+
+        const docAlerts = buildGlobalAlerts(employees, tasks, locations, allDocs).filter((a) =>
+            a.id.startsWith("doc_")
+        );
+        const nonDocAlerts = data.alerts.filter((a) => !a.id.startsWith("doc_"));
+        const acknowledged = getAcknowledgedSet(userId);
+        data.alerts = [...nonDocAlerts, ...docAlerts]
+            .filter((a) => !acknowledged.has(a.id))
+            .sort((a, b) => {
+                if (a.severity !== b.severity) return a.severity - b.severity;
+                return a.sortKey - b.sortKey;
+            });
+
+        return data;
     }
 
     function severityClass(severity) {
@@ -1120,9 +1241,12 @@
     }
 
     function renderMtdCell(current, previous, formatFn, trendOpts) {
+        const trend = trendOpts?.pending
+            ? ""
+            : renderMtdTrend(current, previous, trendOpts);
         return `<td class="home-cc-num home-cc-num--mtd">
             <span class="home-mtd-value">${formatFn(current)}</span>
-            ${renderMtdTrend(current, previous, trendOpts)}
+            ${trend}
         </td>`;
     }
 
@@ -1130,6 +1254,8 @@
         if (!stats.length) return "";
         const rows = [...stats].sort((a, b) => b.monthToDateSales - a.monthToDateSales);
         const prev = (s) => s.prevMtd || {};
+        const trendOpts = (s) => ({ pending: s.prevMtdPending, invert: false });
+        const trendOptsInvert = (s) => ({ pending: s.prevMtdPending, invert: true });
 
         return `
             <div class="home-cc-block home-cc-full">
@@ -1154,12 +1280,12 @@
                                     (s) => `
                             <tr>
                                 <td><strong>${escapeHtml(s.locationName)}</strong></td>
-                                ${renderMtdCell(s.monthToDateSales, prev(s).monthToDateSales, formatCurrencyCompact)}
-                                ${renderMtdCell(s.monthToDateFuelGallons, prev(s).monthToDateFuelGallons, formatNumberCompact)}
-                                ${renderMtdCell(s.monthToDateFuelDollars, prev(s).monthToDateFuelDollars, formatCurrencyCompact)}
-                                ${renderMtdCell(s.monthToDateLotterySales, prev(s).monthToDateLotterySales, formatCurrencyCompact)}
-                                ${renderMtdCell(s.monthToDatePayroll, prev(s).monthToDatePayroll, formatCurrencyCompact, { invert: true })}
-                                ${renderMtdCell(s.monthToDateExpenses, prev(s).monthToDateExpenses, formatCurrencyCompact, { invert: true })}
+                                ${renderMtdCell(s.monthToDateSales, prev(s).monthToDateSales, formatCurrencyCompact, trendOpts(s))}
+                                ${renderMtdCell(s.monthToDateFuelGallons, prev(s).monthToDateFuelGallons, formatNumberCompact, trendOpts(s))}
+                                ${renderMtdCell(s.monthToDateFuelDollars, prev(s).monthToDateFuelDollars, formatCurrencyCompact, trendOpts(s))}
+                                ${renderMtdCell(s.monthToDateLotterySales, prev(s).monthToDateLotterySales, formatCurrencyCompact, trendOpts(s))}
+                                ${renderMtdCell(s.monthToDatePayroll, prev(s).monthToDatePayroll, formatCurrencyCompact, trendOptsInvert(s))}
+                                ${renderMtdCell(s.monthToDateExpenses, prev(s).monthToDateExpenses, formatCurrencyCompact, trendOptsInvert(s))}
                             </tr>`
                                 )
                                 .join("")}
@@ -1245,17 +1371,30 @@
     }
 
     window.OplixHomeOverview = {
-        async loadAndRender(userId, locations, employees, tasks, profile) {
+        async loadAndRender(userId, locations, employees, tasks, profile, options = {}) {
+            const deferHeavy = options.deferHeavy === true;
             lastHomeUserId = userId;
             const loading = document.getElementById("home-loading");
             const overview = document.getElementById("home-overview");
             loading.hidden = false;
             overview.hidden = true;
             try {
-                const data = await loadOverview(userId, locations, employees, tasks, profile);
+                const data = await loadOverview(userId, locations, employees, tasks, profile, {
+                    light: deferHeavy,
+                });
                 loading.hidden = true;
                 render(data, userId);
                 window._oplixHomeData = data;
+                if (deferHeavy) {
+                    enrichOverview(userId, locations, employees, tasks, profile, data)
+                        .then((enriched) => {
+                            render(enriched, userId);
+                            window._oplixHomeData = enriched;
+                        })
+                        .catch((err) => {
+                            console.error("[Oplix] Home overview enrich failed:", err);
+                        });
+                }
             } catch (err) {
                 loading.innerHTML = `<p class="app-error">${escapeHtml(err.message || "Failed to load home overview.")}</p>`;
             }

@@ -1,5 +1,5 @@
 /**
- * Manager-level employees — mirrors ManagerEmployeesViewModel + FirebaseService.
+ * Manager-level employees — Firestore CRUD.
  */
 (function () {
     const PROVISIONING_APP = "OplixEmployeeProvisioning";

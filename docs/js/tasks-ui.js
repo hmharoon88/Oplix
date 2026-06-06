@@ -1,5 +1,5 @@
 /**
- * Facility Tasks section — add, edit, delete (mirrors iOS Locations → Tasks).
+ * Facility Tasks section — add, edit, and delete tasks.
  */
 (function () {
     const M = () => window.OplixTasksModel;
@@ -501,7 +501,7 @@
         return `
             <div class="tasks-panel" data-tasks-panel>
                 ${renderStatusBanner()}
-                <p class="books-hint">Add, edit, or delete recurring and corrective tasks for this facility (syncs with the iOS app).</p>
+                <p class="books-hint">Add, edit, or delete recurring and corrective tasks for this facility.</p>
                 <div class="loc-category-cards">
                     ${renderCategoryCard("recurring")}
                     ${renderCategoryCard("corrective")}

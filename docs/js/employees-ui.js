@@ -1,5 +1,5 @@
 /**
- * Sidebar Employees tab — mirrors iOS ManagerEmployeesView + EditManagerEmployeeView (core fields).
+ * Sidebar Employees tab — create and edit staff.
  */
 (function () {
     const Store = () => window.OplixEmployeesStore;
@@ -125,7 +125,7 @@
                     <button type="button" class="btn" id="emp-add-btn">Add employee</button>
                     <span class="dir-status" id="emp-list-status">${escapeHtml(state.status && state.view === "list" ? state.status : "")}</span>
                 </div>
-                <p class="books-hint">All staff across your organization — same list as the iOS app. Username and login email are generated from the employee name.</p>
+                <p class="books-hint">All staff across your organization. Username and login email are generated from the employee name.</p>
                 ${
                     employees.length
                         ? `<ul class="loc-row-list dir-list">${employees.map(renderEmployeeRow).join("")}</ul>`
@@ -245,7 +245,7 @@
                             <p class="data-list-meta">Email: <strong>${escapeHtml(emailPreview)}</strong></p>
                             <p class="books-hint">If that email is taken, a number is added automatically (e.g. johnsmith1@oplix.app).</p>
                         </div>
-                        <p class="books-hint">Weekly schedules — set detailed hours in the iOS app after creating the employee.</p>
+                        <p class="books-hint">Weekly schedules — set detailed hours after creating the employee.</p>
                         <div class="dir-form-actions">
                             <button type="button" class="btn" id="emp-create-btn"${state.saving ? " disabled" : ""}>Create employee</button>
                             <button type="button" class="btn btn-nav-outline" id="emp-cancel-create">Cancel</button>
@@ -361,7 +361,7 @@
                         </fieldset>`
                                 : ""
                         }
-                        <p class="books-hint">Weekly schedules — edit in the iOS app for full per-facility schedule controls.</p>
+                        <p class="books-hint">Weekly schedules — per-facility schedule controls available when editing.</p>
                         <div class="dir-form-actions">
                             <button type="button" class="btn" id="emp-save-btn"${state.saving ? " disabled" : ""}>Save changes</button>
                             <button type="button" class="btn btn-nav-outline" id="emp-cancel-edit">Cancel</button>

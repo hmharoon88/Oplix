@@ -1,5 +1,5 @@
 /**
- * Firestore CRUD for location tasks (mirrors iOS LocationDetailViewModel).
+ * Firestore CRUD for location tasks.
  */
 (function () {
     const M = () => window.OplixTasksModel;

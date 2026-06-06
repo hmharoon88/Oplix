@@ -1,5 +1,5 @@
 /**
- * Payables tab UI for Daily books (shared Firestore path with iOS).
+ * Payables tab UI for Daily books.
  */
 (function () {
     const M = () => window.OplixPayablesModel;

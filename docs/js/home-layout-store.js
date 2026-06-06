@@ -1,5 +1,5 @@
 /**
- * Home layout prefs — same shape as iOS HomeLayoutStore (localStorage per user).
+ * Home layout prefs — localStorage per user.
  */
 (function () {
     const DEFAULT_ORDER = [

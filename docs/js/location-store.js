@@ -1,5 +1,5 @@
 /**
- * Location CRUD — same Firestore paths as iOS (users/{uid}/locations/{id}).
+ * Location CRUD — users/{uid}/locations/{id}.
  */
 (function () {
     function locRef(userId, locationId) {

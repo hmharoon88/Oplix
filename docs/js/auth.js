@@ -1,5 +1,5 @@
 /**
- * Web auth — same Firebase project and users collection as the Oplix iOS app.
+ * Web auth — Firebase project and users collection.
  * Only accounts with users/{uid}.role === "manager" and verified email.
  */
 const OplixAuth = {

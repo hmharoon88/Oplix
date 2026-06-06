@@ -1,5 +1,5 @@
 /**
- * Settings helpers — notification prefs match iOS User.notificationPrefs.
+ * Settings helpers — notification preferences.
  */
 (function () {
     function resolvedChannels(prefs) {

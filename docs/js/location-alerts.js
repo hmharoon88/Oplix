@@ -1,5 +1,5 @@
 /**
- * Per-location Needs Attention alerts — mirrors LocationAlertsViewModel.swift
+ * Per-location Needs Attention alerts.
  */
 (function () {
     const VARIANCE_THRESHOLD = 5;
