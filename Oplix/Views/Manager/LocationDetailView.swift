@@ -21,6 +21,7 @@ struct LocationDetailView: View {
     // are still available inside Payroll / Employees screens, but the
     // top of the location screen is now action-oriented instead.
     @StateObject private var alertsViewModel: LocationAlertsViewModel
+    @EnvironmentObject private var authViewModel: AuthViewModel
     @State private var showingAddEmployee = false
     @State private var showingDeleteConfirmation = false
     @State private var showingError = false
@@ -146,11 +147,16 @@ struct LocationDetailView: View {
                             // first batch; otherwise the empty "all caught
                             // up" state would push the icon grid down for
                             // no reason on a clean location.
-                            if alertsViewModel.isLoading || !alertsViewModel.alerts.isEmpty {
+                            let locationAlerts = alertsViewModel.alerts
+                                .filteringAcknowledged(authViewModel.acknowledgedAlertIdSet)
+                            if alertsViewModel.isLoading || !locationAlerts.isEmpty {
                                 ActionCenterCard(
-                                    alerts: alertsViewModel.alerts,
+                                    alerts: locationAlerts,
                                     isLoading: alertsViewModel.isLoading,
-                                    onTapAlert: handleAlertTap
+                                    onTapAlert: handleAlertTap,
+                                    onAcknowledge: { alert in
+                                        Task { await authViewModel.acknowledgeAlert(alert.id) }
+                                    }
                                 )
                                 .padding(.horizontal)
                                 .padding(.top, 8)
@@ -250,6 +256,25 @@ struct LocationDetailView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+
+                            if authViewModel.currentUser?.role == .manager {
+                                NavigationLink {
+                                    ReportsHubView(
+                                        userId: userId,
+                                        organizationName: authViewModel.currentUser?.organizationName,
+                                        preselectedLocationId: locationId
+                                    )
+                                } label: {
+                                    SectionIconCard(
+                                        icon: "doc.text.magnifyingglass",
+                                        title: "Reports",
+                                        color: .cyan,
+                                        count: 0,
+                                        showCount: false
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
                             
                             Button(action: {
                                 showingSalesExpenses = true
@@ -466,8 +491,12 @@ struct LocationDetailView: View {
             print("   ViewModel employees count: \(viewModel.employees.count)")
             return AddEmployeeView(viewModel: viewModel)
         }
-        .onChange(of: showingAddEmployee) { oldValue, newValue in
-            print("🟡 SHEET - showingAddEmployee changed: \(oldValue) -> \(newValue)")
+        .onChange(of: showingAddEmployee) { _, isShowing in
+            guard !isShowing else { return }
+            Task {
+                await viewModel.reloadData()
+                await alertsViewModel.loadAlerts()
+            }
         }
         .sheet(isPresented: $showingSalesExpenses) {
             print("🟡 SHEET - SalesExpensesScreen PRESENTED")
@@ -672,5 +701,6 @@ private extension String {
 #Preview {
     NavigationStack {
         LocationDetailView(userId: "test-user", locationId: "test-location")
+            .environmentObject(AuthViewModel())
     }
 }

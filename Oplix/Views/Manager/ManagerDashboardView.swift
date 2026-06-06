@@ -170,6 +170,7 @@ struct ManagerDashboardView: View {
                             locationId: location.id,
                             showsCloseButton: true
                         )
+                        .environmentObject(authViewModel)
                     }
                 }
             }

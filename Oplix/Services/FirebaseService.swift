@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import FirebaseCore
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
@@ -31,6 +32,36 @@ class FirebaseService: ObservableObject {
     }
     
     private init() {}
+    
+    /// Secondary Firebase app used only to provision employee/supervisor Auth accounts
+    /// without replacing the manager's primary `Auth.auth()` session.
+    private static let secondaryAuthAppName = "OplixEmployeeProvisioning"
+    
+    private func authForProvisioningStaffAccount() throws -> Auth {
+        if let app = FirebaseApp.app(name: Self.secondaryAuthAppName) {
+            return Auth.auth(app: app)
+        }
+        guard let primaryApp = FirebaseApp.app() else {
+            throw NSError(
+                domain: "FirebaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Firebase is not configured"]
+            )
+        }
+        FirebaseApp.configure(name: Self.secondaryAuthAppName, options: primaryApp.options)
+        guard let secondaryApp = FirebaseApp.app(name: Self.secondaryAuthAppName) else {
+            throw NSError(
+                domain: "FirebaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to configure secondary Firebase app"]
+            )
+        }
+        return Auth.auth(app: secondaryApp)
+    }
+    
+    private static func shouldProvisionStaffOnSecondaryAuth(role: User.UserRole) -> Bool {
+        role != .manager && Auth.auth().currentUser != nil
+    }
     
     // MARK: - Authentication
     
@@ -100,21 +131,38 @@ class FirebaseService: ObservableObject {
     }
     
     func createUser(email: String, password: String, username: String, role: User.UserRole, locationId: String?, managerUserId: String? = nil, signOutAfterCreation: Bool = true, managerEmail: String? = nil, managerPassword: String? = nil) async throws -> User {
-        // Store manager's email before creating employee (if provided)
-        let managerEmailBeforeCreation = managerEmail ?? Auth.auth().currentUser?.email
+        if Self.shouldProvisionStaffOnSecondaryAuth(role: role) {
+            let secondaryAuth = try authForProvisioningStaffAccount()
+            let result = try await secondaryAuth.createUser(withEmail: email, password: password)
+            defer { try? secondaryAuth.signOut() }
+            
+            let user = User(
+                id: result.user.uid,
+                username: username,
+                role: role,
+                locationId: locationId,
+                managerUserId: managerUserId,
+                createdAt: Date()
+            )
+            
+            do {
+                try db.collection("users").document(user.id).setData(from: user)
+                print("✅ User document created (secondary auth) for \(user.id) with role \(user.role.rawValue)")
+            } catch {
+                print("🔴 Error creating User document: \(error.localizedDescription)")
+                throw error
+            }
+            
+            return user
+        }
         
         let result = try await Auth.auth().createUser(withEmail: email, password: password)
-        // Note: After createUser, Firebase automatically signs in as the new user
         
-        // Send email verification only for managers (not for employees or supervisors)
         if role == .manager {
             do {
                 try await result.user.sendEmailVerification()
             } catch {
-                // If email sending fails, still create the user but sign them out
-                // They can resend verification email later
                 print("⚠️ Warning: Failed to send verification email: \(error.localizedDescription)")
-                // Don't throw - allow user creation to succeed, they can resend email
             }
         }
         
@@ -123,11 +171,10 @@ class FirebaseService: ObservableObject {
             username: username,
             role: role,
             locationId: locationId,
-            managerUserId: managerUserId, // For employees: store the manager's userId
+            managerUserId: managerUserId,
             createdAt: Date()
         )
         
-        // Create User document (employee is currently signed in, so this works)
         do {
             try db.collection("users").document(user.id).setData(from: user)
             print("✅ User document created successfully for \(user.id) with role \(user.role.rawValue)")
@@ -136,25 +183,8 @@ class FirebaseService: ObservableObject {
             throw error
         }
         
-        // Sign out the newly created user if requested (default: true for manager sign-up)
-        // For employee creation, caller will handle sign-out after creating employee document
         if signOutAfterCreation {
             try Auth.auth().signOut()
-        } else if let managerEmail = managerEmailBeforeCreation,
-                  let managerPassword = managerPassword,
-                  let managerUID = managerUserId,
-                  managerUID != result.user.uid {
-            // For employee creation: sign out employee and re-authenticate manager
-            try Auth.auth().signOut()
-            
-            // Re-authenticate the manager
-            do {
-                _ = try await Auth.auth().signIn(withEmail: managerEmail, password: managerPassword)
-                print("✅ Manager re-authenticated after creating employee")
-            } catch {
-                print("⚠️ Warning: Failed to re-authenticate manager: \(error.localizedDescription)")
-                // Don't throw - the employee was created successfully, manager can sign in again
-            }
         }
         
         return user
@@ -279,6 +309,25 @@ class FirebaseService: ObservableObject {
         try await db.collection("users").document(userId).updateData([
             "notificationPrefs": dict
         ])
+    }
+
+    /// Record that the user acknowledged a Needs Attention alert so it
+    /// stays hidden on Home and Location screens across devices.
+    func acknowledgeAlert(userId: String, alertId: String) async throws {
+        try await db.collection("users").document(userId).updateData([
+            "acknowledgedAlertIds": FieldValue.arrayUnion([alertId])
+        ])
+        FirebaseService.withCacheLock {
+            if let cached = FirebaseService.userCache[userId] {
+                var user = cached.user
+                if !user.resolvedAcknowledgedAlertIds.contains(alertId) {
+                    var ids = user.resolvedAcknowledgedAlertIds
+                    ids.append(alertId)
+                    user.acknowledgedAlertIds = ids
+                }
+                FirebaseService.userCache[userId] = (user: user, timestamp: Date())
+            }
+        }
     }
     
     func deleteAccount(userId: String, password: String) async throws {

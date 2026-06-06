@@ -229,22 +229,18 @@ struct LastShiftMultiTerminalSummarySheet: View {
             Divider()
 
             if let summary = summary {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Lottery totals")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
                     summaryRow("Total Sold Tickets", value: "\(summary.totalSold)")
                     summaryRow("Total Dollars", value: formatCurrency(Double(summary.totalDollars)))
                     summaryRow("Total Books", value: "\(summary.totalBooks)")
-                    Divider()
-                    summaryRow("Instant Total", value: formatCurrency(summary.instantTotal))
-                    summaryRow("Online Total", value: formatCurrency(summary.onlineTotal))
-                    summaryRow("Total Sold Amount", value: formatCurrency(summary.totalSoldAmount))
-                    Divider()
-                    summaryRow("Register Cash", value: formatCurrency(summary.registerCash))
-                    summaryRow("Total Cash", value: formatCurrency(summary.totalCash))
-                    summaryRow("Cash In Bag", value: formatCurrency(summary.cashInBag), highlighted: true)
-                    summaryRow("Shift End Cash", value: formatCurrency(summary.cashInBagNet), highlighted: true)
-                    if let overShort = summary.overShort {
-                        summaryRow("Over/Short", value: formatCurrency(overShort), highlighted: true)
-                    }
+                    LotteryCashFlowSummaryView(summary: summary)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)

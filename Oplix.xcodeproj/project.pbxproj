@@ -15,7 +15,6 @@
 		BECAED7E2ECD4D0F0018053C /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = BECAED7D2ECD4D0F0018053C /* FirebaseAnalytics */; };
 		BECAED802ECD4D0F0018053C /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = BECAED7F2ECD4D0F0018053C /* FirebaseAnalyticsCore */; };
 		BECAED822ECD4D0F0018053C /* FirebaseAnalyticsIdentitySupport in Frameworks */ = {isa = PBXBuildFile; productRef = BECAED812ECD4D0F0018053C /* FirebaseAnalyticsIdentitySupport */; };
-		BECAED842ECD4D0F0018053C /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = BECAED832ECD4D0F0018053C /* FirebaseAppCheck */; };
 		BECAED862ECD4D0F0018053C /* FirebaseAppDistribution-Beta in Frameworks */ = {isa = PBXBuildFile; productRef = BECAED852ECD4D0F0018053C /* FirebaseAppDistribution-Beta */; };
 		BECAED8A2ECD4D0F0018053C /* FirebaseAuthCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = BECAED892ECD4D0F0018053C /* FirebaseAuthCombine-Community */; };
 		BECAED8E2ECD4D0F0018053C /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = BECAED8D2ECD4D0F0018053C /* FirebaseCrashlytics */; };
@@ -99,7 +98,6 @@
 				BECAED7E2ECD4D0F0018053C /* FirebaseAnalytics in Frameworks */,
 				BECAED802ECD4D0F0018053C /* FirebaseAnalyticsCore in Frameworks */,
 				BECAED822ECD4D0F0018053C /* FirebaseAnalyticsIdentitySupport in Frameworks */,
-				BECAED842ECD4D0F0018053C /* FirebaseAppCheck in Frameworks */,
 				BECAED862ECD4D0F0018053C /* FirebaseAppDistribution-Beta in Frameworks */,
 				BECAED8A2ECD4D0F0018053C /* FirebaseAuthCombine-Community in Frameworks */,
 				BECAED8E2ECD4D0F0018053C /* FirebaseCrashlytics in Frameworks */,
@@ -475,7 +473,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.6;
+				MARKETING_VERSION = 1.71;
 				PRODUCT_BUNDLE_IDENTIFIER = tech.Oplix;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -508,7 +506,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.6;
+				MARKETING_VERSION = 1.71;
 				PRODUCT_BUNDLE_IDENTIFIER = tech.Oplix;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -681,11 +679,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = BECAEC192ECC10130018053C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseAnalyticsIdentitySupport;
-		};
-		BECAED832ECD4D0F0018053C /* FirebaseAppCheck */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = BECAEC192ECC10130018053C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseAppCheck;
 		};
 		BECAED852ECD4D0F0018053C /* FirebaseAppDistribution-Beta */ = {
 			isa = XCSwiftPackageProductDependency;

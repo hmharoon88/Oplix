@@ -60,7 +60,7 @@ struct AddManagerEmployeeView: View {
                                     Text("Schedule Conflicts Detected")
                                         .font(.headline)
                                         .foregroundColor(.orange)
-                                    Text("Please resolve overlapping schedules before creating the employee.")
+                                    Text("Fix overlapping shift times between locations before creating this employee.")
                                         .font(.caption)
                                         .foregroundColor(.black)
                                 }
@@ -75,16 +75,26 @@ struct AddManagerEmployeeView: View {
                         SecureField("Password", text: $password)
                     }
                     
-                    Section("Schedule Settings") {
+                    Section {
                         Toggle("24/7", isOn: $is24Hours)
                             .onChange(of: is24Hours) { _, newValue in
-                                // When 24/7 is enabled, disable weekly schedule for all locations
                                 if newValue {
+                                    scheduleConflicts.removeAll()
                                     for locationId in selectedLocationIds {
                                         locationUseWeeklySchedule[locationId] = false
                                     }
+                                } else {
+                                    for locationId in selectedLocationIds {
+                                        checkConflicts(for: locationId)
+                                    }
                                 }
                             }
+                    } header: {
+                        Text("Schedule Settings")
+                    } footer: {
+                        if is24Hours {
+                            Text("24/7 shift time allows this employee at multiple locations without overlap warnings.")
+                        }
                     }
                     
                     Section("Assign to Locations") {
@@ -312,7 +322,9 @@ struct AddManagerEmployeeView: View {
                     Spacer()
                     
                     // Show conflict warning
-                    if let locationConflicts = scheduleConflicts[location.id], !locationConflicts.isEmpty {
+                    if !is24Hours,
+                       let locationConflicts = scheduleConflicts[location.id],
+                       !locationConflicts.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(.orange)
@@ -406,10 +418,15 @@ struct AddManagerEmployeeView: View {
     }
     
     private var hasScheduleConflicts: Bool {
-        !scheduleConflicts.isEmpty
+        !is24Hours && !scheduleConflicts.isEmpty
     }
     
     private func checkConflicts(for locationId: String) {
+        if is24Hours {
+            scheduleConflicts.removeValue(forKey: locationId)
+            return
+        }
+
         var conflicts: [String] = []
         
         guard viewModel.locations.first(where: { $0.id == locationId }) != nil else { return }

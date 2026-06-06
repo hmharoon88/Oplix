@@ -158,8 +158,8 @@ struct LotteryTodayCard: View {
     private func secondaryLabel(for row: LotteryTodayRow) -> String {
         if row.formsCount == 0 { return "no submissions" }
         let formsBit = "\(row.formsCount) shift\(row.formsCount == 1 ? "" : "s")"
-        if row.totalSold > 0 {
-            return "\(formsBit) · \(formatCurrency(row.totalSold)) sold"
+        if row.cashEnclosed > 0 {
+            return "\(formsBit) · \(formatCurrency(row.cashEnclosed)) cash enclosed"
         }
         return formsBit
     }

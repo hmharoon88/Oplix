@@ -347,6 +347,72 @@ enum TaskAssignmentAudit {
         }
     }
 
+    /// One recurring task the employee did not complete on a past calendar day.
+    struct EmployeeMissedRecurringItem: Identifiable {
+        let id: String
+        let date: Date
+        let task: WorkTask
+
+        init(date: Date, task: WorkTask, employeeId: String) {
+            self.date = date
+            self.task = task
+            self.id = "\(task.id)-\(employeeId)-\(Int(date.timeIntervalSince1970))"
+        }
+    }
+
+    /// Recurring assignments this employee missed on days before today (same rules as Task Check History).
+    static func missedRecurringItems(
+        for employeeId: String,
+        from tasks: [WorkTask],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [EmployeeMissedRecurringItem] {
+        let recurring = tasks.filter {
+            $0.frequency.isRecurring && $0.assignedEmployeeIds.contains(employeeId)
+        }
+        guard !recurring.isEmpty else { return [] }
+
+        let todayStart = calendar.startOfDay(for: now)
+        guard let rangeStart = calendar.date(byAdding: .day, value: -(lookbackDays - 1), to: todayStart) else {
+            return []
+        }
+
+        var items: [EmployeeMissedRecurringItem] = []
+        var cursor = rangeStart
+        while cursor < todayStart {
+            let dayStart = cursor
+            guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { break }
+
+            for task in recurring {
+                guard isExpected(
+                    task: task,
+                    employeeId: employeeId,
+                    dayStart: dayStart,
+                    dayEnd: dayEnd,
+                    todayStart: todayStart,
+                    calendar: calendar
+                ) else { continue }
+                guard isMissed(
+                    task: task,
+                    employeeId: employeeId,
+                    dayStart: dayStart,
+                    dayEnd: dayEnd,
+                    todayStart: todayStart,
+                    calendar: calendar
+                ) else { continue }
+                items.append(EmployeeMissedRecurringItem(date: dayStart, task: task, employeeId: employeeId))
+            }
+
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+
+        return items.sorted { lhs, rhs in
+            if lhs.date != rhs.date { return lhs.date > rhs.date }
+            return lhs.task.description.localizedCaseInsensitiveCompare(rhs.task.description) == .orderedAscending
+        }
+    }
+
     static func sections(
         from tasks: [WorkTask],
         now: Date = Date(),

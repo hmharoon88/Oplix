@@ -74,6 +74,30 @@ class EmployeeHomeViewModel: ObservableObject {
         TaskProgress.employeeToday(tasks: tasks, employeeId: employeeId)
     }
 
+    /// Recurring tasks missed on past days (read-only on the Tasks tab).
+    var missedRecurringItems: [TaskAssignmentAudit.EmployeeMissedRecurringItem] {
+        TaskAssignmentAudit.missedRecurringItems(for: employeeId, from: tasks)
+    }
+
+    /// Tasks shown in the actionable list: all recurring + corrective until done.
+    var actionableTasks: [WorkTask] {
+        tasks.filter { task in
+            if task.frequency == .oneTime {
+                return !task.isCompletedBy(employeeId: employeeId)
+            }
+            return task.frequency.isRecurring
+        }
+        .sorted { lhs, rhs in
+            let lhsCorrective = lhs.frequency == .oneTime
+            let rhsCorrective = rhs.frequency == .oneTime
+            if lhsCorrective != rhsCorrective { return lhsCorrective }
+            let lhsDone = lhs.isCompletedBy(employeeId: employeeId)
+            let rhsDone = rhs.isCompletedBy(employeeId: employeeId)
+            if lhsDone != rhsDone { return !lhsDone }
+            return lhs.description.localizedCaseInsensitiveCompare(rhs.description) == .orderedAscending
+        }
+    }
+
     /// Location-wide "today" score (% of assigned tasks fully done in the
     /// current cycle). nil when there are no assigned tasks at the location.
     var locationTodayScore: LocationScoreSegment? {
@@ -784,6 +808,7 @@ class EmployeeHomeViewModel: ObservableObject {
         instantCashes: [String],
         imageData: Data?,
         registerCash: String?,
+        cashInHand: Double,
         skipValidation: Bool = false,
         terminalNumber: Int? = nil
     ) async throws -> LotteryForm {
@@ -940,6 +965,9 @@ class EmployeeHomeViewModel: ObservableObject {
         // 7. Update local template
         setTemplate(template, for: terminalNumber)
         
+        // Counted cash enclosed for this shift (required before close).
+        let overShort = cashInHand - shiftSummary.cashInBagNet
+
         // Convert ShiftSummary to ShiftSummaryData (do this before image upload)
         let summaryData = ShiftSummaryData(
             totalSold: shiftSummary.totalSold,
@@ -955,7 +983,7 @@ class EmployeeHomeViewModel: ObservableObject {
             totalCashes: shiftSummary.totalCashes,
             cashInBag: shiftSummary.cashInBag,
             cashInBagNet: shiftSummary.cashInBagNet,
-            overShort: nil // Will be set by employee in shift summary sheet
+            overShort: overShort
         )
         
         // 8. Create and save lottery form with report (without image URL first for faster response).

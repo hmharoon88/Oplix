@@ -225,9 +225,6 @@ class LocationDetailViewModel: ObservableObject {
         var attempts = 0
         let maxAttempts = 10
         
-        // Get manager's email before creating employee (for re-authentication)
-        let managerEmail = Auth.auth().currentUser?.email
-        
         // Try to create user, if email exists, add unique suffix
         while attempts < maxAttempts {
             do {
@@ -238,9 +235,7 @@ class LocationDetailViewModel: ObservableObject {
                     role: role,
                     locationId: locationId,
                     managerUserId: userId,
-                    signOutAfterCreation: false, // Don't sign out yet - we need to create employee document first
-                    managerEmail: managerEmail,
-                    managerPassword: managerPassword
+                    signOutAfterCreation: false
                 )
                 break // Success, exit loop
             } catch {
@@ -268,10 +263,6 @@ class LocationDetailViewModel: ObservableObject {
             throw NSError(domain: "LocationDetailViewModel", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create user after \(maxAttempts) attempts"])
         }
         
-        // At this point, the employee is signed in (createUser signs them in automatically)
-        // We need to create the Employee document while the employee is still signed in
-        // (Firestore rules allow employees to create their own documents)
-        
         // Create Employee document using the user ID from Firebase Auth
         var employee = Employee(
             id: createdUser.id,
@@ -296,60 +287,18 @@ class LocationDetailViewModel: ObservableObject {
         employee.canManageTasks = canManageTasks
         employee.canManageDocuments = canManageDocuments
         
-        // Create employee document while employee is still signed in
-        // (Employee can create their own document per Firestore rules)
         try await firebaseService.createManagerEmployee(userId: userId, employee: employee)
-        
-        // Also create in location subcollection for backward compatibility
         try await firebaseService.createEmployee(userId: userId, locationId: locationId, employee: employee)
         
-        // Small delay to ensure documents are fully written
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-        
-        // Sign out the employee
-        try Auth.auth().signOut()
-        
-        // Re-authenticate manager if we have credentials (manager has full access to all employee data)
-        if let managerEmail = managerEmail,
-           let managerPassword = managerPassword {
-            do {
-                _ = try await Auth.auth().signIn(withEmail: managerEmail, password: managerPassword)
-                print("✅ Manager re-authenticated - has full access to all employee data")
-                
-                // Update location
-                var updatedLocation = location!
-                updatedLocation.employees.append(createdUser.id)
-                try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
-                
-                // Small delay before reloading to ensure location is updated
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-                
-                // Reload data (manager is authenticated)
-                // Store any existing error message before loadData
-                _ = errorMessage
-                await loadData()
-                // If employee creation succeeded, clear any "Employee not found" errors from loadData
-                // The employee was created successfully, so this error is just a timing issue
-                if errorMessage?.contains("Employee not found") == true || 
-                   errorMessage?.contains("Failed to load data") == true {
-                    errorMessage = nil
-                    print("✅ Employee created successfully - ignoring loadData timing error")
-                }
-            } catch {
-                print("⚠️ Warning: Failed to re-authenticate manager: \(error.localizedDescription)")
-                // Still update location even if re-auth fails
-                var updatedLocation = location!
-                updatedLocation.employees.append(createdUser.id)
-                try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
-                // Manager will need to sign in again to see the updated data
-            }
-        } else {
-            // If no manager credentials, just update location
-            // Manager will need to sign in again to see the updated data
-            var updatedLocation = location!
+        var updatedLocation = location!
+        if !updatedLocation.employees.contains(createdUser.id) {
             updatedLocation.employees.append(createdUser.id)
-            try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
         }
+        try await firebaseService.updateLocation(userId: userId, location: updatedLocation)
+        
+        resetLoadedDataFlag()
+        await loadData()
+        errorMessage = nil
         
         return (username: finalUsername, email: email, password: password)
     }

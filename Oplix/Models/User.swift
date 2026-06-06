@@ -25,6 +25,16 @@ struct User: Identifiable, Codable {
     // creates the field on demand.
     var notificationPrefs: NotificationPrefs?
 
+    /// Needs Attention alert ids the user dismissed via Acknowledge on Home
+    /// or Location screens. Persists on the User doc so they stay hidden
+    /// across devices until the underlying issue is resolved (new alert id).
+    /// Optional so legacy User docs without this field still decode.
+    var acknowledgedAlertIds: [String]?
+
+    var resolvedAcknowledgedAlertIds: [String] {
+        acknowledgedAlertIds ?? []
+    }
+
     enum UserRole: String, Codable {
         case manager
         case employee

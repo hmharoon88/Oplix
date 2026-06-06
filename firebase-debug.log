@@ -1,0 +1,108 @@
+[debug] [2026-05-27T22:42:29.149Z] ----------------------------------------------------------------------
+[debug] [2026-05-27T22:42:29.150Z] Command:       /opt/homebrew/Cellar/node/24.3.0/bin/node /opt/homebrew/bin/firebase apps:list --project oplix-3183d
+[debug] [2026-05-27T22:42:29.151Z] CLI Version:   14.24.1
+[debug] [2026-05-27T22:42:29.151Z] Platform:      darwin
+[debug] [2026-05-27T22:42:29.151Z] Node Version:  v24.3.0
+[debug] [2026-05-27T22:42:29.151Z] Time:          Wed May 27 2026 18:42:29 GMT-0400 (Eastern Daylight Time)
+[debug] [2026-05-27T22:42:29.151Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-05-27T22:42:29.152Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-05-27T22:42:29.230Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-05-27T22:42:29.230Z] > authorizing via signed-in user (drharoon0802@gmail.com)
+[debug] [2026-05-27T22:42:29.231Z] Checked if tokens are valid: false, expires at: 1778558656756
+[debug] [2026-05-27T22:42:29.231Z] Checked if tokens are valid: false, expires at: 1778558656756
+[debug] [2026-05-27T22:42:29.231Z] > refreshing access token with scopes: []
+[debug] [2026-05-27T22:42:29.231Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-05-27T22:42:29.231Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-05-27T22:42:29.347Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-05-27T22:42:29.347Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[warn] ⚠  Unable to fetch the CLI MOTD and remote config. This is not a fatal error, but may indicate an issue with your network connection. 
+[debug] [2026-05-27T22:42:29.347Z] Failed to fetch MOTD Error: EPERM: operation not permitted, open '/Users/haroon/.config/configstore/firebase-tools.json.4232107943'
+[debug] [2026-05-27T22:42:29.412Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-05-27T22:42:29.412Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[error] Authentication Error: Your credentials are no longer valid. Please run firebase login --reauth
+
+For CI servers and headless environments, generate a new token with firebase login:ci
+[debug] [2026-05-27T22:42:29.413Z] Authentication Error: Your credentials are no longer valid. Please run firebase login --reauth
+
+For CI servers and headless environments, generate a new token with firebase login:ci
+[debug] [2026-05-27T22:42:29.555Z] FirebaseError: Authentication Error: Your credentials are no longer valid. Please run firebase login --reauth
+
+For CI servers and headless environments, generate a new token with firebase login:ci
+    at invalidCredentialError (/opt/homebrew/lib/node_modules/firebase-tools/lib/auth.js:167:12)
+    at refreshTokens (/opt/homebrew/lib/node_modules/firebase-tools/lib/auth.js:591:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async getAccessToken (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:42:18)
+    at async Client.addAuthHeader (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:169:21)
+    at async Client.request (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:120:34)
+    at async listFirebaseApps (/opt/homebrew/lib/node_modules/firebase-tools/lib/management/apps.js:354:30)
+    at async Command.actionFn (/opt/homebrew/lib/node_modules/firebase-tools/lib/commands/apps-list.js:43:16)
+[error] 
+[error] Error: Failed to list Firebase apps. See firebase-debug.log for more info.
+[debug] [2026-05-27T22:42:29.826Z] Error: EPERM: operation not permitted, open '/Users/haroon/.config/configstore/firebase-tools.json.3289795927'
+    at Object.openSync (node:fs:554:18)
+    at writeFile.writeFileSync [as sync] (/opt/homebrew/lib/node_modules/firebase-tools/node_modules/write-file-atomic/index.js:205:13)
+    at set all (/opt/homebrew/lib/node_modules/firebase-tools/node_modules/configstore/index.js:61:20)
+    at Configstore.delete (/opt/homebrew/lib/node_modules/firebase-tools/node_modules/configstore/index.js:101:12)
+    at process.<anonymous> (/opt/homebrew/lib/node_modules/firebase-tools/lib/bin/cli.js:65:45)
+    at process.emit (node:events:519:35)
+    at process.exit (node:internal/process/per_thread:236:15)
+    at Timeout._onTimeout (/opt/homebrew/lib/node_modules/firebase-tools/lib/errorOut.js:20:17)
+    at listOnTimeout (node:internal/timers:608:17)
+    at process.processTimers (node:internal/timers:543:7)
+[error] 
+[error] Error: An unexpected error has occurred.
+[debug] [2026-05-27T22:42:31.267Z] ----------------------------------------------------------------------
+[debug] [2026-05-27T22:42:31.269Z] Command:       /opt/homebrew/Cellar/node/24.3.0/bin/node /opt/homebrew/bin/firebase apps:list --project oplix-3183d
+[debug] [2026-05-27T22:42:31.269Z] CLI Version:   14.24.1
+[debug] [2026-05-27T22:42:31.269Z] Platform:      darwin
+[debug] [2026-05-27T22:42:31.269Z] Node Version:  v24.3.0
+[debug] [2026-05-27T22:42:31.269Z] Time:          Wed May 27 2026 18:42:31 GMT-0400 (Eastern Daylight Time)
+[debug] [2026-05-27T22:42:31.269Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-05-27T22:42:31.270Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-05-27T22:42:31.345Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-05-27T22:42:31.345Z] > authorizing via signed-in user (drharoon0802@gmail.com)
+[debug] [2026-05-27T22:42:31.346Z] Checked if tokens are valid: false, expires at: 1778558656756
+[debug] [2026-05-27T22:42:31.346Z] Checked if tokens are valid: false, expires at: 1778558656756
+[debug] [2026-05-27T22:42:31.346Z] > refreshing access token with scopes: []
+[debug] [2026-05-27T22:42:31.347Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-05-27T22:42:31.347Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-05-27T22:42:31.462Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-05-27T22:42:31.463Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[warn] ⚠  Unable to fetch the CLI MOTD and remote config. This is not a fatal error, but may indicate an issue with your network connection. 
+[debug] [2026-05-27T22:42:31.463Z] Failed to fetch MOTD Error: EPERM: operation not permitted, open '/Users/haroon/.config/configstore/firebase-tools.json.1578671456'
+[debug] [2026-05-27T22:42:31.511Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-05-27T22:42:31.511Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[error] Authentication Error: Your credentials are no longer valid. Please run firebase login --reauth
+
+For CI servers and headless environments, generate a new token with firebase login:ci
+[debug] [2026-05-27T22:42:31.512Z] Authentication Error: Your credentials are no longer valid. Please run firebase login --reauth
+
+For CI servers and headless environments, generate a new token with firebase login:ci
+[debug] [2026-05-27T22:42:31.634Z] FirebaseError: Authentication Error: Your credentials are no longer valid. Please run firebase login --reauth
+
+For CI servers and headless environments, generate a new token with firebase login:ci
+    at invalidCredentialError (/opt/homebrew/lib/node_modules/firebase-tools/lib/auth.js:167:12)
+    at refreshTokens (/opt/homebrew/lib/node_modules/firebase-tools/lib/auth.js:591:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async getAccessToken (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:42:18)
+    at async Client.addAuthHeader (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:169:21)
+    at async Client.request (/opt/homebrew/lib/node_modules/firebase-tools/lib/apiv2.js:120:34)
+    at async listFirebaseApps (/opt/homebrew/lib/node_modules/firebase-tools/lib/management/apps.js:354:30)
+    at async Command.actionFn (/opt/homebrew/lib/node_modules/firebase-tools/lib/commands/apps-list.js:43:16)
+[error] 
+[error] Error: Failed to list Firebase apps. See firebase-debug.log for more info.
+[debug] [2026-05-27T22:42:31.897Z] Error: EPERM: operation not permitted, open '/Users/haroon/.config/configstore/firebase-tools.json.1224730584'
+    at Object.openSync (node:fs:554:18)
+    at writeFile.writeFileSync [as sync] (/opt/homebrew/lib/node_modules/firebase-tools/node_modules/write-file-atomic/index.js:205:13)
+    at set all (/opt/homebrew/lib/node_modules/firebase-tools/node_modules/configstore/index.js:61:20)
+    at Configstore.delete (/opt/homebrew/lib/node_modules/firebase-tools/node_modules/configstore/index.js:101:12)
+    at process.<anonymous> (/opt/homebrew/lib/node_modules/firebase-tools/lib/bin/cli.js:65:45)
+    at process.emit (node:events:519:35)
+    at process.exit (node:internal/process/per_thread:236:15)
+    at Timeout._onTimeout (/opt/homebrew/lib/node_modules/firebase-tools/lib/errorOut.js:20:17)
+    at listOnTimeout (node:internal/timers:608:17)
+    at process.processTimers (node:internal/timers:543:7)
+[error] 
+[error] Error: An unexpected error has occurred.

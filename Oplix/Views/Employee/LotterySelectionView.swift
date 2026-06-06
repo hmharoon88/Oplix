@@ -336,54 +336,8 @@ struct LastShiftSummarySheet: View {
                                 ShiftSummaryRow(label: "Total Books", value: "\(summary.totalBooks)")
                             }
                             
-                            Divider()
-                            
-                            // Sales Summary
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Sales Summary")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.secondary)
-                                
-                                ShiftSummaryRow(label: "Instant Total", value: formatCurrency(summary.instantTotal))
-                                ShiftSummaryRow(label: "Online Total", value: formatCurrency(summary.onlineTotal))
-                                ShiftSummaryRow(label: "Total Sold Amount", value: formatCurrency(summary.totalSoldAmount))
-                            }
-                            
-                            Divider()
-                            
-                            // Cash Summary
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Cash Summary")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.secondary)
-                                
-                                ShiftSummaryRow(label: "Register Cash", value: formatCurrency(summary.registerCash))
-                                ShiftSummaryRow(label: "Total Cash", value: formatCurrency(summary.totalCash))
-                                ShiftSummaryRow(label: "Online Cashes", value: formatCurrency(summary.onlineCashes))
-                                ShiftSummaryRow(label: "Instant Cashes", value: formatCurrency(summary.instantCashes))
-                                ShiftSummaryRow(label: "Total Cashes", value: formatCurrency(summary.totalCashes))
-                                
-                                Divider()
-                                
-                                ShiftSummaryRow(label: "Remaining Cash", value: formatCurrency(summary.cashInBag), isHighlighted: true)
-                                ShiftSummaryRow(label: "Shift End Cash", value: formatCurrency(summary.cashInBagNet), isHighlighted: true, isNet: true)
-                                
-                                // Over/Short (if available)
-                                if let overShort = summary.overShort {
-                                    Divider()
-                                    ShiftSummaryRow(
-                                        label: "Over/Short",
-                                        value: formatCurrency(overShort),
-                                        isHighlighted: true
-                                    )
-                                }
-                            }
+                            LotteryCashFlowSummaryView(summary: summary)
                         }
-                        .padding()
-                        .background(Color(red: 0.95, green: 0.95, blue: 1.0))
-                        .cornerRadius(12)
                         .padding(.horizontal, 20)
                     }
                     

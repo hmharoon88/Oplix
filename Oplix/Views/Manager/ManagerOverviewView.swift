@@ -293,15 +293,21 @@ struct ManagerOverviewView: View {
             // here (not in the view model) so toggling is instant — no
             // refetch — and the underlying data stays available for any
             // other surface that wants the unfiltered list.
-            let visibleAlerts = alertsViewModel.alerts.filter { alert in
-                !layoutStore.prefs.hiddenAlertCategories.contains(alert.category)
-            }
+            let visibleAlerts = alertsViewModel.alerts
+                .filter { alert in
+                    !layoutStore.prefs.hiddenAlertCategories.contains(alert.category)
+                }
+                .filteringAcknowledged(authViewModel.acknowledgedAlertIdSet)
             ActionCenterCard(
                 alerts: visibleAlerts,
-                isLoading: alertsViewModel.isLoading
-            ) { alert in
-                handleAlertTap(alert)
-            }
+                isLoading: alertsViewModel.isLoading,
+                onTapAlert: { alert in
+                    handleAlertTap(alert)
+                },
+                onAcknowledge: { alert in
+                    Task { await authViewModel.acknowledgeAlert(alert.id) }
+                }
+            )
             .padding(.horizontal)
             
         case .today:

@@ -122,6 +122,13 @@ struct ActionAlert: Identifiable, Equatable {
     let category: ManagerAlertCategory
 }
 
+extension Array where Element == ActionAlert {
+    /// Hides alerts the manager has acknowledged on Home or Location screens.
+    func filteringAcknowledged(_ acknowledgedIds: Set<String>) -> [ActionAlert] {
+        filter { !acknowledgedIds.contains($0.id) }
+    }
+}
+
 // MARK: - This-week pulse
 
 // Per-location row used by the DueThisWeekSheet. We carry a snapshot of
@@ -174,7 +181,7 @@ struct LotteryTodayRow: Identifiable, Equatable {
     let id: String              // location id
     let name: String            // location name
     var formsCount: Int         // # of forms submitted today (across terminals)
-    var totalSold: Double       // total sales reported today
+    var cashEnclosed: Double    // sum of reported/shift-end cash enclosed today
     var overShort: Double       // signed sum of overShort across today's forms
     var hadOverShortData: Bool  // false = no terminal reported a number; treat as "—"
     
@@ -337,7 +344,7 @@ final class HomeAlertsViewModel: ObservableObject {
         )
         let emptyLottery = LotteryTodayRow(
             id: location.id, name: location.name,
-            formsCount: 0, totalSold: 0,
+            formsCount: 0, cashEnclosed: 0,
             overShort: 0, hadOverShortData: false
         )
 
@@ -397,14 +404,14 @@ final class HomeAlertsViewModel: ObservableObject {
         
         var row = LotteryTodayRow(
             id: location.id, name: location.name,
-            formsCount: 0, totalSold: 0,
+            formsCount: 0, cashEnclosed: 0,
             overShort: 0, hadOverShortData: false
         )
         for form in forms {
             guard form.submittedAt >= todayStart, form.submittedAt < tomorrowStart else { continue }
             row.formsCount += 1
             if let summary = form.shiftSummary {
-                row.totalSold += summary.totalSoldAmount
+                row.cashEnclosed += Self.cashEnclosedAmount(from: summary)
                 if let overShort = summary.overShort {
                     row.overShort += overShort
                     row.hadOverShortData = true
@@ -412,6 +419,12 @@ final class HomeAlertsViewModel: ObservableObject {
             }
         }
         return row
+    }
+
+    /// Cash the employee counted and enclosed for the shift. Requires
+    /// over/short (saved at close since cash in hand is mandatory).
+    private static func cashEnclosedAmount(from summary: ShiftSummaryData) -> Double {
+        summary.cashInBagNet + (summary.overShort ?? 0)
     }
     
     // MARK: - Weekly cash pulse

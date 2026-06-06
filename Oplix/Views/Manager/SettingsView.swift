@@ -95,6 +95,20 @@ struct SettingsView: View {
                         }
                         
                         Section("Preferences") {
+                            if let userId = authViewModel.currentUser?.id,
+                               authViewModel.currentUser?.role == .manager {
+                                NavigationLink {
+                                    ReportsHubView(
+                                        userId: userId,
+                                        organizationName: authViewModel.currentUser?.organizationName
+                                    )
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "doc.text.magnifyingglass")
+                                        Text("Reports")
+                                    }
+                                }
+                            }
                             NavigationLink {
                                 NotificationSettingsView()
                             } label: {

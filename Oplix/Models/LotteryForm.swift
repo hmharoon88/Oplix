@@ -49,6 +49,70 @@ struct LotteryForm: Identifiable, Codable {
     var effectiveTerminalNumber: Int { terminalNumber ?? 1 }
 }
 
+/// User-facing labels for lottery close-out amounts (`ShiftSummaryData`).
+/// Stored field names (`cashInBag`, `cashInBagNet`) stay unchanged in Firestore.
+enum LotterySummaryDisplayName {
+    static let cashFlowTitle = "Cash in & cash out"
+
+    static let instantSales = "Instant ticket sales"
+    static let onlineSales = "Online lottery sales"
+    static let registerStartingCash = "Register starting cash"
+    static let totalCashIn = "Total cash in"
+
+    static let onlinePayouts = "Online payouts"
+    static let instantPayouts = "Instant payouts"
+    static let totalCashOut = "Total cash out"
+
+    /// `cashInBag` — sales + register float minus payouts.
+    static let balanceAfterCashOut = "Balance after cash out"
+
+    static let lessRegisterFloat = "Less register float"
+
+    /// `cashInBagNet` — lottery-only amount the employee should count.
+    static let expectedEnclosedCash = "Expected enclosed cash"
+
+    static let actualEnclosedCash = "Actual enclosed cash"
+
+    static func varianceLabel(for overShort: Double) -> String {
+        overShort >= 0 ? "Over" : "Short"
+    }
+}
+
+extension ShiftSummaryData {
+    /// Counted cash enclosed when the shift was closed (`cashInHand`).
+    var actualEnclosedCash: Double? {
+        guard let overShort else { return nil }
+        return cashInBagNet + overShort
+    }
+}
+
+/// Sanitizes and parses the actual enclosed cash text field (allows negatives).
+enum CashEnclosedInput {
+    static func sanitize(_ raw: String) -> String {
+        var result = ""
+        var hasLeadingMinus = false
+        var hasDecimal = false
+        for (index, character) in raw.enumerated() {
+            if character == "-", index == 0, !hasLeadingMinus {
+                hasLeadingMinus = true
+                result.append(character)
+            } else if character == ".", !hasDecimal {
+                hasDecimal = true
+                result.append(character)
+            } else if character.isNumber {
+                result.append(character)
+            }
+        }
+        return result
+    }
+
+    static func parse(_ text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "-", trimmed != ".", trimmed != "-." else { return nil }
+        return Double(trimmed)
+    }
+}
+
 struct ShiftSummaryData: Codable {
     let totalSold: Int
     let totalDollars: Int
@@ -61,7 +125,9 @@ struct ShiftSummaryData: Codable {
     let onlineCashes: Double
     let instantCashes: Double
     let totalCashes: Double
+    /// See `LotterySummaryDisplayName.balanceAfterCashOut`.
     let cashInBag: Double
+    /// See `LotterySummaryDisplayName.expectedEnclosedCash`.
     let cashInBagNet: Double
     var overShort: Double? // Optional - entered by employee in shift summary
 }

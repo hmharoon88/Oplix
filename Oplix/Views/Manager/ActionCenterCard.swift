@@ -13,6 +13,7 @@ struct ActionCenterCard: View {
     let isLoading: Bool
     // Caller is responsible for actually routing — we just hand back the alert.
     let onTapAlert: (ActionAlert) -> Void
+    let onAcknowledge: (ActionAlert) -> Void
 
     // Cap the row count so a noisy location doesn't push everything else
     // off-screen; the rest are available via "Show all" below.
@@ -34,10 +35,7 @@ struct ActionCenterCard: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(visibleAlerts.enumerated()), id: \.element.id) { idx, alert in
-                        Button { onTapAlert(alert) } label: {
-                            AlertRow(alert: alert)
-                        }
-                        .buttonStyle(.plain)
+                        alertRow(alert: alert)
                         if idx < visibleAlerts.count - 1 {
                             Divider().padding(.leading, 52)
                         }
@@ -67,6 +65,28 @@ struct ActionCenterCard: View {
             }
         }
         .oplixCard()
+    }
+
+    @ViewBuilder
+    private func alertRow(alert: ActionAlert) -> some View {
+        HStack(spacing: 0) {
+            Button { onTapAlert(alert) } label: {
+                AlertRow(alert: alert)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                onAcknowledge(alert)
+            } label: {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 22))
+                    .foregroundColor(Theme.cloudBlue)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Acknowledge")
+        }
     }
 
     // MARK: - Subviews
