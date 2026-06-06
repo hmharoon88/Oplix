@@ -42,7 +42,7 @@ cp docs/js/firebase-config.override.js.example docs/js/firebase-config.override.
 
 - `localhost`
 - `hmharoon88.github.io` (GitHub Pages)
-- Your custom domain when ready
+- Your Oplix custom domain when ready (not algls.com — that is a separate company site)
 
 ## Sync config after plist changes
 

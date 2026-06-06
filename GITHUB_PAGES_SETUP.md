@@ -57,7 +57,9 @@ When the app is on the App Store, edit `docs/index.html` and replace the placeho
 
 ## Custom domain (optional)
 
-1. Buy a domain (e.g. `oplix.app`)
+Oplix can use its own domain later (e.g. `oplix.app`). **algls.com** is a separate company site — see the `algls-website` project on your Desktop.
+
+1. Buy or use a domain for Oplix
 2. In **Settings → Pages**, enter the custom domain
 3. Add the DNS records GitHub shows at your registrar
 4. Enable **Enforce HTTPS**
