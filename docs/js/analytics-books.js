@@ -10,6 +10,7 @@
     let locations = [];
     let drillPack = null;
     let activeDrill = null;
+    let analysisRunId = 0;
     let state = {
         locationId: "",
         monthId: M().monthIdFromDate(new Date()),
@@ -79,18 +80,6 @@
             ids.push(M().monthIdFromDate(new Date(anchor.getFullYear(), anchor.getMonth() - i, 1)));
         }
         return ids;
-    }
-
-    async function loadMonthHistory(locationId, anchorMonthId, count) {
-        const monthIds = monthIdsForHistory(anchorMonthId, count);
-        if (!monthIds.length) return [];
-        const packs = await Store().loadMonthsForCompare(
-            userId,
-            [locationId],
-            monthIds,
-            loadOptions()
-        );
-        return packs.sort((a, b) => b.monthId.localeCompare(a.monthId));
     }
 
     function renderPreviousMonthsSection(packs, locationId, currentMonthId) {
@@ -374,7 +363,25 @@
             </div>`;
     }
 
+    function renderPrimaryDashboard(primaryPack) {
+        drillPack = {
+            title: `${locName(primaryPack.locationId)} · ${monthLabel(primaryPack.monthId)}`,
+            ...primaryPack,
+        };
+
+        const overviewHtml = `
+            <div class="bs-report">
+                ${renderMainDashboard(primaryPack.aggregate, drillPack.title)}
+            </div>`;
+
+        const out = $("analytics-output");
+        out.innerHTML = `
+            <div id="an-drill-mount" class="an-drill-mount" hidden></div>
+            <div id="an-overview-mount" class="an-overview-mount bs-overview">${overviewHtml}</div>`;
+    }
+
     async function runAnalysis() {
+        const runId = ++analysisRunId;
         const out = $("analytics-output");
         out.innerHTML = '<p class="books-hint">Loading…</p>';
         renderPreviousMonthsMount("");
@@ -382,29 +389,39 @@
         closeDrill();
 
         try {
-            const historyPacks = await loadMonthHistory(state.locationId, state.monthId, 12);
-            const primaryPack =
-                historyPacks.find((p) => p.monthId === state.monthId) || historyPacks[0];
+            const primaryPacks = await Store().loadMonthsForCompare(
+                userId,
+                [state.locationId],
+                [state.monthId],
+                loadOptions()
+            );
+            if (runId !== analysisRunId) return;
+
+            const primaryPack = primaryPacks[0];
             if (!primaryPack) {
                 out.innerHTML = '<p class="data-list-empty">No books data for this selection.</p>';
                 return;
             }
 
+            renderPrimaryDashboard(primaryPack);
+
+            const otherMonthIds = monthIdsForHistory(state.locationId, state.monthId, 12).filter(
+                (id) => id !== state.monthId
+            );
+            const otherPacks = otherMonthIds.length
+                ? await Store().loadMonthsForCompare(
+                      userId,
+                      [state.locationId],
+                      otherMonthIds,
+                      loadOptions()
+                  )
+                : [];
+            if (runId !== analysisRunId) return;
+
+            const historyPacks = [...primaryPacks, ...otherPacks].sort((a, b) =>
+                b.monthId.localeCompare(a.monthId)
+            );
             const previousPacks = historyPacks.filter((p) => p.monthId !== state.monthId);
-
-            drillPack = {
-                title: `${locName(primaryPack.locationId)} · ${monthLabel(primaryPack.monthId)}`,
-                ...primaryPack,
-            };
-
-            const overviewHtml = `
-                <div class="bs-report">
-                    ${renderMainDashboard(primaryPack.aggregate, drillPack.title)}
-                </div>`;
-
-            out.innerHTML = `
-                <div id="an-drill-mount" class="an-drill-mount" hidden></div>
-                <div id="an-overview-mount" class="an-overview-mount bs-overview">${overviewHtml}</div>`;
 
             renderPreviousMonthsMount(
                 renderPreviousMonthsSection(previousPacks, state.locationId, state.monthId)
@@ -420,6 +437,7 @@
                     : ""
             );
         } catch (err) {
+            if (runId !== analysisRunId) return;
             out.innerHTML = `<p class="app-error">${escapeHtml(err.message || "Failed to load books summary.")}</p>`;
             renderPreviousMonthsMount("");
             renderKeyMetricsMount("");

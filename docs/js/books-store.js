@@ -48,26 +48,30 @@
     /** Load many months for comparison (cap to avoid huge reads). */
     async function loadMonthsForCompare(userId, locationIds, monthIds, options) {
         const facilityTypesById = (options && options.facilityTypesById) || {};
-        const results = [];
+        const tasks = [];
         for (const locationId of locationIds) {
             const hasGasStation = facilityTypesById[locationId] === "c_store_gas";
             for (const monthId of monthIds) {
-                try {
-                    const { month, daysById } = await loadMonth(userId, locationId, monthId);
-                    const agg = M().aggregateMonth(month, daysById, { hasGasStation });
-                    results.push({ locationId, monthId, month, daysById, aggregate: agg });
-                } catch {
-                    results.push({
-                        locationId,
-                        monthId,
-                        month: M().defaultMonthDoc(),
-                        daysById: {},
-                        aggregate: M().aggregateMonth(M().defaultMonthDoc(), {}, { hasGasStation }),
-                    });
-                }
+                tasks.push(
+                    loadMonth(userId, locationId, monthId)
+                        .then(({ month, daysById }) => ({
+                            locationId,
+                            monthId,
+                            month,
+                            daysById,
+                            aggregate: M().aggregateMonth(month, daysById, { hasGasStation }),
+                        }))
+                        .catch(() => ({
+                            locationId,
+                            monthId,
+                            month: M().defaultMonthDoc(),
+                            daysById: {},
+                            aggregate: M().aggregateMonth(M().defaultMonthDoc(), {}, { hasGasStation }),
+                        }))
+                );
             }
         }
-        return results;
+        return Promise.all(tasks);
     }
 
     window.OplixBooksStore = {
