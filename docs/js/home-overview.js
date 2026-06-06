@@ -116,16 +116,88 @@
         return hours > 0 ? hours : null;
     }
 
-    function registerRevenue(register) {
-        return (register.cashSale || 0) + (register.creditCard || 0) + (register.fuelSaleDollars || 0);
+    function isGasLocation(location) {
+        return location?.facilityType === "c_store_gas";
     }
 
-    function shiftMerchRevenue(shift) {
+    /** C Store shift register total — card + cash only (all registers). */
+    function shiftRegisterCardCash(shift) {
         const regs = shift.registers || [];
         if (regs.length) {
             return regs.reduce((sum, r) => sum + (r.cashSale || 0) + (r.creditCard || 0), 0);
         }
         return (shift.cashSale || 0) + (shift.creditCard || 0);
+    }
+
+    function monthBooksPrefix(now) {
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    }
+
+    function hasMonthBooksDays(daysById, now) {
+        const M = window.OplixBooksModel;
+        if (!M) return false;
+        const prefix = monthBooksPrefix(now);
+        const todayDay = M.dayIdFromDate(now);
+        return Object.keys(daysById || {}).some((id) => id.startsWith(prefix) && id <= todayDay);
+    }
+
+    function storeSalesFromBooksDay(location, day) {
+        const M = window.OplixBooksModel;
+        if (!M || !day) return 0;
+        return M.daySalesForAggregate(M.normalizeDayDoc(day), isGasLocation(location));
+    }
+
+    function formatNumberCompact(value) {
+        const n = Number(value) || 0;
+        return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n);
+    }
+
+    function monthToDateFuelFromBooks(daysById, now) {
+        const M = window.OplixBooksModel;
+        if (!M) return { gallons: 0, dollars: 0 };
+        const prefix = monthBooksPrefix(now);
+        const todayDay = M.dayIdFromDate(now);
+        let gallons = 0;
+        let dollars = 0;
+        Object.entries(daysById || {}).forEach(([dayId, day]) => {
+            if (!dayId.startsWith(prefix) || dayId > todayDay) return;
+            const fuel = M.fuelDayTotal(M.normalizeDayDoc(day));
+            gallons += fuel.gallons;
+            dollars += fuel.dollars;
+        });
+        return { gallons, dollars };
+    }
+
+    function monthToDateStoreSalesFromBooks(location, daysById, now) {
+        const M = window.OplixBooksModel;
+        if (!M) return 0;
+        const prefix = monthBooksPrefix(now);
+        const todayDay = M.dayIdFromDate(now);
+        let total = 0;
+        Object.entries(daysById || {}).forEach(([dayId, day]) => {
+            if (!dayId.startsWith(prefix) || dayId > todayDay) return;
+            total += M.daySalesForAggregate(M.normalizeDayDoc(day), isGasLocation(location));
+        });
+        return total;
+    }
+
+    function storeSalesForDayId(location, dayId, daysById, shifts) {
+        const booksDay = daysById?.[dayId];
+        if (booksDay) {
+            return storeSalesFromBooksDay(location, booksDay);
+        }
+        if (isGasLocation(location)) return 0;
+        const M = window.OplixBooksModel;
+        if (!M) return 0;
+        let total = 0;
+        for (const shift of shifts) {
+            if (!shiftHasRegisterData(shift)) continue;
+            const dateRef = shiftDateRef(shift);
+            if (!dateRef) continue;
+            if (M.dayIdFromDate(dateRef) !== dayId) continue;
+            total += shiftRegisterCardCash(shift);
+        }
+        return total;
     }
 
     function shiftDateRef(shift) {
@@ -423,64 +495,62 @@
         return row;
     }
 
-    function computeLocationStats(location, bundle, allEmployeesDict, now) {
+    function sameDayPriorMonth(now) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        d.setMonth(d.getMonth() - 1);
+        return d;
+    }
+
+    /** Month-to-date metrics through asOfDate (same calendar days vs prior month for trends). */
+    function computeMtdMetrics(location, bundle, daysById, allEmployeesDict, asOfDate) {
         const { shifts, lotteryForms } = bundle;
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const monthEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+        const monthStart = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), 1);
+        const monthEnd = new Date(
+            asOfDate.getFullYear(),
+            asOfDate.getMonth(),
+            asOfDate.getDate(),
+            23,
+            59,
+            59
+        );
+        const M = window.OplixBooksModel;
 
-        const todayStart = startOfDay(now);
-        const tomorrowStart = addDays(todayStart, 1);
-        const lastWeekStart = addDays(todayStart, -7);
-        const lastWeekEnd = addDays(tomorrowStart, -7);
-
-        let monthToDateSales = 0;
         let monthToDateFuelGallons = 0;
         let monthToDateFuelDollars = 0;
         let monthToDateLotterySales = 0;
         let monthToDatePayroll = 0;
         let monthToDateExpenses = 0;
 
-        const snapshotPart = { revenue: 0, revenueLastWeek: 0, clockedIn: 0 };
-
-        for (const shift of shifts) {
-            if (shiftIsActive(shift)) snapshotPart.clockedIn += 1;
-
-            const dateRef = shiftDateRef(shift);
-            if (dateRef && shiftHasRegisterData(shift)) {
-                if (isInHalfOpenRange(dateRef, todayStart, tomorrowStart)) {
-                    const regs = shift.registers || [];
-                    if (regs.length) {
-                        regs.forEach((r) => {
-                            snapshotPart.revenue += registerRevenue(r);
-                        });
-                    } else {
-                        snapshotPart.revenue += (shift.cashSale || 0) + (shift.creditCard || 0);
-                    }
-                } else if (isInHalfOpenRange(dateRef, lastWeekStart, lastWeekEnd)) {
-                    const regs = shift.registers || [];
-                    if (regs.length) {
-                        regs.forEach((r) => {
-                            snapshotPart.revenueLastWeek += registerRevenue(r);
-                        });
-                    } else {
-                        snapshotPart.revenueLastWeek += (shift.cashSale || 0) + (shift.creditCard || 0);
-                    }
-                }
+        const useBooks = hasMonthBooksDays(daysById, asOfDate);
+        let monthToDateStoreSales = useBooks
+            ? monthToDateStoreSalesFromBooks(location, daysById, asOfDate)
+            : 0;
+        if (!useBooks && !isGasLocation(location)) {
+            for (const shift of shifts) {
+                if (!shiftHasRegisterData(shift)) continue;
+                const date = shiftDateRef(shift);
+                if (!date || !isInDateRange(date, monthStart, monthEnd)) continue;
+                monthToDateStoreSales += shiftRegisterCardCash(shift);
             }
+        }
 
-            if (!shiftHasRegisterData(shift)) continue;
-            const date = shiftDateRef(shift);
-            if (!date || !isInDateRange(date, monthStart, monthEnd)) continue;
+        if (useBooks && M) {
+            const fuel = monthToDateFuelFromBooks(daysById, asOfDate);
+            monthToDateFuelGallons = fuel.gallons;
+            monthToDateFuelDollars = fuel.dollars;
+        } else {
+            for (const shift of shifts) {
+                if (!shiftHasRegisterData(shift)) continue;
+                const date = shiftDateRef(shift);
+                if (!date || !isInDateRange(date, monthStart, monthEnd)) continue;
 
-            const regs = shift.registers || [];
-            if (regs.length) {
-                regs.forEach((r) => {
-                    monthToDateSales += (r.cashSale || 0) + (r.creditCard || 0);
-                    monthToDateFuelGallons += r.fuelSaleGallons || 0;
-                    monthToDateFuelDollars += r.fuelSaleDollars || 0;
-                });
-            } else {
-                monthToDateSales += (shift.cashSale || 0) + (shift.creditCard || 0);
+                const regs = shift.registers || [];
+                if (regs.length) {
+                    regs.forEach((r) => {
+                        monthToDateFuelGallons += r.fuelSaleGallons || 0;
+                        monthToDateFuelDollars += r.fuelSaleDollars || 0;
+                    });
+                }
             }
         }
 
@@ -488,11 +558,6 @@
             const submitted = toDate(form.submittedAt);
             if (!submitted) continue;
             const sold = lotterySoldAmount(form);
-            if (isInHalfOpenRange(submitted, todayStart, tomorrowStart)) {
-                snapshotPart.revenue += sold;
-            } else if (isInHalfOpenRange(submitted, lastWeekStart, lastWeekEnd)) {
-                snapshotPart.revenueLastWeek += sold;
-            }
             if (isInDateRange(submitted, monthStart, monthEnd)) {
                 monthToDateLotterySales += sold;
             }
@@ -529,15 +594,48 @@
         });
 
         return {
+            monthToDateSales: monthToDateStoreSales,
+            monthToDateLotterySales,
+            monthToDatePayroll,
+            monthToDateExpenses,
+            monthToDateFuelGallons,
+            monthToDateFuelDollars,
+        };
+    }
+
+    function computeLocationStats(location, bundle, daysById, allEmployeesDict, now) {
+        const { shifts } = bundle;
+        const todayStart = startOfDay(now);
+        const lastWeekStart = addDays(todayStart, -7);
+        const M = window.OplixBooksModel;
+        const todayDayId = M ? M.dayIdFromDate(todayStart) : null;
+        const lastWeekDayId = M ? M.dayIdFromDate(lastWeekStart) : null;
+
+        const snapshotPart = { revenue: 0, revenueLastWeek: 0, clockedIn: 0 };
+
+        const mtd = computeMtdMetrics(location, bundle, daysById, allEmployeesDict, now);
+
+        if (todayDayId) {
+            snapshotPart.revenue = storeSalesForDayId(location, todayDayId, daysById, shifts);
+        }
+        if (lastWeekDayId) {
+            snapshotPart.revenueLastWeek = storeSalesForDayId(
+                location,
+                lastWeekDayId,
+                daysById,
+                shifts
+            );
+        }
+
+        for (const shift of shifts) {
+            if (shiftIsActive(shift)) snapshotPart.clockedIn += 1;
+        }
+
+        return {
             stats: {
                 id: location.id,
                 locationName: location.name,
-                monthToDateSales,
-                monthToDateLotterySales,
-                monthToDatePayroll,
-                monthToDateExpenses,
-                monthToDateFuelGallons,
-                monthToDateFuelDollars,
+                ...mtd,
             },
             snapshotPart,
             locationName: location.name,
@@ -639,9 +737,34 @@
         };
 
         const allDocs = [];
+        const booksDaysByLocation = {};
+        const booksDaysByLocationPrev = {};
+        const M = window.OplixBooksModel;
+        const monthId = M
+            ? M.monthIdFromDate(now)
+            : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+        const prevAsOf = sameDayPriorMonth(now);
+        const prevMonthId = M
+            ? M.monthIdFromDate(prevAsOf)
+            : `${prevAsOf.getFullYear()}-${String(prevAsOf.getMonth() + 1).padStart(2, "0")}`;
+
         const bundles = await Promise.all(
             locations.map(async (loc) => {
-                const bundle = await fetchLocationBundle(userId, loc.id);
+                const [bundle, books, prevBooks] = await Promise.all([
+                    fetchLocationBundle(userId, loc.id),
+                    window.OplixBooksStore
+                        ? window.OplixBooksStore.loadMonth(userId, loc.id, monthId).catch(() => ({
+                              daysById: {},
+                          }))
+                        : Promise.resolve({ daysById: {} }),
+                    window.OplixBooksStore
+                        ? window.OplixBooksStore.loadMonth(userId, loc.id, prevMonthId).catch(() => ({
+                              daysById: {},
+                          }))
+                        : Promise.resolve({ daysById: {} }),
+                ]);
+                booksDaysByLocation[loc.id] = books.daysById || {};
+                booksDaysByLocationPrev[loc.id] = prevBooks.daysById || {};
                 bundle.documents.forEach((d) => allDocs.push({ ...d, locationId: loc.id }));
                 bundle.locationEmployees.forEach((e) => {
                     if (!allEmployeesDict[e.id]) allEmployeesDict[e.id] = e;
@@ -665,8 +788,16 @@
             const { stats, snapshotPart } = computeLocationStats(
                 location,
                 bundle,
+                booksDaysByLocation[location.id],
                 allEmployeesDict,
                 now
+            );
+            stats.prevMtd = computeMtdMetrics(
+                location,
+                bundle,
+                booksDaysByLocationPrev[location.id],
+                allEmployeesDict,
+                prevAsOf
             );
             locationStats.push(stats);
             todaySnapshot.revenue += snapshotPart.revenue;
@@ -825,7 +956,7 @@
                 <h2 class="home-cc-heading">Today at a glance</h2>
                 <div class="home-card home-today-revenue">
                     <p class="home-today-amount">${formatCurrency(snapshot.revenue)}</p>
-                    <p class="home-today-meta">Revenue today ${trend}</p>
+                    <p class="home-today-meta">Store sales today ${trend}</p>
                 </div>
                 <div class="home-tiles">
                     <div class="home-card home-tile">
@@ -964,25 +1095,53 @@
             </div>`;
     }
 
+    function renderMtdTrend(current, previous, options) {
+        const cur = Number(current) || 0;
+        const prev = Number(previous) || 0;
+        const invert = options?.invert === true;
+        if (cur === 0 && prev === 0) return "";
+        let pct;
+        let isUp;
+        if (prev === 0) {
+            if (cur === 0) return "";
+            pct = 100;
+            isUp = true;
+        } else {
+            pct = ((cur - prev) / prev) * 100;
+            if (Math.abs(pct) < 0.5) {
+                return `<span class="home-mtd-trend home-trend home-trend--flat">— 0%</span>`;
+            }
+            isUp = pct >= 0;
+        }
+        const visualUp = invert ? !isUp : isUp;
+        const cls = visualUp ? "home-trend--up" : "home-trend--down";
+        const arrow = isUp ? "▲" : "▼";
+        return `<span class="home-mtd-trend home-trend ${cls}">${arrow} ${Math.abs(pct).toFixed(0)}%</span>`;
+    }
+
+    function renderMtdCell(current, previous, formatFn, trendOpts) {
+        return `<td class="home-cc-num home-cc-num--mtd">
+            <span class="home-mtd-value">${formatFn(current)}</span>
+            ${renderMtdTrend(current, previous, trendOpts)}
+        </td>`;
+    }
+
     function renderMonthToDateTable(stats) {
         if (!stats.length) return "";
-        const rows = [...stats]
-            .map((s) => {
-                const total = s.monthToDateSales + s.monthToDateFuelDollars + s.monthToDateLotterySales;
-                return { ...s, total };
-            })
-            .sort((a, b) => b.total - a.total);
+        const rows = [...stats].sort((a, b) => b.monthToDateSales - a.monthToDateSales);
+        const prev = (s) => s.prevMtd || {};
 
         return `
             <div class="home-cc-block home-cc-full">
                 <h2 class="home-cc-heading">Month to date</h2>
+                <p class="books-hint home-mtd-hint">Compared to the same days last month. Store sales — merch for gas; register card + cash for C Store.</p>
                 <div class="home-card home-cc-table-wrap">
                     <table class="home-cc-table home-cc-table--mtd">
                         <thead>
                             <tr>
                                 <th>Facility</th>
-                                <th class="home-cc-num">Revenue</th>
-                                <th class="home-cc-num">Merchandise</th>
+                                <th class="home-cc-num">Store sales</th>
+                                <th class="home-cc-num">Gallons</th>
                                 <th class="home-cc-num">Fuel</th>
                                 <th class="home-cc-num">Lottery</th>
                                 <th class="home-cc-num">Payroll</th>
@@ -995,12 +1154,12 @@
                                     (s) => `
                             <tr>
                                 <td><strong>${escapeHtml(s.locationName)}</strong></td>
-                                <td class="home-cc-num">${formatCurrencyCompact(s.total)}</td>
-                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDateSales)}</td>
-                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDateFuelDollars)}</td>
-                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDateLotterySales)}</td>
-                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDatePayroll)}</td>
-                                <td class="home-cc-num">${formatCurrencyCompact(s.monthToDateExpenses)}</td>
+                                ${renderMtdCell(s.monthToDateSales, prev(s).monthToDateSales, formatCurrencyCompact)}
+                                ${renderMtdCell(s.monthToDateFuelGallons, prev(s).monthToDateFuelGallons, formatNumberCompact)}
+                                ${renderMtdCell(s.monthToDateFuelDollars, prev(s).monthToDateFuelDollars, formatCurrencyCompact)}
+                                ${renderMtdCell(s.monthToDateLotterySales, prev(s).monthToDateLotterySales, formatCurrencyCompact)}
+                                ${renderMtdCell(s.monthToDatePayroll, prev(s).monthToDatePayroll, formatCurrencyCompact, { invert: true })}
+                                ${renderMtdCell(s.monthToDateExpenses, prev(s).monthToDateExpenses, formatCurrencyCompact, { invert: true })}
                             </tr>`
                                 )
                                 .join("")}

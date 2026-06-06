@@ -248,6 +248,24 @@
     text-align: right;
 }
 
+.home-cc-num--mtd {
+    vertical-align: top;
+}
+
+.home-cc-num--mtd .home-mtd-value {
+    display: block;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.home-mtd-trend {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
 .home-cc-actions {
     display: flex;
     flex-wrap: wrap;

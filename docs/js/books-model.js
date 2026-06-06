@@ -732,6 +732,7 @@
         utilitiesTotalFrom,
         sumLines,
         registerDayTotal,
+        daySalesForAggregate,
         cardCashBreakdownFromAggregate,
         gasSalesSlicesFromAggregate,
         gasSalesDetailBreakdownFromAggregate,
