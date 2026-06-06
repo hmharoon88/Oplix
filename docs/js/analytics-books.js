@@ -11,6 +11,7 @@
     let drillPack = null;
     let activeDrill = null;
     let analysisRunId = 0;
+    let lastRenderedKey = null;
     let state = {
         locationId: "",
         monthId: M().monthIdFromDate(new Date()),
@@ -363,6 +364,25 @@
             </div>`;
     }
 
+    function analysisKey() {
+        return `${state.locationId}:${state.monthId}`;
+    }
+
+    function prefetchHistoryMonths() {
+        if (!userId || !state.locationId) return;
+        const otherMonthIds = monthIdsForHistory(state.locationId, state.monthId, 12).filter(
+            (id) => id !== state.monthId
+        );
+        if (!otherMonthIds.length || !Store()?.prefetchMonths) return;
+        Store().prefetchMonths(userId, [state.locationId], otherMonthIds, loadOptions());
+    }
+
+    function renderHistoryLoading() {
+        renderPreviousMonthsMount('<p class="books-hint">Loading previous months…</p>');
+        $("an-previous-mount").hidden = false;
+        renderKeyMetricsMount("");
+    }
+
     function renderPrimaryDashboard(primaryPack) {
         drillPack = {
             title: `${locName(primaryPack.locationId)} · ${monthLabel(primaryPack.monthId)}`,
@@ -383,10 +403,17 @@
     async function runAnalysis() {
         const runId = ++analysisRunId;
         const out = $("analytics-output");
-        out.innerHTML = '<p class="books-hint">Loading…</p>';
-        renderPreviousMonthsMount("");
-        renderKeyMetricsMount("");
-        closeDrill();
+        const key = analysisKey();
+        const primaryCached = Store().hasCachedMonth(userId, state.locationId, state.monthId);
+
+        if (lastRenderedKey !== key) {
+            closeDrill();
+            if (!primaryCached) {
+                out.innerHTML = '<p class="books-hint">Loading…</p>';
+            }
+            renderPreviousMonthsMount("");
+            renderKeyMetricsMount("");
+        }
 
         try {
             const primaryPacks = await Store().loadMonthsForCompare(
@@ -400,10 +427,13 @@
             const primaryPack = primaryPacks[0];
             if (!primaryPack) {
                 out.innerHTML = '<p class="data-list-empty">No books data for this selection.</p>';
+                lastRenderedKey = null;
                 return;
             }
 
             renderPrimaryDashboard(primaryPack);
+            lastRenderedKey = key;
+            renderHistoryLoading();
 
             const otherMonthIds = monthIdsForHistory(state.locationId, state.monthId, 12).filter(
                 (id) => id !== state.monthId
@@ -441,6 +471,7 @@
             out.innerHTML = `<p class="app-error">${escapeHtml(err.message || "Failed to load books summary.")}</p>`;
             renderPreviousMonthsMount("");
             renderKeyMetricsMount("");
+            lastRenderedKey = null;
         }
     }
 
@@ -501,10 +532,18 @@
             locations = locs || [];
             bindControls();
             render();
+            prefetchHistoryMonths();
         },
         onShow() {
             readControls();
-            if (userId && locations.length) runAnalysis();
+            if (!userId || !locations.length) return;
+            if (lastRenderedKey === analysisKey() && $("analytics-output")?.querySelector(".bs-report")) {
+                return;
+            }
+            runAnalysis();
+        },
+        invalidateCache() {
+            lastRenderedKey = null;
         },
         resetToRoot() {
             closeDrill();

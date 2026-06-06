@@ -395,6 +395,7 @@
         syncFromForm();
         $("di-status").textContent = "Saving…";
         await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
+        window.OplixAnalytics?.invalidateCache?.();
         state.dirty = false;
         $("di-status").textContent = "Month saved.";
         setTimeout(() => {
@@ -410,6 +411,7 @@
             Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day),
             Store().saveMonth(userId, state.locationId, state.monthId, state.month),
         ]);
+        window.OplixAnalytics?.invalidateCache?.();
         state.daysById[state.dayId] = { ...state.day, _dayId: state.dayId };
         state.dirty = false;
         $("di-status").textContent = "Day saved.";
