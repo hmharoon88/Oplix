@@ -269,6 +269,15 @@
         localStorage.setItem(`oplix.acknowledgedAlerts.${userId}`, JSON.stringify([...set]));
     }
 
+    function applyAcknowledgedFilter(data, userId) {
+        if (!data) return data;
+        const acknowledged = getAcknowledgedSet(userId);
+        return {
+            ...data,
+            alerts: (data.alerts || []).filter((a) => !acknowledged.has(a.id)),
+        };
+    }
+
     async function fetchSubcollection(userId, locationId, name) {
         const snap = await window.oplixDb
             .collection("users")
@@ -1330,15 +1339,14 @@
         el.hidden = false;
 
         el.querySelectorAll(".home-alert-ack").forEach((btn) => {
-            btn.addEventListener("click", async () => {
-                acknowledgeAlert(userId, btn.dataset.alertId);
-                await window.OplixHomeOverview.reload(
-                    userId,
-                    data.locations,
-                    data.employees,
-                    data.tasks,
-                    data.profile
-                );
+            btn.addEventListener("click", () => {
+                const alertId = btn.dataset.alertId;
+                if (!alertId) return;
+                acknowledgeAlert(userId, alertId);
+                const base = window._oplixHomeData || data;
+                const updated = applyAcknowledgedFilter(base, userId);
+                window._oplixHomeData = updated;
+                render(updated, userId);
             });
         });
 

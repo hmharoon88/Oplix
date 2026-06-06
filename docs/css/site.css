@@ -61,11 +61,51 @@ a {
     letter-spacing: -0.02em;
 }
 
-.logo span {
+.logo span,
+.logo-mark {
     background: linear-gradient(135deg, var(--sky-blue), var(--cloud-blue));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    color: transparent;
+}
+
+.logo.brand-lockup {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    line-height: 1.15;
+}
+
+.logo-tagline {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    font-size: 0.8125rem;
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    color: var(--text-muted);
+    max-width: 11rem;
+    line-height: 1.3;
+    padding-right: 14px;
+    margin-right: 14px;
+    border-right: 1px solid rgba(26, 107, 181, 0.22);
+}
+
+.logo-mark {
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    -webkit-text-fill-color: transparent;
+}
+
+@media (max-width: 640px) {
+    .logo-tagline {
+        display: none;
+    }
+
+    .logo.brand-lockup .logo-mark {
+        font-size: 1.35rem;
+    }
 }
 
 .nav-links {
