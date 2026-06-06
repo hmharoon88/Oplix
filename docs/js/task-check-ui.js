@@ -176,10 +176,11 @@
     function renderLocationRow(loc, index) {
         const locTasks = managerTasks.filter((t) => t.locationId === loc.id);
         const accent = `fac-gradient-${index % 8}`;
+        const address = loc.address ? String(loc.address).trim() : "";
+        const titleAttr = address ? ` title="${escapeHtml(address)}"` : "";
         return `
-            <button type="button" class="fac-card ${accent} tc-loc-row" data-tc-loc="${escapeHtml(loc.id)}">
+            <button type="button" class="fac-card ${accent} tc-loc-row"${titleAttr} data-tc-loc="${escapeHtml(loc.id)}">
                 <span class="fac-card-name">${escapeHtml(loc.name || "Facility")}</span>
-                ${loc.address ? `<span class="tc-loc-address">${escapeHtml(loc.address)}</span>` : ""}
                 ${scoreBadge(locTasks)}
             </button>`;
     }
@@ -191,7 +192,7 @@
                 <p class="books-hint">Tap a facility to review completions and photo proof.</p>
                 ${
                     locations.length
-                        ? `<div class="facilities-list tc-loc-list">${locations
+                        ? `<div class="facilities-group-grid tc-loc-grid">${locations
                               .map((loc, i) => renderLocationRow(loc, i))
                               .join("")}</div>`
                         : `<div class="emp-hub-empty"><p class="emp-hub-empty-title">No facilities yet</p><p class="data-list-meta">Add a facility first.</p></div>`

@@ -2729,6 +2729,9 @@
 
 .task-category-card {
     width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 14px;
     text-align: left;
     cursor: pointer;
     font-family: inherit;
@@ -3565,12 +3568,19 @@
 }
 
 /* Task Check */
-.tc-loc-list .tc-loc-row {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    text-align: left;
+.tc-loc-grid .tc-loc-row {
+    cursor: pointer;
+    gap: 8px;
+}
+
+.tc-loc-grid .tc-loc-row .fac-card-name {
+    flex: 1;
+    min-height: 0;
+}
+
+.tc-loc-grid .tc-score {
+    margin-top: auto;
+    flex-shrink: 0;
 }
 
 .tc-loc-address {
@@ -3604,6 +3614,12 @@
 
 .tc-loc-header {
     margin-bottom: 16px;
+}
+
+.loc-category-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
 }
 
 .tc-mode-tabs {
