@@ -90,8 +90,8 @@
         return ids;
     }
 
-    function renderPreviousMonthsSection(packs, locationId, currentMonthId) {
-        if (!packs.length) return "";
+    function renderPreviousMonthsSection(packs, locationId, currentMonthId, progressText) {
+        if (!packs.length && !progressText) return "";
         const isGas = !!packs[0]?.aggregate?.hasGasStation;
         const M = window.OplixBooksModel;
         const rows = packs
@@ -124,6 +124,7 @@
                     <h3 class="an-prev-months-title">Previous months · ${escapeHtml(locName(locationId))}</h3>
                     <p class="an-prev-months-lead">Books totals for earlier months. Tap a row to load that month above (currently ${escapeHtml(monthLabel(currentMonthId))}).</p>
                 </header>
+                ${progressText ? `<p class="books-hint an-history-progress">${escapeHtml(progressText)}</p>` : ""}
                 <div class="an-prev-month-list">${rows}</div>
             </section>`;
     }
@@ -389,14 +390,7 @@
     }
 
     function prefetchHistoryMonths() {
-        /* history loads after primary month in loadHistorySections */
-    }
-
-    function renderHistoryLoading() {
-        renderPreviousMonthsMount('<p class="books-hint">Loading previous months…</p>');
-        const mount = $("an-previous-mount");
-        if (mount) mount.hidden = false;
-        renderKeyMetricsMount("");
+        /* loaded progressively in loadHistorySections */
     }
 
     function renderPrimaryDashboard(primaryPack) {
@@ -424,51 +418,86 @@
             <div id="an-overview-mount" class="an-overview-mount bs-overview">${overviewHtml}</div>`;
     }
 
+    function renderHistorySections(accumulated, primaryPack, keyAtStart, loaded, total) {
+        if (analysisKey() !== keyAtStart) return;
+
+        const historyComplete = loaded >= total;
+        const previousPacks = accumulated
+            .slice()
+            .sort((a, b) => b.monthId.localeCompare(a.monthId));
+        const progressText = historyComplete
+            ? ""
+            : `Loading previous months… ${loaded} of ${total}`;
+
+        renderPreviousMonthsMount(
+            renderPreviousMonthsSection(
+                previousPacks,
+                state.locationId,
+                state.monthId,
+                progressText
+            )
+        );
+        $("an-previous-mount").hidden = !previousPacks.length && !progressText;
+
+        const historyPacks = [primaryPack, ...previousPacks].sort((a, b) =>
+            b.monthId.localeCompare(a.monthId)
+        );
+        const metricsHtml = Charts()
+            ? Charts().renderKeyMetricsHistory(historyPacks, {
+                  booksModel: M(),
+                  monthLabel,
+                  locationName: locName(state.locationId),
+              })
+            : "";
+
+        renderKeyMetricsMount(
+            historyComplete
+                ? metricsHtml
+                : `${metricsHtml}<p class="books-hint an-history-progress">Loading monthly detail… ${loaded} of ${total}</p>`
+        );
+        $("an-key-metrics-mount").hidden = !metricsHtml && !historyComplete;
+    }
+
     async function loadHistorySections(keyAtStart, primaryPack) {
         const otherMonthIds = monthIdsForHistory(state.locationId, state.monthId, 12).filter(
             (id) => id !== state.monthId
         );
         if (!otherMonthIds.length) {
             renderPreviousMonthsMount("");
-            renderKeyMetricsMount("");
-            return;
-        }
-
-        renderHistoryLoading();
-
-        try {
-            const otherPacks = await Store().loadMonthsForCompare(
-                userId,
-                [state.locationId],
-                otherMonthIds,
-                loadOptions()
-            );
-            if (analysisKey() !== keyAtStart) return;
-
-            const historyPacks = [primaryPack, ...otherPacks].sort((a, b) =>
-                b.monthId.localeCompare(a.monthId)
-            );
-            const previousPacks = historyPacks.filter((p) => p.monthId !== state.monthId);
-
-            renderPreviousMonthsMount(
-                renderPreviousMonthsSection(previousPacks, state.locationId, state.monthId)
-            );
-
             renderKeyMetricsMount(
                 Charts()
-                    ? Charts().renderKeyMetricsHistory(historyPacks, {
+                    ? Charts().renderKeyMetricsHistory([primaryPack], {
                           booksModel: M(),
                           monthLabel,
                           locationName: locName(state.locationId),
                       })
                     : ""
             );
-        } catch (histErr) {
+            return;
+        }
+
+        const accumulated = [];
+        renderHistorySections(accumulated, primaryPack, keyAtStart, 0, otherMonthIds.length);
+
+        for (let i = 0; i < otherMonthIds.length; i++) {
             if (analysisKey() !== keyAtStart) return;
-            renderPreviousMonthsMount(
-                `<p class="books-hint">${escapeHtml(histErr.message || "Could not load previous months.")}</p>`
-            );
-            $("an-previous-mount").hidden = false;
+
+            const monthId = otherMonthIds[i];
+            let pack;
+            try {
+                [pack] = await Store().loadMonthsForCompare(
+                    userId,
+                    [state.locationId],
+                    [monthId],
+                    loadOptions()
+                );
+            } catch {
+                pack = buildEmptyPack(state.locationId, monthId);
+            }
+
+            if (analysisKey() !== keyAtStart) return;
+            accumulated.push(pack || buildEmptyPack(state.locationId, monthId));
+            renderHistorySections(accumulated, primaryPack, keyAtStart, i + 1, otherMonthIds.length);
         }
     }
 
