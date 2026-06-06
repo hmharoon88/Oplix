@@ -31,19 +31,23 @@
     gap: 0;
 }
 
-.dashboard-topbar .logo-tagline {
-    font-size: 0.75rem;
-    color: var(--dash-muted);
-    border-right-color: var(--dash-border);
-    max-width: 10.5rem;
-}
-
 .dashboard-topbar .logo-mark {
     font-size: 1.35rem;
+    border-right-color: var(--dash-border);
     background: linear-gradient(120deg, #1d4ed8 0%, #3b82f6 45%, #6366f1 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
+}
+
+.dashboard-topbar .logo-tagline {
+    font-size: 0.75rem;
+    color: var(--dash-muted);
+    max-width: 13rem;
+}
+
+.dashboard-topbar .brand-lockup--modern .logo-tagline {
+    color: var(--dash-muted);
 }
 
 .dashboard-topbar .logo span {
