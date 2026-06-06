@@ -10,12 +10,19 @@
     let locations = [];
     let drillPack = null;
     let activeDrill = null;
-    let analysisRunId = 0;
     let lastRenderedKey = null;
     let state = {
         locationId: "",
-        monthId: M().monthIdFromDate(new Date()),
+        monthId: "",
     };
+
+    function defaultMonthId() {
+        return M()?.monthIdFromDate(new Date()) || "";
+    }
+
+    function ensureStateMonth() {
+        if (!state.monthId) state.monthId = defaultMonthId();
+    }
 
     function $(id) {
         return document.getElementById(id);
@@ -364,91 +371,81 @@
             </div>`;
     }
 
+    function buildEmptyPack(locationId, monthId) {
+        const hasGasStation = facilityTypesById()[locationId] === "c_store_gas";
+        const month = M().defaultMonthDoc();
+        const daysById = {};
+        return {
+            locationId,
+            monthId,
+            month,
+            daysById,
+            aggregate: M().aggregateMonth(month, daysById, { hasGasStation }),
+        };
+    }
+
     function analysisKey() {
         return `${state.locationId}:${state.monthId}`;
     }
 
     function prefetchHistoryMonths() {
-        if (!userId || !state.locationId) return;
-        const otherMonthIds = monthIdsForHistory(state.locationId, state.monthId, 12).filter(
-            (id) => id !== state.monthId
-        );
-        if (!otherMonthIds.length || !Store()?.prefetchMonths) return;
-        Store().prefetchMonths(userId, [state.locationId], otherMonthIds, loadOptions());
+        /* history loads after primary month in loadHistorySections */
     }
 
     function renderHistoryLoading() {
         renderPreviousMonthsMount('<p class="books-hint">Loading previous months…</p>');
-        $("an-previous-mount").hidden = false;
+        const mount = $("an-previous-mount");
+        if (mount) mount.hidden = false;
         renderKeyMetricsMount("");
     }
 
     function renderPrimaryDashboard(primaryPack) {
+        if (!primaryPack?.aggregate) return;
         drillPack = {
             title: `${locName(primaryPack.locationId)} · ${monthLabel(primaryPack.monthId)}`,
             ...primaryPack,
         };
 
-        const overviewHtml = `
+        let overviewHtml;
+        try {
+            overviewHtml = `
             <div class="bs-report">
                 ${renderMainDashboard(primaryPack.aggregate, drillPack.title)}
             </div>`;
+        } catch (err) {
+            console.error("[Oplix] Summary render failed:", err);
+            overviewHtml = `<p class="app-error">${escapeHtml(err.message || "Could not render summary.")}</p>`;
+        }
 
         const out = $("analytics-output");
+        if (!out) return;
         out.innerHTML = `
             <div id="an-drill-mount" class="an-drill-mount" hidden></div>
             <div id="an-overview-mount" class="an-overview-mount bs-overview">${overviewHtml}</div>`;
     }
 
-    async function runAnalysis() {
-        const runId = ++analysisRunId;
-        const out = $("analytics-output");
-        const key = analysisKey();
-        const primaryCached = Store().hasCachedMonth(userId, state.locationId, state.monthId);
-
-        if (lastRenderedKey !== key) {
-            closeDrill();
-            if (!primaryCached) {
-                out.innerHTML = '<p class="books-hint">Loading…</p>';
-            }
+    async function loadHistorySections(keyAtStart, primaryPack) {
+        const otherMonthIds = monthIdsForHistory(state.locationId, state.monthId, 12).filter(
+            (id) => id !== state.monthId
+        );
+        if (!otherMonthIds.length) {
             renderPreviousMonthsMount("");
             renderKeyMetricsMount("");
+            return;
         }
 
+        renderHistoryLoading();
+
         try {
-            const primaryPacks = await Store().loadMonthsForCompare(
+            const otherPacks = await Store().loadMonthsForCompare(
                 userId,
                 [state.locationId],
-                [state.monthId],
+                otherMonthIds,
                 loadOptions()
             );
-            if (runId !== analysisRunId) return;
+            if (analysisKey() !== keyAtStart) return;
 
-            const primaryPack = primaryPacks[0];
-            if (!primaryPack) {
-                out.innerHTML = '<p class="data-list-empty">No books data for this selection.</p>';
-                lastRenderedKey = null;
-                return;
-            }
-
-            renderPrimaryDashboard(primaryPack);
-            lastRenderedKey = key;
-            renderHistoryLoading();
-
-            const otherMonthIds = monthIdsForHistory(state.locationId, state.monthId, 12).filter(
-                (id) => id !== state.monthId
-            );
-            const otherPacks = otherMonthIds.length
-                ? await Store().loadMonthsForCompare(
-                      userId,
-                      [state.locationId],
-                      otherMonthIds,
-                      loadOptions()
-                  )
-                : [];
-            if (runId !== analysisRunId) return;
-
-            const historyPacks = [...primaryPacks, ...otherPacks].sort((a, b) =>
+            const historyPacks = [primaryPack, ...otherPacks].sort((a, b) =>
                 b.monthId.localeCompare(a.monthId)
             );
             const previousPacks = historyPacks.filter((p) => p.monthId !== state.monthId);
@@ -466,12 +463,51 @@
                       })
                     : ""
             );
-        } catch (err) {
-            if (runId !== analysisRunId) return;
-            out.innerHTML = `<p class="app-error">${escapeHtml(err.message || "Failed to load books summary.")}</p>`;
+        } catch (histErr) {
+            if (analysisKey() !== keyAtStart) return;
+            renderPreviousMonthsMount(
+                `<p class="books-hint">${escapeHtml(histErr.message || "Could not load previous months.")}</p>`
+            );
+            $("an-previous-mount").hidden = false;
+        }
+    }
+
+    async function runAnalysis() {
+        ensureStateMonth();
+        const keyAtStart = analysisKey();
+        const out = $("analytics-output");
+        if (!out) return;
+
+        try {
+            closeDrill();
+            renderPrimaryDashboard(buildEmptyPack(state.locationId, state.monthId));
+            lastRenderedKey = keyAtStart;
             renderPreviousMonthsMount("");
             renderKeyMetricsMount("");
-            lastRenderedKey = null;
+
+            const primaryPacks = await Store().loadMonthsForCompare(
+                userId,
+                [state.locationId],
+                [state.monthId],
+                loadOptions()
+            );
+            if (analysisKey() !== keyAtStart) return;
+
+            const primaryPack =
+                primaryPacks[0] || buildEmptyPack(state.locationId, state.monthId);
+            renderPrimaryDashboard(primaryPack);
+            out.querySelector(".an-load-error")?.remove();
+
+            loadHistorySections(keyAtStart, primaryPack);
+        } catch (err) {
+            if (analysisKey() !== keyAtStart) return;
+            console.error("[Oplix] Summary load failed:", err);
+            renderPrimaryDashboard(buildEmptyPack(state.locationId, state.monthId));
+            out.querySelector(".an-load-error")?.remove();
+            out.insertAdjacentHTML(
+                "beforeend",
+                `<p class="app-error an-load-error">${escapeHtml(err.message || "Failed to load books summary.")}</p>`
+            );
         }
     }
 
@@ -522,6 +558,7 @@
             return;
         }
         if (!state.locationId) state.locationId = locations[0].id;
+        ensureStateMonth();
 
         root.innerHTML = `${renderMonthPicker()}<div id="analytics-output" class="an-output"></div><div id="an-previous-mount" class="an-previous-mount" hidden></div><div id="an-key-metrics-mount" class="an-key-metrics-mount" hidden></div>`;
     }
@@ -532,7 +569,6 @@
             locations = locs || [];
             bindControls();
             render();
-            prefetchHistoryMonths();
         },
         onShow() {
             readControls();

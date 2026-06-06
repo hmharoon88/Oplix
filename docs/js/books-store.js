@@ -6,6 +6,7 @@
 
     const monthCache = new Map();
     const inflight = new Map();
+    const LOAD_TIMEOUT_MS = 15000;
 
     function cacheKey(userId, locationId, monthId) {
         return `${userId}|${locationId}|${monthId}`;
@@ -42,31 +43,77 @@
         return monthCache.has(cacheKey(userId, locationId, monthId));
     }
 
+    function withTimeout(promise, ms, message) {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                setTimeout(
+                    () => reject(new Error(message || "Books load timed out — check your connection.")),
+                    ms
+                );
+            }),
+        ]);
+    }
+
+    async function readMonthFromFirestore(ref, source) {
+        const getOpts = source ? { source } : undefined;
+        const [snap, daysSnap] = await Promise.all([
+            getOpts ? ref.get(getOpts) : ref.get(),
+            getOpts ? ref.collection("days").get(getOpts) : ref.collection("days").get(),
+        ]);
+        const month = snap.exists ? snap.data() : M().defaultMonthDoc();
+        const daysById = {};
+        daysSnap.docs.forEach((d) => {
+            daysById[d.id] = { ...d.data(), _dayId: d.id };
+        });
+        return { month, daysById };
+    }
+
+    function refreshMonthFromServer(userId, locationId, monthId) {
+        const key = cacheKey(userId, locationId, monthId);
+        const ref = monthRef(userId, locationId, monthId);
+        readMonthFromFirestore(ref)
+            .then((payload) => {
+                monthCache.set(key, payload);
+            })
+            .catch(() => {});
+    }
+
     async function loadMonth(userId, locationId, monthId, options = {}) {
         const key = cacheKey(userId, locationId, monthId);
         if (!options.bypassCache && monthCache.has(key)) {
             return cloneMonthPayload(monthCache.get(key));
         }
         if (inflight.has(key)) {
-            return inflight.get(key).then(cloneMonthPayload);
+            return inflight.get(key);
         }
 
         const ref = monthRef(userId, locationId, monthId);
-        const promise = Promise.all([ref.get(), ref.collection("days").get()])
-            .then(([snap, daysSnap]) => {
-                const month = snap.exists ? snap.data() : M().defaultMonthDoc();
-                const daysById = {};
-                daysSnap.docs.forEach((d) => {
-                    daysById[d.id] = { ...d.data(), _dayId: d.id };
-                });
-                const payload = { month, daysById };
-                monthCache.set(key, payload);
-                inflight.delete(key);
-                return cloneMonthPayload(payload);
-            })
+        const timeoutMs = options.timeoutMs ?? LOAD_TIMEOUT_MS;
+
+        const promise = (async () => {
+            try {
+                const cached = await withTimeout(
+                    readMonthFromFirestore(ref, "cache"),
+                    2500,
+                    "cache miss"
+                );
+                monthCache.set(key, cached);
+                refreshMonthFromServer(userId, locationId, monthId);
+                return cloneMonthPayload(cached);
+            } catch {
+                const fresh = await withTimeout(readMonthFromFirestore(ref), timeoutMs);
+                monthCache.set(key, fresh);
+                return cloneMonthPayload(fresh);
+            }
+        })()
             .catch((err) => {
                 inflight.delete(key);
                 throw err;
+            })
+            .then((result) => {
+                inflight.delete(key);
+                return result;
             });
 
         inflight.set(key, promise);
@@ -120,11 +167,6 @@
         return Promise.all(tasks);
     }
 
-    function prefetchMonths(userId, locationIds, monthIds, options) {
-        if (!userId || !locationIds.length || !monthIds.length) return;
-        loadMonthsForCompare(userId, locationIds, monthIds, options || {}).catch(() => {});
-    }
-
     window.OplixBooksStore = {
         loadMonth,
         saveMonth,
@@ -132,6 +174,5 @@
         loadMonthsForCompare,
         hasCachedMonth,
         invalidateMonth,
-        prefetchMonths,
     };
 })();
