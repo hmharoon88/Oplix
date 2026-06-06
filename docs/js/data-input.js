@@ -1,5 +1,5 @@
 /**
- * Data input — monthly books (daily sheet, utilities, payroll, receivables).
+ * Daily books — monthly books entry (daily sheet, utilities, payroll, receivables).
  */
 (function () {
     const M = () => window.OplixBooksModel;
@@ -18,11 +18,105 @@
         day: M().defaultDayDoc(),
         daysById: {},
         utilityProviders: [],
+        payables: [],
         dirty: false,
     };
 
     function mergedUtilityKeys() {
         return M().mergeUtilityKeys(state.utilityProviders, state.month.utilities);
+    }
+
+    function canDeleteUtility(key) {
+        return !M().isStandardUtilityKey(key);
+    }
+
+    async function addUtility() {
+        const label = window.prompt("Utility name (e.g. Sewer, Phone):");
+        if (!label || !String(label).trim()) return;
+        const customLabel = String(label).trim();
+        const utilityType = M().slugUtilityKey(customLabel);
+        if (mergedUtilityKeys().some((u) => u.key === utilityType)) {
+            window.alert("That utility already exists for this facility.");
+            return;
+        }
+        if (!DirStore() || !DirModel()) {
+            window.alert("Utility directory is unavailable.");
+            return;
+        }
+        syncFromForm();
+        $("di-status").textContent = "Adding utility…";
+        const payload = DirModel().normalizeUtilityProvider({
+            utilityType,
+            customLabel,
+            isDefault: false,
+            active: true,
+        });
+        await DirStore().save(
+            userId,
+            state.locationId,
+            DirModel().COLLECTIONS.utilityProviders,
+            utilityType,
+            payload
+        );
+        state.month.utilities[utilityType] = 0;
+        await loadUtilityProviders();
+        state.month.utilities = M().normalizeMonthUtilities(
+            state.month.utilities,
+            mergedUtilityKeys()
+        );
+        await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
+        $("di-status").textContent = "Utility added.";
+        render();
+        setTimeout(() => {
+            if ($("di-status")?.textContent === "Utility added.") $("di-status").textContent = "";
+        }, 2000);
+    }
+
+    async function deleteUtility(key) {
+        if (!canDeleteUtility(key)) {
+            window.alert("Default utilities (Internet, Water, Electric, etc.) cannot be removed.");
+            return;
+        }
+        const row = mergedUtilityKeys().find((u) => u.key === key);
+        const label = row?.label || key;
+        if (!window.confirm(`Remove "${label}" from this facility? Monthly amounts for it will be cleared.`)) {
+            return;
+        }
+        syncFromForm();
+        $("di-status").textContent = "Removing…";
+        if (DirStore() && DirModel()) {
+            const hasProvider = state.utilityProviders.some(
+                (p) => (p.utilityType || p.id) === key
+            );
+            if (hasProvider) {
+                await DirStore().remove(
+                    userId,
+                    state.locationId,
+                    DirModel().COLLECTIONS.utilityProviders,
+                    key
+                );
+            }
+        }
+        delete state.month.utilities[key];
+        await loadUtilityProviders();
+        state.month.utilities = M().normalizeMonthUtilities(
+            state.month.utilities,
+            mergedUtilityKeys()
+        );
+        await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
+        $("di-status").textContent = "Utility removed.";
+        render();
+        setTimeout(() => {
+            if ($("di-status")?.textContent === "Utility removed.") $("di-status").textContent = "";
+        }, 2000);
+    }
+
+    async function loadPayables() {
+        if (!state.locationId || !window.OplixPayablesStore) {
+            state.payables = [];
+            return;
+        }
+        state.payables = await OplixPayablesStore.list(userId, state.locationId);
     }
 
     async function loadUtilityProviders() {
@@ -70,6 +164,29 @@
 
     function hasGasStation(loc) {
         return effectiveFacilityType(loc || currentLocation()) === "c_store_gas";
+    }
+
+    function amountValue(v) {
+        if (v == null || v === "") return "";
+        return M().formatAmountForInput(v);
+    }
+
+    function normalizeAllAmountFields() {
+        const root = $("data-input-root");
+        if (!root) return;
+        root.querySelectorAll(".books-input-amount").forEach(normalizeAmountField);
+    }
+
+    function amountInputAttrs(name, value) {
+        return `type="text" inputmode="decimal" autocomplete="off" class="books-input books-input-amount" name="${name}" value="${escapeHtml(amountValue(value))}"`;
+    }
+
+    function normalizeAmountField(el) {
+        if (!el || !el.classList.contains("books-input-amount")) return;
+        const raw = String(el.value ?? "").trim();
+        if (raw === "") return;
+        const n = M().parseAmountExpression(raw);
+        if (Number.isFinite(n)) el.value = M().formatAmountForInput(n);
     }
 
     function bindShell() {
@@ -120,6 +237,15 @@
             if (rm) {
                 removeLine(rm.dataset.diList, rm.dataset.diRm);
                 render();
+                return;
+            }
+            if (e.target.closest("[data-di-util-add]")) {
+                addUtility();
+                return;
+            }
+            const utilRm = e.target.closest("[data-di-util-rm]");
+            if (utilRm) {
+                deleteUtility(utilRm.dataset.diUtilRm);
             }
         });
 
@@ -128,6 +254,20 @@
             syncFromForm();
             state.dirty = true;
         });
+
+        panel.addEventListener(
+            "blur",
+            (e) => {
+                if (!e.target.classList.contains("books-input-amount")) return;
+                if (!e.target.closest(".data-input-form, [data-pay-section]")) return;
+                normalizeAmountField(e.target);
+                if (e.target.closest(".data-input-form")) {
+                    syncFromForm();
+                    state.dirty = true;
+                }
+            },
+            true
+        );
     }
 
     function addLine(list) {
@@ -167,7 +307,9 @@
 
         ["week1", "week2", "week3", "week4"].forEach((w) => {
             const el = root.querySelector(`[name="payroll_${w}"]`);
-            if (el) state.month.payroll[w] = M().num(el.value);
+            if (el && !(state.month.payrollLines || []).length) {
+                state.month.payroll[w] = M().num(el.value);
+            }
         });
 
         const tax = root.querySelector('[name="salesTax"]');
@@ -191,19 +333,18 @@
             if (el) state.day.pulltab[f] = M().num(el.value);
         });
 
-        if (!state.day.fuelSale) state.day.fuelSale = M().defaultFuelSale();
         if (hasGasStation()) {
+            const merch = root.querySelector('[name="merch_sale"]');
+            if (merch) state.day.merchSale = M().num(merch.value);
             const fuelG = root.querySelector('[name="fuel_gallons"]');
             const fuelD = root.querySelector('[name="fuel_dollars"]');
-            const merch = root.querySelector('[name="merch_sale"]');
             const credit = root.querySelector('[name="credit_card"]');
             if (fuelG) state.day.fuelSale.gallons = M().num(fuelG.value);
             if (fuelD) state.day.fuelSale.dollars = M().num(fuelD.value);
-            if (merch) state.day.merchSale = M().num(merch.value);
             if (credit) state.day.creditCard = M().num(credit.value);
         } else {
-            state.day.fuelSale = M().defaultFuelSale();
             state.day.merchSale = 0;
+            state.day.fuelSale = M().defaultFuelSale();
             state.day.creditCard = 0;
         }
 
@@ -236,7 +377,7 @@
         if (!state.locationId) return;
         $("di-status").textContent = "Loading…";
         const { month, daysById } = await Store().loadMonth(userId, state.locationId, state.monthId);
-        await loadUtilityProviders();
+        await Promise.all([loadUtilityProviders(), loadPayables()]);
         state.month = month;
         state.month.utilities = M().normalizeMonthUtilities(
             state.month.utilities,
@@ -250,6 +391,7 @@
     }
 
     async function saveMonth() {
+        normalizeAllAmountFields();
         syncFromForm();
         $("di-status").textContent = "Saving…";
         await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
@@ -261,6 +403,7 @@
     }
 
     async function saveDay() {
+        normalizeAllAmountFields();
         syncFromForm();
         $("di-status").textContent = "Saving…";
         await Promise.all([
@@ -331,7 +474,7 @@
                         .map(
                             (f) => `
                     <label class="books-label">${escapeHtml(f.label)}
-                        <input type="number" step="0.01" class="books-input" name="${prefix}_${f.name}" value="${M().num(data[f.name]) || ""}">
+                        <input ${amountInputAttrs(`${prefix}_${f.name}`, data[f.name])}>
                     </label>`
                         )
                         .join("")}
@@ -353,7 +496,10 @@
                             .map((c) => {
                                 const type = c.type || "text";
                                 const val = row[c.name] ?? "";
-                                return `<input type="${type}" step="${type === "number" ? "0.01" : ""}" class="books-input" name="${c.name}" value="${escapeHtml(val)}">`;
+                                if (type === "number") {
+                                    return `<input ${amountInputAttrs(c.name, val)}>`;
+                                }
+                                return `<input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}">`;
                             })
                             .join("");
                         return `
@@ -369,83 +515,247 @@
 
     function renderUtilitiesPayroll() {
         const utilityKeys = mergedUtilityKeys();
-        const utilFields = utilityKeys
-            .map(
-                (u) => `
-            <label class="books-label">${escapeHtml(u.label)}
-                <input type="number" step="0.01" class="books-input" name="util_${u.key}" value="${M().num(state.month.utilities[u.key]) || ""}">
-            </label>`
-            )
+        const utilRows = utilityKeys
+            .map((u) => {
+                const deletable = canDeleteUtility(u.key);
+                return `
+            <div class="books-util-row" data-di-util-key="${escapeHtml(u.key)}">
+                <span class="books-util-label" title="${escapeHtml(u.label)}">${escapeHtml(u.label)}</span>
+                <input ${amountInputAttrs(`util_${u.key}`, state.month.utilities[u.key])}>
+                ${
+                    deletable
+                        ? `<button type="button" class="books-rm" data-di-util-rm="${escapeHtml(u.key)}" title="Remove utility">×</button>`
+                        : `<span class="books-util-spacer" aria-hidden="true"></span>`
+                }
+            </div>`;
+            })
             .join("");
 
-        const payrollFields = ["week1", "week2", "week3", "week4"]
-            .map(
-                (w, i) => `
+        const payrollLines = (state.month.payrollLines || []).map((l) =>
+            M().normalizePayrollLine(l)
+        );
+        const payrollSynced = payrollLines.length > 0;
+
+        const payrollFields = payrollSynced
+            ? ""
+            : ["week1", "week2", "week3", "week4"]
+                  .map(
+                      (w, i) => `
             <label class="books-label">Week ${i + 1}
-                <input type="number" step="0.01" class="books-input" name="payroll_${w}" value="${M().num(state.month.payroll[w]) || ""}">
+                <input ${amountInputAttrs(`payroll_${w}`, state.month.payroll[w])}>
             </label>`
-            )
-            .join("");
+                  )
+                  .join("");
 
         const utilTotal = utilityKeys.reduce(
             (s, u) => s + M().num(state.month.utilities[u.key]),
             0
         );
-        const payTotal =
-            M().num(state.month.payroll.week1) +
-            M().num(state.month.payroll.week2) +
-            M().num(state.month.payroll.week3) +
-            M().num(state.month.payroll.week4);
+        const payTotal = payrollSynced
+            ? payrollLines.reduce((s, l) => s + M().num(l.pay), 0)
+            : M().num(state.month.payroll.week1) +
+              M().num(state.month.payroll.week2) +
+              M().num(state.month.payroll.week3) +
+              M().num(state.month.payroll.week4);
+
+        const payrollLinesTable = payrollSynced
+            ? `
+                <div class="home-card home-cc-table-wrap payroll-books-table">
+                    <table class="home-cc-table">
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th class="home-cc-num">Hours</th>
+                                <th class="home-cc-num">Rate</th>
+                                <th class="home-cc-num">Pay</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${payrollLines
+                                .map(
+                                    (l) => `
+                                <tr>
+                                    <td>${escapeHtml(l.employeeName || "Employee")}</td>
+                                    <td class="home-cc-num">${M().formatAmountForInput(l.hours)}</td>
+                                    <td class="home-cc-num">${money(l.hourlyRate)}</td>
+                                    <td class="home-cc-num">${money(l.pay)}</td>
+                                </tr>`
+                                )
+                                .join("")}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="books-hint">Synced from the <strong>Payroll</strong> tab — this total is included in Books summary automatically. Edit hours in Payroll, save, and it updates here. You do not need to enter weekly totals below.</p>`
+            : `<p class="books-hint">Enter weekly totals below, or use the <strong>Payroll</strong> tab to enter hours by employee (syncs here and into Books summary when you save).</p>`;
+
+        const payrollWeekBlock = payrollFields
+            ? `<h4 class="books-week-heading">Weekly totals</h4>
+                <div class="books-payroll-weeks">${payrollFields}</div>`
+            : "";
 
         return `
             <div class="books-panel data-input-form">
                 <h3 class="books-subtitle">Utilities</h3>
-                <p class="books-hint">Monthly amounts — same types as <strong>Facilities → Utilities</strong>. Add custom types under the facility first; they appear here automatically.</p>
-                <div class="books-grid-util">${utilFields}</div>
+                <p class="books-hint">Monthly amounts per utility. Standard types (Internet, Water, Electric, etc.) are always listed; add custom ones below.</p>
+                <div class="books-util-list" data-di-util-list>
+                    <div class="books-util-head">
+                        <span>Utility</span>
+                        <span>Amount</span>
+                        <span></span>
+                    </div>
+                    ${utilRows}
+                    <button type="button" class="books-add-line" data-di-util-add>+ Add utility</button>
+                </div>
                 <p class="books-total-line">Utilities total: <strong>${money(utilTotal)}</strong></p>
 
                 <h3 class="books-subtitle">Payroll</h3>
-                <div class="books-grid-4">${payrollFields}</div>
+                ${payrollLinesTable}
+                ${payrollWeekBlock}
                 <p class="books-total-line">Payroll total: <strong>${money(payTotal)}</strong></p>
 
                 <h3 class="books-subtitle">Other monthly</h3>
                 <div class="books-grid-2">
                     <label class="books-label">Sales tax
-                        <input type="number" step="0.01" class="books-input" name="salesTax" value="${M().num(state.month.salesTax) || ""}">
+                        <input ${amountInputAttrs("salesTax", state.month.salesTax)}>
                     </label>
                     <label class="books-label">Accountant
-                        <input type="number" step="0.01" class="books-input" name="accountant" value="${M().num(state.month.accountant) || ""}">
+                        <input ${amountInputAttrs("accountant", state.month.accountant)}>
                     </label>
                 </div>
                 <button type="button" class="btn books-save" id="di-save-month">Save month (utilities & payroll)</button>
             </div>`;
     }
 
+    function renderDailyMerchEntry() {
+        return `
+            <h3 class="books-subtitle">Daily sales</h3>
+            <p class="books-hint"><strong>Total sales</strong> uses merch only. Register card (detail sheet) drives the credit card tile; pump credit and fuel are separate.</p>
+            <label class="books-label">Merch sale ($)
+                <input ${amountInputAttrs("merch_sale", state.day.merchSale)}>
+                <span class="books-field-hint">In-store merch total for the day</span>
+            </label>`;
+    }
+
+    function renderDailyGasSales() {
+        return `
+            ${renderDailyMerchEntry()}
+            <label class="books-label">Credit card ($)
+                <input ${amountInputAttrs("credit_card", state.day.creditCard)}>
+                <span class="books-field-hint">Pump / outdoor card sales — separate from merch and register card</span>
+            </label>`;
+    }
+
+    function renderDailyDetailSheet(reg, fuel) {
+        const totals = `
+            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash · O/S ${money(reg.overShort)}</p>
+            <p class="books-hint">Shift registers are for reconciliation — register card appears on the credit card tile; pump credit is entered above.</p>`;
+
+        return `
+            <details class="books-detail-sheet" open>
+                <summary class="books-detail-summary">Detail sheet</summary>
+                <div class="books-detail-body">
+                    ${renderRegisterUnit("Register 1", "register1", state.day.register1)}
+                    ${renderRegisterUnit("Register 2", "register2", state.day.register2)}
+                    ${totals}
+
+                    <h3 class="books-subtitle">Fuel</h3>
+                    <div class="books-grid-2">
+                        <label class="books-label">Gallons sold
+                            <input ${amountInputAttrs("fuel_gallons", fuel.gallons)}>
+                        </label>
+                        <label class="books-label">Fuel amount ($)
+                            <input ${amountInputAttrs("fuel_dollars", fuel.dollars)}>
+                            <span class="books-field-hint">Fuel revenue — separate from merch and credit card</span>
+                        </label>
+                    </div>
+
+                    <h3 class="books-subtitle">Pulltab</h3>
+                    ${renderShiftBlock("Pulltab", "pull", state.day.pulltab, [
+                        { name: "cash", label: "Cash" },
+                        { name: "winner", label: "Winners" },
+                        { name: "overShort", label: "Over / short" },
+                    ])}
+
+                    <h3 class="books-subtitle">Cash expense</h3>
+                    ${renderLineList("cashExpenses", [
+                        { name: "description", label: "Description" },
+                        { name: "amount", label: "Amount", type: "number" },
+                        { name: "overShort", label: "O/S", type: "number" },
+                    ])}
+
+                    <h3 class="books-subtitle">Checks / ACH</h3>
+                    ${renderLineList("checksAch", [
+                        { name: "date", label: "Date" },
+                        { name: "description", label: "Description" },
+                        { name: "checkNo", label: "Check #" },
+                        { name: "amount", label: "Amount", type: "number" },
+                    ])}
+
+                    <h3 class="books-subtitle">Other expense</h3>
+                    ${renderLineList("otherExpenses", [
+                        { name: "description", label: "Description" },
+                        { name: "amount", label: "Amount", type: "number" },
+                    ])}
+                </div>
+            </details>`;
+    }
+
+    function renderDailyCStore() {
+        const reg = M().registerDayTotal(state.day);
+        return `
+            <h3 class="books-subtitle">Registers</h3>
+            <p class="books-hint"><strong>Total sales</strong> in Books summary uses register card + cash (both registers, both shifts). Lottery and pulltab are tracked separately.</p>
+            ${renderRegisterUnit("Register 1", "register1", state.day.register1)}
+            ${renderRegisterUnit("Register 2", "register2", state.day.register2)}
+            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash · O/S ${money(reg.overShort)}</p>
+
+            <h3 class="books-subtitle">Pulltab</h3>
+            ${renderShiftBlock("Pulltab", "pull", state.day.pulltab, [
+                { name: "cash", label: "Cash" },
+                { name: "winner", label: "Winners" },
+                { name: "overShort", label: "Over / short" },
+            ])}
+
+            <h3 class="books-subtitle">Cash expense</h3>
+            ${renderLineList("cashExpenses", [
+                { name: "description", label: "Description" },
+                { name: "amount", label: "Amount", type: "number" },
+                { name: "overShort", label: "O/S", type: "number" },
+            ])}
+
+            <h3 class="books-subtitle">Checks / ACH</h3>
+            ${renderLineList("checksAch", [
+                { name: "date", label: "Date" },
+                { name: "description", label: "Description" },
+                { name: "checkNo", label: "Check #" },
+                { name: "amount", label: "Amount", type: "number" },
+            ])}
+
+            <h3 class="books-subtitle">Other expense</h3>
+            ${renderLineList("otherExpenses", [
+                { name: "description", label: "Description" },
+                { name: "amount", label: "Amount", type: "number" },
+            ])}`;
+    }
+
     function renderDaily() {
         const reg = M().registerDayTotal(state.day);
         const gas = hasGasStation();
         const fuel = M().fuelDayTotal(state.day);
-        const totals = `
-            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash · O/S ${money(reg.overShort)}</p>`;
 
-        const fuelSection = gas
-            ? `
-                <h3 class="books-subtitle">Gas station sales</h3>
-                <div class="books-grid-2">
-                    <label class="books-label">Gallons sold
-                        <input type="number" step="0.01" min="0" class="books-input" name="fuel_gallons" value="${M().num(fuel.gallons) || ""}">
-                    </label>
-                    <label class="books-label">Amount ($)
-                        <input type="number" step="0.01" min="0" class="books-input" name="fuel_dollars" value="${M().num(fuel.dollars) || ""}">
-                    </label>
-                    <label class="books-label">Merch sale
-                        <input type="number" step="0.01" min="0" class="books-input" name="merch_sale" value="${M().num(state.day.merchSale) || ""}">
-                    </label>
-                    <label class="books-label">Credit card
-                        <input type="number" step="0.01" min="0" class="books-input" name="credit_card" value="${M().num(state.day.creditCard) || ""}">
-                    </label>
-                </div>`
-            : "";
+        if (gas) {
+            return `
+            <div class="books-panel data-input-form">
+                <label class="books-label">Day
+                    <select id="di-day" class="books-select">${dayOptions()}</select>
+                </label>
+
+                ${renderDailyGasSales()}
+                ${renderDailyDetailSheet(reg, fuel)}
+
+                <button type="button" class="btn books-save" id="di-save-day">Save this day</button>
+            </div>`;
+        }
 
         return `
             <div class="books-panel data-input-form">
@@ -453,38 +763,7 @@
                     <select id="di-day" class="books-select">${dayOptions()}</select>
                 </label>
 
-                ${renderRegisterUnit("Register 1", "register1", state.day.register1)}
-                ${renderRegisterUnit("Register 2", "register2", state.day.register2)}
-                ${totals}
-                ${fuelSection}
-
-                <h3 class="books-subtitle">Pulltab</h3>
-                ${renderShiftBlock("Pulltab", "pull", state.day.pulltab, [
-                    { name: "cash", label: "Cash" },
-                    { name: "winner", label: "Winners" },
-                    { name: "overShort", label: "Over / short" },
-                ])}
-
-                <h3 class="books-subtitle">Cash expense</h3>
-                ${renderLineList("cashExpenses", [
-                    { name: "description", label: "Description" },
-                    { name: "amount", label: "Amount", type: "number" },
-                    { name: "overShort", label: "O/S", type: "number" },
-                ])}
-
-                <h3 class="books-subtitle">Checks / ACH</h3>
-                ${renderLineList("checksAch", [
-                    { name: "date", label: "Date" },
-                    { name: "description", label: "Description" },
-                    { name: "checkNo", label: "Check #" },
-                    { name: "amount", label: "Amount", type: "number" },
-                ])}
-
-                <h3 class="books-subtitle">Other expense</h3>
-                ${renderLineList("otherExpenses", [
-                    { name: "description", label: "Description" },
-                    { name: "amount", label: "Amount", type: "number" },
-                ])}
+                ${renderDailyCStore()}
 
                 <button type="button" class="btn books-save" id="di-save-day">Save this day</button>
             </div>`;
@@ -520,13 +799,23 @@
         const tabs = [
             { id: "daily", label: "Daily sheet" },
             { id: "utilities", label: "Utilities & payroll" },
+            { id: "payables", label: "Payables" },
             { id: "receivables", label: "Receivables" },
         ];
 
         let body = "";
         if (state.tab === "daily") body = renderDaily();
         else if (state.tab === "utilities") body = renderUtilitiesPayroll();
-        else body = renderReceivables();
+        else if (state.tab === "payables") {
+            body = window.OplixPayablesUI
+                ? OplixPayablesUI.renderTab({
+                      userId,
+                      locationId: state.locationId,
+                      monthId: state.monthId,
+                      payables: state.payables,
+                  })
+                : '<p class="data-list-empty">Payables unavailable.</p>';
+        } else body = renderReceivables();
 
         root.innerHTML = `
             <div class="books-toolbar">
@@ -541,10 +830,28 @@
                 <button type="button" class="btn btn-nav-outline" id="di-reload">Load</button>
                 <span class="books-status" id="di-status"></span>
             </div>
+            <p class="books-hint books-amount-tip">Amount fields: use <strong>+</strong> or <strong>−</strong> to add/subtract (e.g. <code>100+50-25</code>). Tab out of the field to total.</p>
             <nav class="books-tabs">
                 ${tabs.map((t) => `<button type="button" class="books-tab${state.tab === t.id ? " active" : ""}" data-di-tab="${t.id}">${t.label}</button>`).join("")}
             </nav>
             ${body}`;
+
+        if (state.tab === "payables" && window.OplixPayablesUI) {
+            const payRoot = root.querySelector("[data-pay-section]");
+            if (payRoot) {
+                payRoot.dataset.payBound = "";
+                OplixPayablesUI.bind(payRoot, {
+                    userId,
+                    locationId: state.locationId,
+                    monthId: state.monthId,
+                    payables: state.payables,
+                    onRefresh: async () => {
+                        await loadPayables();
+                        render();
+                    },
+                });
+            }
+        }
     }
 
     window.OplixDataInput = {
@@ -560,6 +867,20 @@
         },
         onShow() {
             if (userId && state.locationId) loadCurrent();
+        },
+        resetToRoot() {
+            state.tab = "daily";
+            render();
+            if (userId && state.locationId) loadCurrent();
+        },
+        refreshIfOpen(locationId, monthId) {
+            if (
+                userId &&
+                state.locationId === locationId &&
+                state.monthId === monthId
+            ) {
+                loadCurrent();
+            }
         },
     };
 })();

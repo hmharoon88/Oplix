@@ -237,6 +237,7 @@
                 const hours = Math.floor((now - clockIn) / 3600000);
                 alerts.push({
                     id: `clockout_${shift.id}`,
+                    locationId: location.id,
                     severity: 0,
                     title: `${name} forgot to clock out`,
                     subtitle: `${location.name} · clocked in ${hours}h ago`,
@@ -251,6 +252,7 @@
                     const name = nameLookup[shift.employeeId] || "Employee";
                     alerts.push({
                         id: `noregister_${shift.id}`,
+                        locationId: location.id,
                         severity: 0,
                         title: `${location.name} — register data missing`,
                         subtitle: `${name}'s shift · ${formatDateMedium(clockOut)}`,
@@ -292,6 +294,7 @@
             if (!submittedYesterday) {
                 alerts.push({
                     id: `lotteryclose_${location.id}`,
+                    locationId: location.id,
                     severity: 0,
                     title: `${location.name} — lottery not closed`,
                     subtitle: `No submission for ${formatDateMedium(yesterday)}`,
@@ -317,6 +320,7 @@
             const total = overdue.reduce((s, p) => s + (p.amount || 0), 0);
             alerts.push({
                 id: `payables_${location.id}`,
+                locationId: location.id,
                 severity: 2,
                 title: `${overdue.length} payable${overdue.length === 1 ? "" : "s"} overdue · ${formatCurrency(total)}`,
                 subtitle: location.name,
@@ -332,12 +336,37 @@
         const label = value < 0 ? "SHORT" : "OVER";
         return {
             id,
+            locationId: location.id,
             severity,
             title: `${location.name} ${kind} ${label} ${formatCurrency(Math.abs(value))}`,
             subtitle: formatDateMedium(date),
             sortKey: kind === "lottery" ? 11 : 10,
         };
     }
+
+    function alertLocationId(alert) {
+        if (alert?.locationId) return alert.locationId;
+        const id = String(alert?.id || "");
+        if (id.startsWith("lotteryclose_")) return id.slice("lotteryclose_".length);
+        if (id.startsWith("payables_")) return id.slice("payables_".length);
+        if (id.startsWith("disapp_")) return id.slice("disapp_".length);
+        return null;
+    }
+
+    function alertSectionId(alert) {
+        const id = String(alert?.id || "");
+        if (id.startsWith("clockout_") || id.startsWith("noregister_") || id.startsWith("regvar_")) {
+            return "shifts";
+        }
+        if (id.startsWith("lotteryclose_") || id.startsWith("lotvar_")) return "lottery";
+        if (id.startsWith("payables_")) return "payables";
+        if (id.startsWith("doc_")) return "documents";
+        if (id.startsWith("disapp_")) return "tasks";
+        return null;
+    }
+
+    let needsAttentionExpanded = false;
+    let lastHomeUserId = null;
 
     function computeWeeklyPulse(location, payables, receivables) {
         const todayStart = startOfDay(new Date());
@@ -528,6 +557,7 @@
             const days = Math.max(0, Math.floor((exp - now) / 86400000));
             alerts.push({
                 id: `doc_${doc.id}`,
+                locationId: doc.locationId,
                 severity: days <= 7 ? 1 : 2,
                 title: `${doc.name || "Document"} expires in ${days} day${days === 1 ? "" : "s"}`,
                 subtitle: nameById[doc.locationId] || "Location",
@@ -571,6 +601,7 @@
         Object.entries(byLoc).forEach(([locId, count]) => {
             alerts.push({
                 id: `disapp_${locId}`,
+                locationId: locId,
                 severity: 1,
                 title: `${count} task${count === 1 ? "" : "s"} need rework`,
                 subtitle: nameById[locId] || "Location",
@@ -711,7 +742,7 @@
             </header>`;
     }
 
-    function renderNeedsAttention(alerts, userId, onAck) {
+    function renderNeedsAttention(alerts, userId) {
         const header = `
             <div class="home-card-header">
                 <span class="home-card-header-icon">⚠️</span>
@@ -730,28 +761,32 @@
                 </div>`;
         } else {
             const limit = 5;
-            const visible = alerts.slice(0, limit);
+            const visible = needsAttentionExpanded ? alerts : alerts.slice(0, limit);
             body = `
                 <ul class="home-alert-list" id="home-alert-list">
                     ${visible
-                        .map(
-                            (a) => `
+                        .map((a) => {
+                            const locId = alertLocationId(a);
+                            const sectionId = alertSectionId(a);
+                            const canOpen = !!locId;
+                            return `
                         <li class="home-alert-item">
-                            <button type="button" class="home-alert-main" data-goto="facilities">
+                            <button type="button" class="home-alert-main"${canOpen ? ` data-alert-location="${escapeHtml(locId)}"${sectionId ? ` data-alert-section="${escapeHtml(sectionId)}"` : ""}` : ""}${canOpen ? "" : " disabled"}>
                                 <span class="home-severity-dot ${severityClass(a.severity)}"></span>
                                 <span class="home-alert-text">
                                     <span class="home-alert-title">${escapeHtml(a.title)}</span>
                                     ${a.subtitle ? `<span class="home-alert-sub">${escapeHtml(a.subtitle)}</span>` : ""}
                                 </span>
+                                ${canOpen ? `<span class="home-alert-chevron">›</span>` : ""}
                             </button>
                             <button type="button" class="home-alert-ack" data-alert-id="${escapeHtml(a.id)}" title="Acknowledge">✓</button>
-                        </li>`
-                        )
+                        </li>`;
+                        })
                         .join("")}
                 </ul>
                 ${
                     alerts.length > limit
-                        ? `<p class="home-more-note">${alerts.length - limit} more alert${alerts.length - limit === 1 ? "" : "s"} — open the iOS app for full list</p>`
+                        ? `<button type="button" class="home-alert-more" id="home-alert-toggle">${needsAttentionExpanded ? "Show less" : `Show ${alerts.length - limit} more`}</button>`
                         : ""
                 }`;
         }
@@ -976,20 +1011,30 @@
     }
 
     function renderCommandCenter(data, userId) {
+        const Layout = window.OplixHomeLayoutStore;
+        const prefs = Layout ? Layout.load(userId) : null;
+        const filteredAlerts = Layout
+            ? Layout.filterAlerts(data.alerts, prefs)
+            : data.alerts;
+
+        const sections = {
+            actionCenter: renderNeedsAttention(filteredAlerts, userId),
+            thisWeek: renderThisWeek(data.weeklyPulse),
+            today: renderToday(data.todaySnapshot),
+            lotteryToday: renderLotteryTable(data.lotteryToday),
+            monthToDate: renderMonthToDateTable(data.locationStats),
+            shortcuts: renderQuickActions(),
+        };
+
+        const order = Layout
+            ? Layout.visibleSectionsInOrder(prefs)
+            : ["actionCenter", "today", "lotteryToday", "thisWeek", "shortcuts", "monthToDate"];
+
+        const blocks = order.map((id) => sections[id]).filter(Boolean).join("");
+
         return `
             ${renderGreeting(data)}
-            <div class="home-command-center">
-                <aside class="home-cc-col home-cc-col--aside">
-                    ${renderNeedsAttention(data.alerts, userId)}
-                    ${renderThisWeek(data.weeklyPulse)}
-                </aside>
-                <div class="home-cc-col home-cc-col--main">
-                    ${renderToday(data.todaySnapshot)}
-                    ${renderLotteryTable(data.lotteryToday)}
-                </div>
-            </div>
-            ${renderMonthToDateTable(data.locationStats)}
-            ${renderQuickActions()}`;
+            <div class="home-sections-stack">${blocks}</div>`;
     }
 
     function render(data, userId) {
@@ -1012,11 +1057,29 @@
             });
         });
 
-        el.querySelectorAll(".home-cc-action-btn[data-panel], .home-alert-main[data-goto]").forEach((btn) => {
+        el.querySelector("#home-alert-toggle")?.addEventListener("click", () => {
+            needsAttentionExpanded = !needsAttentionExpanded;
+            render(data, userId);
+        });
+
+        el.querySelectorAll(".home-cc-action-btn[data-panel]").forEach((btn) => {
             btn.addEventListener("click", () => {
-                const panel = btn.dataset.panel || btn.dataset.goto;
-                if (panel && typeof window.showDashboardPanel === "function") {
-                    window.showDashboardPanel(panel);
+                if (typeof window.showDashboardPanel === "function") {
+                    window.showDashboardPanel(btn.dataset.panel);
+                }
+            });
+        });
+
+        el.querySelectorAll(".home-alert-main[data-alert-location]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                const locationId = btn.dataset.alertLocation;
+                const sectionId = btn.dataset.alertSection || null;
+                if (!locationId) return;
+                if (typeof window.showDashboardPanel === "function") {
+                    window.showDashboardPanel("facilities");
+                }
+                if (window.OplixFacilities?.openLocation) {
+                    await OplixFacilities.openLocation(locationId, { sectionId });
                 }
             });
         });
@@ -1024,6 +1087,7 @@
 
     window.OplixHomeOverview = {
         async loadAndRender(userId, locations, employees, tasks, profile) {
+            lastHomeUserId = userId;
             const loading = document.getElementById("home-loading");
             const overview = document.getElementById("home-overview");
             loading.hidden = false;
@@ -1038,9 +1102,17 @@
             }
         },
         async reload(userId, locations, employees, tasks, profile) {
+            lastHomeUserId = userId;
             const data = await loadOverview(userId, locations, employees, tasks, profile);
             render(data, userId);
             window._oplixHomeData = data;
+        },
+        resetToRoot() {
+            needsAttentionExpanded = false;
+            const data = window._oplixHomeData;
+            if (data && lastHomeUserId) {
+                render(data, lastHomeUserId);
+            }
         },
     };
 })();

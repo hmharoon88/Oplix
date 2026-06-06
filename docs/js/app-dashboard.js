@@ -1,7 +1,6 @@
 (function () {
     const loadingEl = document.getElementById("app-loading");
     const contentEl = document.getElementById("app-content");
-    const employeesList = document.getElementById("employees-list");
     const signOutBtn = document.getElementById("sign-out");
     const sidebarNav = document.getElementById("sidebar-nav");
 
@@ -10,8 +9,52 @@
     let employeesCache = [];
     let tasksCache = [];
     let profileCache = null;
+    let activePanelId = null;
 
-    const PLACEHOLDER_SECTIONS = ["vendors", "payroll", "tasks", "reports"];
+    const PLACEHOLDER_SECTIONS = [];
+    const PANEL_KEY = "oplix.dashboard.panel";
+    const VALID_PANELS = new Set([
+        "home",
+        "facilities",
+        "employees",
+        "vendors",
+        "payroll",
+        "tasks",
+        "data-input",
+        "analytics",
+        "reports",
+        "settings",
+    ]);
+
+    function panelFromHash() {
+        const id = (location.hash || "").replace(/^#/, "").trim();
+        return VALID_PANELS.has(id) ? id : null;
+    }
+
+    function savePanel(panelId) {
+        if (!VALID_PANELS.has(panelId)) return;
+        try {
+            sessionStorage.setItem(PANEL_KEY, panelId);
+        } catch {
+            /* ignore */
+        }
+        const hash = `#${panelId}`;
+        if (location.hash !== hash) {
+            history.replaceState(null, "", hash);
+        }
+    }
+
+    function restorePanel() {
+        const fromHash = panelFromHash();
+        if (fromHash) return fromHash;
+        try {
+            const saved = sessionStorage.getItem(PANEL_KEY);
+            if (saved && VALID_PANELS.has(saved)) return saved;
+        } catch {
+            /* ignore */
+        }
+        return "home";
+    }
 
     function showContent() {
         loadingEl.hidden = true;
@@ -28,7 +71,51 @@
         return div.innerHTML;
     }
 
+    function resetPanelToRoot(panelId) {
+        switch (panelId) {
+            case "home":
+                window.OplixHomeOverview?.resetToRoot?.();
+                break;
+            case "facilities":
+                window.OplixFacilities?.resetToRoot?.();
+                break;
+            case "employees":
+                window.OplixEmployeesUI?.resetToRoot?.();
+                break;
+            case "vendors":
+                window.OplixVendorsUI?.resetToRoot?.();
+                break;
+            case "payroll":
+                window.OplixPayrollUI?.resetToRoot?.();
+                break;
+            case "tasks":
+                window.OplixTaskCheckUI?.resetToRoot?.();
+                break;
+            case "data-input":
+                window.OplixDataInput?.resetToRoot?.();
+                break;
+            case "analytics":
+                window.OplixAnalytics?.resetToRoot?.();
+                break;
+            case "reports":
+                window.OplixReports?.resetToRoot?.();
+                break;
+            case "settings":
+                window.OplixSettingsUI?.resetToRoot?.();
+                break;
+            default:
+                break;
+        }
+        const panel = document.getElementById(`panel-${panelId}`);
+        if (panel) panel.scrollTop = 0;
+    }
+
     function showPanel(panelId) {
+        const reselect = activePanelId === panelId;
+        if (reselect) {
+            resetPanelToRoot(panelId);
+        }
+
         document.querySelectorAll(".dashboard-panel").forEach((panel) => {
             const active = panel.dataset.panel === panelId;
             panel.hidden = !active;
@@ -46,6 +133,26 @@
         if (panelId === "analytics" && window.OplixAnalytics) {
             OplixAnalytics.onShow();
         }
+        if (panelId === "reports" && window.OplixReports) {
+            OplixReports.onShow();
+        }
+        if (panelId === "payroll" && window.OplixPayrollUI) {
+            OplixPayrollUI.onShow();
+        }
+        if (panelId === "tasks" && window.OplixTaskCheckUI) {
+            OplixTaskCheckUI.onShow();
+        }
+        if (panelId === "settings" && window.OplixSettingsUI) {
+            OplixSettingsUI.onShow();
+        }
+        if (panelId === "vendors" && window.OplixVendorsUI) {
+            OplixVendorsUI.onShow();
+        }
+        if (panelId === "employees" && window.OplixEmployeesUI) {
+            OplixEmployeesUI.onShow();
+        }
+        activePanelId = panelId;
+        savePanel(panelId);
     }
 
     window.showDashboardPanel = showPanel;
@@ -64,6 +171,27 @@
         }
         if (window.OplixAnalytics) {
             OplixAnalytics.init(currentUserId, locationsCache);
+        }
+        if (window.OplixReports) {
+            OplixReports.init(currentUserId, locationsCache);
+        }
+        if (window.OplixPayrollUI) {
+            OplixPayrollUI.init(currentUserId, locationsCache);
+        }
+        if (window.OplixTaskCheckUI) {
+            OplixTaskCheckUI.setLocations(locationsCache);
+        }
+        if (window.OplixTasksUI?.setLocations) {
+            OplixTasksUI.setLocations(locationsCache);
+        }
+        if (window.OplixSettingsUI) {
+            OplixSettingsUI.init(currentUserId);
+        }
+        if (window.OplixVendorsUI) {
+            OplixVendorsUI.setLocations(locationsCache);
+        }
+        if (window.OplixEmployeesUI) {
+            OplixEmployeesUI.setLocations(locationsCache);
         }
         if (window.OplixHomeOverview && profileCache) {
             await OplixHomeOverview.loadAndRender(
@@ -107,26 +235,6 @@
             .get();
 
         employeesCache = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-
-        if (snap.empty) {
-            employeesList.innerHTML = '<li class="data-list-empty">No employees yet.</li>';
-            return;
-        }
-
-        employeesList.innerHTML = employeesCache
-            .map((doc) => {
-                const data = doc;
-                const name = data.name || data.username || "Unnamed";
-                const username = data.username ? `@${data.username}` : "";
-                const rate =
-                    data.hourlyRate != null ? `$${Number(data.hourlyRate).toFixed(2)}/hr` : "";
-                return `
-                <li class="data-list-item">
-                    <h3>${escapeHtml(name)}</h3>
-                    <p class="data-list-meta">${escapeHtml(username)} ${rate ? " · " + escapeHtml(rate) : ""}</p>
-                </li>`;
-            })
-            .join("");
     }
 
     async function loadTasks(userId) {
@@ -150,6 +258,22 @@
 
     bindSidebar();
     initPlaceholders();
+
+    window.addEventListener("hashchange", () => {
+        const panel = panelFromHash();
+        if (panel && contentEl && !contentEl.hidden) {
+            showPanel(panel);
+        }
+    });
+
+    async function runModuleInit(label, fn) {
+        if (!fn) return;
+        try {
+            await fn();
+        } catch (err) {
+            console.error(`[Oplix] ${label} failed to load:`, err);
+        }
+    }
 
     OplixAuth.onAuthStateChanged(async (user) => {
         if (!user) {
@@ -189,8 +313,27 @@
             if (window.OplixAnalytics) {
                 OplixAnalytics.init(user.uid, locationsCache);
             }
+            if (window.OplixReports) {
+                OplixReports.init(user.uid, locationsCache);
+            }
+            if (window.OplixPayrollUI) {
+                await runModuleInit("Payroll", () => OplixPayrollUI.init(user.uid, locationsCache));
+            }
+            if (window.OplixTaskCheckUI) {
+                await runModuleInit("Tasks", () => OplixTaskCheckUI.init(user.uid, locationsCache));
+            }
+            if (window.OplixSettingsUI) {
+                await runModuleInit("Settings", () => OplixSettingsUI.init(user.uid));
+            }
+            if (window.OplixVendorsUI) {
+                await runModuleInit("Vendors", () => OplixVendorsUI.init(user.uid, locationsCache));
+            }
+            if (window.OplixEmployeesUI) {
+                await runModuleInit("Employees", () => OplixEmployeesUI.init(user.uid, locationsCache));
+            }
 
             showContent();
+            showPanel(restorePanel());
         } catch (err) {
             showError(err.message || "Unable to load your account.");
         }

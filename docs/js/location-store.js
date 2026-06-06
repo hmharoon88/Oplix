@@ -107,6 +107,7 @@
             "utilityProviders",
             "servicers",
             "complianceItems",
+            "payrollEntries",
         ];
         for (const name of subcollections) {
             await deleteSubcollection(userId, locationId, name);

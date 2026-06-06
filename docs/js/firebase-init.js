@@ -27,6 +27,9 @@
 
     window.oplixAuth = firebase.auth();
     window.oplixDb = firebase.firestore();
+    if (typeof firebase.storage === "function") {
+        window.oplixStorage = firebase.storage();
+    }
 
     window.oplixAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function (err) {
         console.warn("Auth persistence:", err);

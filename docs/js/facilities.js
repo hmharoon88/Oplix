@@ -37,14 +37,18 @@
     let tasks = [];
     let listRendered = false;
     let currentDetail = null;
+    let currentSectionId = null;
     let showCreateForm = false;
     let showEditForm = false;
+    let facEditSaveReady = null;
+
+    const FAC_NAV_KEY = "oplix.facilities.nav";
 
     const Store = () => window.OplixLocationStore;
 
     const FACILITY_TYPES = [
-        { id: "c_store", label: "C-Store" },
-        { id: "c_store_gas", label: "C-Store with gas" },
+        { id: "c_store", label: "C Store" },
+        { id: "c_store_gas", label: "C Store Gas Station" },
     ];
 
     function escapeHtml(text) {
@@ -55,6 +59,41 @@
 
     function $(id) {
         return document.getElementById(id);
+    }
+
+    function readFacNav() {
+        try {
+            const raw = sessionStorage.getItem(FAC_NAV_KEY);
+            if (!raw) return null;
+            const nav = JSON.parse(raw);
+            if (!nav?.locationId) return null;
+            return nav;
+        } catch {
+            return null;
+        }
+    }
+
+    function saveFacNav() {
+        try {
+            if (!currentDetail?.location?.id) return;
+            sessionStorage.setItem(
+                FAC_NAV_KEY,
+                JSON.stringify({
+                    locationId: currentDetail.location.id,
+                    sectionId: currentSectionId || null,
+                })
+            );
+        } catch {
+            /* ignore */
+        }
+    }
+
+    function clearFacNav() {
+        try {
+            sessionStorage.removeItem(FAC_NAV_KEY);
+        } catch {
+            /* ignore */
+        }
     }
 
     function formatCurrency(amount) {
@@ -175,7 +214,33 @@
         }
 
         if (emptyEl) emptyEl.hidden = true;
-        listEl.innerHTML = locations.map((loc, i) => renderLocationCard(loc, i)).join("");
+
+        let cardIndex = 0;
+        const grouped = FACILITY_TYPES.map((type) => ({
+            type,
+            locations: locations
+                .filter((loc) => effectiveFacilityType(loc) === type.id)
+                .slice()
+                .sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+        })).filter((g) => g.locations.length > 0);
+
+        listEl.innerHTML = grouped
+            .map(
+                (group) => `
+            <section class="facilities-group">
+                <h2 class="facilities-group-title">${escapeHtml(group.type.label)}</h2>
+                <div class="facilities-group-grid">
+                    ${group.locations
+                        .map((loc) => {
+                            const html = renderLocationCard(loc, cardIndex);
+                            cardIndex += 1;
+                            return html;
+                        })
+                        .join("")}
+                </div>
+            </section>`
+            )
+            .join("");
 
         listEl.querySelectorAll(".fac-card").forEach((btn) => {
             btn.addEventListener("click", () => openLocation(btn.dataset.locationId));
@@ -356,7 +421,7 @@
                 <div class="fac-detail-header-text">
                     <h1>${escapeHtml(data.location.name)}</h1>
                     <p>${escapeHtml(data.location.address || "")}</p>
-                    <p class="fac-detail-type">${escapeHtml(FACILITY_TYPES.find((t) => t.id === effectiveFacilityType(data.location))?.label || "C-Store")}</p>
+                    <p class="fac-detail-type">${escapeHtml(FACILITY_TYPES.find((t) => t.id === effectiveFacilityType(data.location))?.label || "C Store")}</p>
                 </div>
                 <div class="fac-detail-actions">
                     <button type="button" class="btn btn-nav-outline" id="fac-edit-btn">Edit</button>
@@ -422,13 +487,23 @@
             case "supervisors":
                 return renderPeopleList(title, data.supervisors, data);
             case "tasks":
-                return renderTasksScreen(data);
+                return window.OplixTasksUI
+                    ? OplixTasksUI.renderEmbedded({
+                          locationName: data.location.name,
+                      })
+                    : renderComingSoonSection(title);
             case "shifts":
                 return renderShiftsScreen(data);
             case "lottery":
                 return renderLotteryScreen(data);
             case "documents":
-                return renderDocumentsScreen(data);
+                return window.OplixFacilityDocuments
+                    ? OplixFacilityDocuments.renderSection({
+                          userId,
+                          locationId: data.location.id,
+                          data,
+                      })
+                    : renderDocumentsScreen(data);
             case "reminders":
                 return renderRemindersScreen(data);
             case "payables":
@@ -453,8 +528,18 @@
                           data,
                       })
                     : renderComingSoonSection(title);
-            case "payroll":
             case "reports":
+                return window.OplixReports
+                    ? OplixReports.renderEmbedded({
+                          locationName: data.location.name,
+                      })
+                    : renderComingSoonSection(title);
+            case "payroll":
+                return window.OplixPayrollUI
+                    ? OplixPayrollUI.renderEmbedded({
+                          locationName: data.location.name,
+                      })
+                    : renderComingSoonSection(title);
             case "sales":
                 return renderComingSoonSection(title);
             default:
@@ -463,8 +548,16 @@
     }
 
     function renderPeopleList(title, people, data) {
+        const locId = data.location.id;
+        const isSupervisors = title === "Supervisors";
+        const addLabel = isSupervisors ? "Add supervisor" : "Add employee";
+        const roleAttr = isSupervisors ? ' data-fac-add-role="supervisor"' : "";
+        const toolbar = `
+            <div class="dir-toolbar">
+                <button type="button" class="btn" data-fac-add-employee="${escapeHtml(locId)}"${roleAttr}>${escapeHtml(addLabel)}</button>
+            </div>`;
         if (!people.length) {
-            return `<h2 class="loc-section-heading">${escapeHtml(title)}</h2><p class="data-list-empty">No one listed yet.</p>`;
+            return `<h2 class="loc-section-heading">${escapeHtml(title)}</h2>${toolbar}<p class="data-list-empty">No one listed yet.</p>`;
         }
         const rows = people
             .map((emp) => {
@@ -480,58 +573,23 @@
                     {};
                 const status = shiftStatusLabel(empShift);
                 return `
-                <li class="loc-row-card">
+                <li class="loc-row-card dir-row">
                     <div>
                         <strong>${escapeHtml(emp.name || "Unnamed")}</strong>
                         <span class="data-list-meta">@${escapeHtml(emp.username || "—")}</span>
                     </div>
-                    <div class="loc-row-end">
+                    <div class="loc-row-end fac-people-row-end">
                         ${progHtml}
                         <span class="loc-shift-pill">${escapeHtml(status)}</span>
+                        <div class="dir-row-actions">
+                            <button type="button" class="dir-btn-edit" data-fac-emp-edit="${escapeHtml(emp.id)}">Edit</button>
+                            <button type="button" class="dir-btn-edit fac-people-delete" data-fac-emp-delete="${escapeHtml(emp.id)}">Delete</button>
+                        </div>
                     </div>
                 </li>`;
             })
             .join("");
-        return `<h2 class="loc-section-heading">${escapeHtml(title)}</h2><ul class="loc-row-list">${rows}</ul>`;
-    }
-
-    function renderTasksScreen(data) {
-        const recurring = data.tasks.filter((t) => t.frequency && t.frequency !== "one_time");
-        const corrective = data.tasks.filter((t) => !t.frequency || t.frequency === "one_time");
-        return `
-            <h2 class="loc-section-heading">Tasks</h2>
-            <div class="loc-category-cards">
-                <div class="loc-category-card loc-category-card--green">
-                    <span class="loc-category-icon">↻</span>
-                    <div>
-                        <strong>Recurring</strong>
-                        <span class="data-list-meta">${recurring.length} task${recurring.length === 1 ? "" : "s"}</span>
-                    </div>
-                </div>
-                <div class="loc-category-card loc-category-card--blue">
-                    <span class="loc-category-icon">!</span>
-                    <div>
-                        <strong>Corrective</strong>
-                        <span class="data-list-meta">${corrective.length} task${corrective.length === 1 ? "" : "s"}</span>
-                    </div>
-                </div>
-            </div>
-            ${renderTaskList("Recurring", recurring)}
-            ${renderTaskList("Corrective", corrective)}`;
-    }
-
-    function renderTaskList(label, taskList) {
-        if (!taskList.length) return "";
-        return `
-            <h3 class="loc-subheading">${escapeHtml(label)}</h3>
-            <ul class="loc-row-list">
-                ${taskList
-                    .map((t) => {
-                        const freq = (t.frequency || "one_time").replace("_", " ");
-                        return `<li class="loc-row-card"><div><strong>${escapeHtml(t.description || "Task")}</strong><span class="data-list-meta">${escapeHtml(freq)}</span></div></li>`;
-                    })
-                    .join("")}
-            </ul>`;
+        return `<h2 class="loc-section-heading">${escapeHtml(title)}</h2>${toolbar}<ul class="loc-row-list">${rows}</ul>`;
     }
 
     function renderShiftsScreen(data) {
@@ -693,10 +751,60 @@
         $("location-detail-main").innerHTML = renderLocationMain(data);
         bindDetailMainEvents(data);
         updateNav("detail");
+        attachFacEditSaveReady();
+    }
+
+    function attachFacEditSaveReady() {
+        facEditSaveReady?.detach();
+        facEditSaveReady = null;
+        if (!showEditForm || !window.OplixFormSaveReady) return;
+        const form = $("fac-edit-form");
+        if (!form) return;
+        facEditSaveReady = OplixFormSaveReady.watch(form, { mode: "edit" });
+    }
+
+    function bindPeopleSectionActions(content, sectionId) {
+        content.querySelectorAll("[data-fac-emp-edit]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                const empId = btn.dataset.facEmpEdit;
+                if (window.showDashboardPanel) showDashboardPanel("employees");
+                if (window.OplixEmployeesUI?.openEdit) {
+                    await OplixEmployeesUI.openEdit(empId);
+                }
+            });
+        });
+        content.querySelectorAll("[data-fac-emp-delete]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                const empId = btn.dataset.facEmpDelete;
+                const emp = currentDetail?.allPeople?.find((e) => e.id === empId);
+                if (!emp) return;
+                if (
+                    !confirm(
+                        `Delete ${emp.name || "this employee"}?\n\nThis removes their login and facility assignments.`
+                    )
+                ) {
+                    return;
+                }
+                try {
+                    await window.OplixEmployeesStore.deleteEmployee(userId, emp);
+                    if (window.OplixEmployeesUI?.refresh) {
+                        await OplixEmployeesUI.refresh();
+                    }
+                    if (window.OplixDashboard?.reloadLocations) {
+                        await OplixDashboard.reloadLocations();
+                    }
+                    currentDetail = await loadLocationDetail(currentDetail.location.id);
+                    openSection(sectionId);
+                } catch (err) {
+                    alert(err.message || "Could not delete employee.");
+                }
+            });
+        });
     }
 
     function openSection(sectionId) {
         if (!currentDetail) return;
+        currentSectionId = sectionId;
         $("location-detail-main").hidden = true;
         $("location-section-panel").hidden = false;
         const content = $("location-section-content");
@@ -725,19 +833,74 @@
                 },
             });
         }
+        if (window.OplixFacilityDocuments?.isDocumentsSection(sectionId)) {
+            content.dataset.docBound = "";
+            OplixFacilityDocuments.bind(content, {
+                userId,
+                locationId: currentDetail.location.id,
+                data: currentDetail,
+                onRefresh: async () => {
+                    currentDetail = await loadLocationDetail(currentDetail.location.id);
+                    openSection(sectionId);
+                },
+            });
+        }
+        if (sectionId === "reports" && window.OplixReports) {
+            content.querySelector("#rpt-embedded-root")?.removeAttribute("data-rpt-embedded-bound");
+            OplixReports.bindEmbedded(content, {
+                userId,
+                locationId: currentDetail.location.id,
+                locationName: currentDetail.location.name,
+                locations: locations.length ? locations : [currentDetail.location],
+            });
+        }
+        if (sectionId === "payroll" && window.OplixPayrollUI) {
+            OplixPayrollUI.bindEmbedded(content, {
+                userId,
+                locationId: currentDetail.location.id,
+                locationName: currentDetail.location.name,
+                locations: locations.length ? locations : [currentDetail.location],
+            });
+        }
+        if (sectionId === "tasks" && window.OplixTasksUI) {
+            OplixTasksUI.bindEmbedded(content, {
+                userId,
+                locationId: currentDetail.location.id,
+                locationName: currentDetail.location.name,
+                locations: locations.length ? locations : [currentDetail.location],
+            });
+        }
+        content.querySelectorAll("[data-fac-add-employee]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const locId = btn.dataset.facAddEmployee;
+                const role = btn.dataset.facAddRole || "employee";
+                if (window.showDashboardPanel) showDashboardPanel("employees");
+                if (window.OplixEmployeesUI?.openCreate) {
+                    OplixEmployeesUI.openCreate(locId, role);
+                }
+            });
+        });
+        if (sectionId === "employees" || sectionId === "supervisors") {
+            bindPeopleSectionActions(content, sectionId);
+        }
+        saveFacNav();
         updateNav("section");
     }
 
     function closeSection() {
         if (!currentDetail) return;
+        currentSectionId = null;
+        saveFacNav();
         showDetailMain(currentDetail);
     }
 
-    async function openLocation(locationId) {
+    async function openLocation(locationId, options) {
         const listView = $("facilities-list-view");
         const detailView = $("location-detail-view");
+        const sectionId = options?.sectionId || null;
 
         showEditForm = false;
+        currentSectionId = sectionId;
         listView.hidden = true;
         detailView.hidden = false;
         $("location-detail-loading").hidden = false;
@@ -748,7 +911,20 @@
         try {
             const data = await loadLocationDetail(locationId);
             showDetailMain(data);
+            if (sectionId) {
+                openSection(sectionId);
+            } else {
+                saveFacNav();
+            }
         } catch (err) {
+            if (options?.restoring) {
+                clearFacNav();
+                currentSectionId = null;
+                closeLocation();
+                listRendered = false;
+                renderList();
+                return;
+            }
             $("location-detail-loading").hidden = true;
             $("location-detail-main").hidden = false;
             $("location-detail-main").innerHTML = `<p class="app-error">${escapeHtml(err.message || "Failed to load facility.")}</p>`;
@@ -760,8 +936,17 @@
         $("facilities-list-view").hidden = false;
         $("location-detail-view").hidden = true;
         currentDetail = null;
+        currentSectionId = null;
         showEditForm = false;
+        clearFacNav();
         updateNav("list");
+    }
+
+    function resetToRoot() {
+        showCreateForm = false;
+        showEditForm = false;
+        closeLocation();
+        renderCreateForm();
     }
 
     function bindFacilitiesShell() {
@@ -879,19 +1064,41 @@
             userId = uid;
             locations = locs || [];
             tasks = taskList || [];
-            listRendered = false;
 
+            const nav = readFacNav();
+            if (nav?.locationId) {
+                if (locations.some((l) => l.id === nav.locationId)) {
+                    listRendered = true;
+                    await openLocation(nav.locationId, {
+                        sectionId: nav.sectionId || null,
+                        restoring: true,
+                    });
+                    return;
+                }
+                clearFacNav();
+            }
+
+            listRendered = false;
             const loadingEl = $("facilities-loading");
             const listEl = $("facilities-list");
             if (loadingEl) loadingEl.hidden = false;
             if (listEl) listEl.innerHTML = "";
 
+            if ($("location-detail-view") && !$("location-detail-view").hidden) {
+                closeLocation();
+            } else {
+                currentDetail = null;
+                currentSectionId = null;
+            }
             renderList();
         },
 
         ensureLoaded() {
             if (!listRendered && userId) renderList();
         },
+
+        openLocation,
+        resetToRoot,
     };
 
     function bindNav() {

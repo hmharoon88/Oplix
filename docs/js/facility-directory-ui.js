@@ -90,7 +90,8 @@
             </li>`;
     }
 
-    function renderVendorForm(item, id) {
+    function renderVendorForm(item, id, opts = {}) {
+        const includeActions = opts.includeActions !== false;
         const v = M().normalizeVendor(item);
         return `
             <form class="dir-form" data-dir-form="vendors" data-dir-id="${escapeHtml(id)}">
@@ -117,11 +118,15 @@
                 <label class="books-label">Notes
                     <textarea class="books-input dir-textarea" name="notes" rows="2">${escapeHtml(v.notes)}</textarea>
                 </label>
-                <div class="dir-form-actions">
+                ${
+                    includeActions
+                        ? `<div class="dir-form-actions">
                     <button type="submit" class="btn">Save</button>
                     <button type="button" class="btn btn-nav-outline" data-dir-cancel>Cancel</button>
                     ${id ? `<button type="button" class="btn dir-btn-delete" data-dir-delete>Delete</button>` : ""}
-                </div>
+                </div>`
+                        : ""
+                }
             </form>`;
     }
 
@@ -133,7 +138,7 @@
         if (isNewCustom) {
             return `
             <form class="dir-form" data-dir-form="utilityProviders" data-dir-custom="1" data-dir-id="">
-                <p class="books-hint">Creates a new line in <strong>Data input → Utilities & payroll</strong> for this facility.</p>
+                <p class="books-hint">Creates a new line in <strong>Daily books → Utilities & payroll</strong> for this facility.</p>
                 <div class="books-grid-2">
                     <label class="books-label">Utility name *
                         <input class="books-input" name="customLabel" required placeholder="e.g. Propane, Phone">
@@ -261,7 +266,7 @@
 
         const utilHint =
             sectionId === "utility-providers"
-                ? `<p class="books-hint dir-hint">Default types match <strong>Data input</strong> (Internet, Water, Electric, Trash, Gas, Alarm, Rent). Custom utilities you add here also appear in Data input for this facility.</p>`
+                ? `<p class="books-hint dir-hint">Default types match <strong>Daily books</strong> (Internet, Water, Electric, Trash, Gas, Alarm, Rent). Custom utilities you add here also appear in Daily books for this facility.</p>`
                 : `<p class="books-hint dir-hint">Saved for this facility in Firestore — same paths when the iOS app adds support.</p>`;
 
         const toolbarBtn =
@@ -356,12 +361,15 @@
 
         const formSlot = section.querySelector("[data-dir-form-slot]");
         const statusEl = section.querySelector("[data-dir-status]");
+        let saveReadyHandle = null;
 
         function setStatus(msg) {
             if (statusEl) statusEl.textContent = msg || "";
         }
 
         function hideForm() {
+            saveReadyHandle?.detach();
+            saveReadyHandle = null;
             if (formSlot) {
                 formSlot.hidden = true;
                 formSlot.innerHTML = "";
@@ -369,9 +377,15 @@
         }
 
         function showForm(item, id) {
+            saveReadyHandle?.detach();
             formSlot.innerHTML = renderForm(sectionId, item, id);
             formSlot.hidden = false;
             formSlot.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            if (window.OplixFormSaveReady) {
+                saveReadyHandle = OplixFormSaveReady.watch(formSlot, {
+                    mode: id ? "edit" : "new",
+                });
+            }
         }
 
         section.addEventListener("click", async (e) => {
@@ -448,9 +462,25 @@
         });
     }
 
+    function readVendorForm(form) {
+        const fd = new FormData(form);
+        return M().normalizeVendor({
+            active: true,
+            name: fd.get("name"),
+            category: fd.get("category"),
+            contactName: fd.get("contactName"),
+            phone: fd.get("phone"),
+            email: fd.get("email"),
+            accountNumber: fd.get("accountNumber"),
+            notes: fd.get("notes"),
+        });
+    }
+
     window.OplixFacilityDirectory = {
         isDirectorySection,
         renderSection,
         bind,
+        renderVendorForm,
+        readVendorForm,
     };
 })();

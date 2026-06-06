@@ -6,7 +6,7 @@
  *   users/{uid}/locations/{locationId}/utilityProviders/{id}  — doc id = utilityType key
  *   users/{uid}/locations/{locationId}/servicers/{id}
  *
- * Standard utility types match Data input / books (OplixBooksModel.UTILITY_KEYS).
+ * Standard utility types match Daily books (OplixBooksModel.UTILITY_KEYS).
  */
 (function () {
     const COLLECTIONS = {
