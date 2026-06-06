@@ -27,33 +27,64 @@ struct AddEmployeeView: View {
     @State private var hasWorkingHours = false
     @State private var useWeeklySchedule = true // Default to weekly schedule
     @State private var weeklySchedule = WeeklySchedule()
+    @State private var is24Hours = false
     @State private var hourlyRate = ""
     @State private var canTakeRegister = false
     @State private var canSubmitLottery = false
+    @State private var selectedRole: User.UserRole = .employee
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var showingSuccess = false
     @State private var createdEmployeeInfo: (username: String, email: String, password: String)?
     
     var body: some View {
-        NavigationStack {
+        let _ = print("🟡 SHEET - AddEmployeeView BODY RENDER")
+        let _ = print("   ViewModel location: \(viewModel.location?.name ?? "nil")")
+        let _ = print("   ViewModel employees count: \(viewModel.employees.count)")
+        
+        return NavigationStack {
             ZStack {
                 Theme.secondaryGradient
                     .ignoresSafeArea()
                 
                 Form {
                     Section("Employee Details") {
-                        TextField("Employee Name", text: $name)
+                        TextField("Name", text: $name)
                             .textInputAutocapitalization(.words)
                         SecureField("Password", text: $password)
+                        
+                        Picker("Role", selection: $selectedRole) {
+                            Text("Employee").tag(User.UserRole.employee)
+                            Text("Supervisor").tag(User.UserRole.supervisor)
+                        }
+                    }
+                    
+                    Section("Schedule Settings") {
+                        Toggle("24/7", isOn: $is24Hours)
+                            .onChange(of: is24Hours) { _, newValue in
+                                // When 24/7 is enabled, disable weekly schedule
+                                if newValue {
+                                    useWeeklySchedule = false
+                                }
+                            }
                     }
                     
                     Section("Schedule") {
                         Toggle("Set Weekly Schedule", isOn: $useWeeklySchedule)
+                            .disabled(is24Hours)
+                            .foregroundColor(is24Hours ? Theme.darkGray : .primary)
+                            .onChange(of: useWeeklySchedule) { _, newValue in
+                                // When weekly schedule is enabled, disable 24/7
+                                if newValue {
+                                    is24Hours = false
+                                }
+                            }
                         
-                        if useWeeklySchedule {
+                        if useWeeklySchedule && !is24Hours {
                             WeeklyScheduleEditor(schedule: $weeklySchedule)
-                        } else {
+                                .disabled(is24Hours)
+                                .opacity(is24Hours ? 0.5 : 1.0)
+                        } else if !is24Hours {
                             Toggle("Set Working Hours", isOn: $hasWorkingHours)
                             
                             if hasWorkingHours {
@@ -91,11 +122,17 @@ struct AddEmployeeView: View {
                     }
                 }
             }
-            .navigationTitle("New Employee")
+            .navigationTitle(selectedRole == .supervisor ? "New Supervisor" : "New Employee")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                print("🟡 SHEET - AddEmployeeView ON APPEAR")
+                print("   ViewModel location: \(viewModel.location?.name ?? "nil")")
+                print("   ViewModel employees count: \(viewModel.employees.count)")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
+                        print("🟡 SHEET - AddEmployeeView DISMISS (Cancel)")
                         dismiss()
                     }
                 }
@@ -108,6 +145,8 @@ struct AddEmployeeView: View {
                     .disabled(name.isEmpty || password.isEmpty)
                 }
             }
+            .toolbarBackground(Theme.secondaryGradient, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .alert("Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -120,11 +159,21 @@ struct AddEmployeeView: View {
                     }
                 }
                 Button("Done", role: .cancel) {
+                    print("🟡 SHEET - AddEmployeeView DISMISS (Success - Done)")
                     dismiss()
                 }
             } message: {
                 if let info = createdEmployeeInfo {
                     Text("Email: \(info.email)\n\nPassword: \(info.password)")
+                }
+            }
+            .onChange(of: showingSuccess) { oldValue, newValue in
+                if newValue {
+                    print("🟡 SHEET - AddEmployeeView - Employee created successfully")
+                    if let info = createdEmployeeInfo {
+                        print("   Username: \(info.username)")
+                        print("   Email: \(info.email)")
+                    }
                 }
             }
         }
@@ -153,14 +202,18 @@ struct AddEmployeeView: View {
             let info = try await viewModel.createEmployee(
                 name: name,
                 password: password,
+                role: selectedRole,
                 workingHoursStart: startTime,
                 workingHoursEnd: endTime,
                 weeklySchedule: schedule,
+                is24Hours: is24Hours ? true : nil,
                 hourlyRate: rate,
                 canTakeRegister: canTakeRegister,
                 canSubmitLottery: canSubmitLottery
             )
             createdEmployeeInfo = info
+            // Clear any error messages from viewModel (might be from loadData timing issues)
+            viewModel.errorMessage = nil
             showingSuccess = true
         } catch {
             errorMessage = error.localizedDescription

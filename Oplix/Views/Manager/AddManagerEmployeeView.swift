@@ -32,6 +32,7 @@ struct AddManagerEmployeeView: View {
     @State private var locationHasWorkingHours: [String: Bool] = [:] // Track if location has working hours
     @State private var locationWorkingHoursStart: [String: Date] = [:] // Working hours start per location
     @State private var locationWorkingHoursEnd: [String: Date] = [:] // Working hours end per location
+    @State private var is24Hours = false
     @State private var hourlyRate = ""
     @State private var canTakeRegister = false
     @State private var canSubmitLottery = false
@@ -72,6 +73,18 @@ struct AddManagerEmployeeView: View {
                         TextField("Employee Name", text: $name)
                             .textInputAutocapitalization(.words)
                         SecureField("Password", text: $password)
+                    }
+                    
+                    Section("Schedule Settings") {
+                        Toggle("24/7", isOn: $is24Hours)
+                            .onChange(of: is24Hours) { _, newValue in
+                                // When 24/7 is enabled, disable weekly schedule for all locations
+                                if newValue {
+                                    for locationId in selectedLocationIds {
+                                        locationUseWeeklySchedule[locationId] = false
+                                    }
+                                }
+                            }
                     }
                     
                     Section("Assign to Locations") {
@@ -165,6 +178,8 @@ struct AddManagerEmployeeView: View {
                     .disabled(name.isEmpty || password.isEmpty || hasScheduleConflicts)
                 }
             }
+            .toolbarBackground(Theme.secondaryGradient, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .alert("Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -240,6 +255,7 @@ struct AddManagerEmployeeView: View {
                 workingHoursStart: startTime,
                 workingHoursEnd: endTime,
                 weeklySchedule: schedule,
+                is24Hours: is24Hours ? true : nil,
                 assignedLocationIds: assignedLocationIds,
                 hourlyRate: rate,
                 canTakeRegister: canTakeRegister,
@@ -312,11 +328,17 @@ struct AddManagerEmployeeView: View {
                     get: { locationUseWeeklySchedule[location.id] ?? true },
                     set: {
                         locationUseWeeklySchedule[location.id] = $0
+                        // When weekly schedule is enabled, disable 24/7
+                        if $0 {
+                            is24Hours = false
+                        }
                         checkConflicts(for: location.id)
                     }
                 ))
+                .disabled(is24Hours)
+                .foregroundColor(is24Hours ? Theme.darkGray : .primary)
                 
-                if locationUseWeeklySchedule[location.id] ?? true {
+                if locationUseWeeklySchedule[location.id] ?? true && !is24Hours {
                     WeeklyScheduleEditor(schedule: Binding(
                         get: { locationSchedules[location.id] ?? WeeklySchedule() },
                         set: {
@@ -324,7 +346,9 @@ struct AddManagerEmployeeView: View {
                             checkConflicts(for: location.id)
                         }
                     ))
-                } else {
+                    .disabled(is24Hours)
+                    .opacity(is24Hours ? 0.5 : 1.0)
+                } else if !is24Hours {
                     Toggle("Set Working Hours", isOn: Binding(
                         get: { locationHasWorkingHours[location.id] ?? false },
                         set: {
@@ -388,7 +412,7 @@ struct AddManagerEmployeeView: View {
     private func checkConflicts(for locationId: String) {
         var conflicts: [String] = []
         
-        guard let currentLocation = viewModel.locations.first(where: { $0.id == locationId }) else { return }
+        guard viewModel.locations.first(where: { $0.id == locationId }) != nil else { return }
         
         // Get current location's schedule
         let currentUseWeekly = locationUseWeeklySchedule[locationId] ?? true

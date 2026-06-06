@@ -22,11 +22,33 @@ struct EmployeeDetailView: View {
     @State private var canSubmitLottery: Bool = false
     @State private var showingPermissionError = false
     @State private var permissionErrorMessage = ""
+    @State private var showingPermissionSuccess = false
+
+    // Supervisor-only permission state. Mirrors EditManagerEmployeeView so
+    // supervisor flags are editable from either entry point. Only rendered
+    // and saved when the employee actually has the supervisor role.
+    @State private var canViewEmployeeData: Bool = false
+    @State private var canManageTasks: Bool = false
+    @State private var canManageDocuments: Bool = false
+    @State private var canViewRegisterData: Bool = false
+    @State private var canViewLotteryData: Bool = false
+    @State private var canEditSchedules: Bool = false
+    @State private var canViewReports: Bool = false
+
+    /// True when this employee was loaded into the view model's
+    /// `supervisors` bucket. The view model populates that bucket by
+    /// fetching User.role, so this is a reliable proxy without a duplicate
+    /// network request from this screen.
+    private var isSupervisor: Bool {
+        viewModel.supervisors.contains(where: { $0.id == employee.id })
+    }
     @State private var showingEditHourlyRate = false
     @State private var hourlyRateText = ""
     @State private var showingHourlyRateError = false
     @State private var hourlyRateErrorMessage = ""
     @State private var showingHourlyRateSuccess = false
+    @State private var employeeSchedule: WeeklySchedule?
+    @State private var hasSchedule = false
     
     var body: some View {
         ZStack {
@@ -47,17 +69,17 @@ struct EmployeeDetailView: View {
                         
                         Text(employee.username)
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Theme.darkGray)
                         
                         HStack {
                             Text("Status:")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Theme.darkGray)
                             Text(employee.currentShiftStatus.rawValue.capitalized)
                                 .font(.caption)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 4)
-                                .background(employee.currentShiftStatus == .clockedIn ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
+                                .background(employee.currentShiftStatus == .clockedIn ? Color.green.opacity(0.2) : Theme.darkGray.opacity(0.2))
                                 .cornerRadius(8)
                         }
                     }
@@ -137,6 +159,72 @@ struct EmployeeDetailView: View {
                             }
                             .padding(.horizontal)
                         }
+                    }
+                    
+                    // Schedule Section
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Schedule")
+                            .font(.headline)
+                            .padding(.horizontal)
+                        
+                        VStack(spacing: 12) {
+                            if hasSchedule, let schedule = employeeSchedule {
+                                WeeklyScheduleEditor(schedule: Binding(
+                                    get: { schedule },
+                                    set: { newSchedule in
+                                        employeeSchedule = newSchedule
+                                        Task {
+                                            var updatedEmployee = employee
+                                            updatedEmployee.weeklySchedule = newSchedule
+                                            do {
+                                                try await viewModel.updateEmployee(updatedEmployee)
+                                            } catch {
+                                                // Handle error
+                                            }
+                                        }
+                                    }
+                                ))
+                                .padding()
+                                .background(Theme.cloudWhite)
+                                .cornerRadius(12)
+                                .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                            } else {
+                                VStack(spacing: 8) {
+                                    Text("No weekly schedule set")
+                                        .font(.subheadline)
+                                        .foregroundColor(Theme.darkGray)
+                                    
+                                    Button(action: {
+                                        let newSchedule = WeeklySchedule()
+                                        employeeSchedule = newSchedule
+                                        hasSchedule = true
+                                        Task {
+                                            var updatedEmployee = employee
+                                            updatedEmployee.weeklySchedule = newSchedule
+                                            do {
+                                                try await viewModel.updateEmployee(updatedEmployee)
+                                            } catch {
+                                                // Handle error
+                                            }
+                                        }
+                                    }) {
+                                        Text("Add Weekly Schedule")
+                                            .font(.caption)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(Theme.cloudBlue)
+                                            .foregroundColor(.white)
+                                            .cornerRadius(8)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Theme.cloudWhite)
+                                .cornerRadius(12)
+                                .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                            }
+                        }
+                        .padding(.horizontal)
                     }
                     
                     // Hourly Rate Section (Always shown)
@@ -236,7 +324,56 @@ struct EmployeeDetailView: View {
                             .background(Theme.cloudWhite)
                             .cornerRadius(12)
                             .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-                            
+
+                            // Supervisor-only permissions. Only shown for
+                            // people whose User.role is .supervisor — for
+                            // regular employees these are irrelevant and
+                            // would just clutter the screen.
+                            if isSupervisor {
+                                supervisorPermissionToggle(
+                                    isOn: $canViewEmployeeData,
+                                    icon: "person.2.fill",
+                                    title: "Can View Employee Data",
+                                    subtitle: "View other employees and their shifts"
+                                )
+                                supervisorPermissionToggle(
+                                    isOn: $canManageTasks,
+                                    icon: "checklist",
+                                    title: "Can Manage Tasks",
+                                    subtitle: "Audit, approve photos, add/edit tasks at this location"
+                                )
+                                supervisorPermissionToggle(
+                                    isOn: $canManageDocuments,
+                                    icon: "doc.text.fill",
+                                    title: "Can Manage Documents",
+                                    subtitle: "Upload and manage documents for this location"
+                                )
+                                supervisorPermissionToggle(
+                                    isOn: $canEditSchedules,
+                                    icon: "calendar",
+                                    title: "Can Edit Schedules",
+                                    subtitle: "Modify employee schedules at this location"
+                                )
+                                supervisorPermissionToggle(
+                                    isOn: $canViewRegisterData,
+                                    icon: "cashregister",
+                                    title: "Can View Register Data",
+                                    subtitle: "Read-only access to register submissions"
+                                )
+                                supervisorPermissionToggle(
+                                    isOn: $canViewLotteryData,
+                                    icon: "ticket",
+                                    title: "Can View Lottery Data",
+                                    subtitle: "Read-only access to lottery forms"
+                                )
+                                supervisorPermissionToggle(
+                                    isOn: $canViewReports,
+                                    icon: "chart.bar.fill",
+                                    title: "Can View Reports",
+                                    subtitle: "Access reports and statistics"
+                                )
+                            }
+
                             Button(action: {
                                 Task {
                                     await updatePermissions()
@@ -307,6 +444,23 @@ struct EmployeeDetailView: View {
                     // Initialize permission toggles
                     canTakeRegister = employee.hasRegisterPermission
                     canSubmitLottery = employee.hasLotteryPermission
+                    // Supervisor-only flags — safe to read for any employee;
+                    // they just default to false on records that never set
+                    // them. The UI only surfaces these when isSupervisor.
+                    canViewEmployeeData = employee.canViewEmployeeData ?? false
+                    canManageTasks = employee.canManageTasks ?? false
+                    canManageDocuments = employee.canManageDocuments ?? false
+                    canViewRegisterData = employee.canViewRegisterData ?? false
+                    canViewLotteryData = employee.canViewLotteryData ?? false
+                    canEditSchedules = employee.canEditSchedules ?? false
+                    canViewReports = employee.canViewReports ?? false
+                    // Initialize schedule
+                    if let schedule = employee.weeklySchedule {
+                        employeeSchedule = schedule
+                        hasSchedule = true
+                    } else {
+                        hasSchedule = false
+                    }
                 }
         .sheet(isPresented: $showingChangePassword) {
             ChangePasswordView(
@@ -342,6 +496,11 @@ struct EmployeeDetailView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(permissionErrorMessage)
+        }
+        .alert("Success", isPresented: $showingPermissionSuccess) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Permissions updated successfully")
         }
         .sheet(isPresented: $showingEditHourlyRate) {
             EditHourlyRateView(
@@ -401,8 +560,31 @@ struct EmployeeDetailView: View {
             var updatedEmployee = employee
             updatedEmployee.canTakeRegister = canTakeRegister
             updatedEmployee.canSubmitLottery = canSubmitLottery
-            
+
+            // Only persist supervisor-only flags when the employee actually
+            // has the supervisor role. For everyone else we leave the
+            // existing values alone so we don't overwrite stored data with
+            // stale UI state from the regular permission section.
+            if isSupervisor {
+                updatedEmployee.canViewEmployeeData = canViewEmployeeData
+                updatedEmployee.canManageTasks = canManageTasks
+                updatedEmployee.canManageDocuments = canManageDocuments
+                updatedEmployee.canEditSchedules = canEditSchedules
+                updatedEmployee.canViewRegisterData = canViewRegisterData
+                updatedEmployee.canViewLotteryData = canViewLotteryData
+                updatedEmployee.canViewReports = canViewReports
+            }
+
             try await viewModel.updateEmployee(updatedEmployee)
+            
+            // Update local state from viewModel's refreshed employee list
+            if let updatedEmployeeFromViewModel = viewModel.employees.first(where: { $0.id == employee.id }) {
+                // The employee constant can't be updated, but we can update the toggles
+                // The viewModel's employee list is already updated, so the UI should reflect the changes
+                // when the view refreshes or when navigating back and forth
+            }
+            
+            showingPermissionSuccess = true
         } catch {
             permissionErrorMessage = "Failed to update permissions: \(error.localizedDescription)"
             showingPermissionError = true
@@ -416,6 +598,37 @@ struct EmployeeDetailView: View {
         formatter.minimumFractionDigits = 2
         formatter.maximumFractionDigits = 2
         return formatter.string(from: NSNumber(value: amount)) ?? "$\(String(format: "%.2f", amount))"
+    }
+
+    /// Reusable card-styled toggle for supervisor permission rows. Keeps
+    /// the visual treatment identical to the existing register/lottery
+    /// toggles above so the section reads as one consistent list.
+    @ViewBuilder
+    private func supervisorPermissionToggle(
+        isOn: Binding<Bool>,
+        icon: String,
+        title: String,
+        subtitle: String
+    ) -> some View {
+        Toggle(isOn: isOn) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundColor(Theme.cloudBlue)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.body)
+                        .foregroundColor(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding()
+        .background(Theme.cloudWhite)
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
     }
 }
 
@@ -648,7 +861,12 @@ struct TaskAssignmentRow: View {
         .opacity(isCompletedByThisEmployee ? 0.6 : 1.0)
         .sheet(isPresented: $showingImage) {
             if let completion = completion {
-                        TaskImageView(imageURL: completion.imageURL, timestamp: completion.timestamp, employeeName: nil)
+                let allURLs = completion.imageURLs.isEmpty ? [completion.imageURL] : completion.imageURLs
+                if allURLs.count > 1 {
+                    TaskImagesView(imageURLs: allURLs, timestamp: completion.timestamp)
+                } else {
+                    TaskImageView(imageURL: allURLs.first ?? completion.imageURL, timestamp: completion.timestamp, employeeName: nil)
+                }
             }
         }
     }

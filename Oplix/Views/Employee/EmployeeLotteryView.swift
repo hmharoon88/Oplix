@@ -11,47 +11,47 @@ import UIKit
 struct EmployeeLotteryView: View {
     @ObservedObject var viewModel: EmployeeHomeViewModel
     @State private var isLoading = true
+    @State private var showingLotterySelection = false
+
+    /// Whether *any* terminal at this location has rows configured.
+    /// Multi-terminal locations only show the empty state when no
+    /// terminal at all is set up — otherwise the employee can pick
+    /// the configured terminals from the close-out sheet.
+    private var hasUsableLotteryForm: Bool {
+        if viewModel.hasMultipleLotteryTerminals {
+            return viewModel.lotteryTemplates.values.contains { !$0.rows.isEmpty }
+        }
+        if let template = viewModel.lotteryTemplate {
+            return !template.rows.isEmpty
+        }
+        return false
+    }
     
     var body: some View {
         ZStack {
             Theme.secondaryGradient
                 .ignoresSafeArea()
             
-            if viewModel.currentShift != nil {
-                if isLoading {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text("Loading lottery form...")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                    }
-                } else if let template = viewModel.lotteryTemplate, !template.rows.isEmpty {
-                    EmployeeLotteryFormView(viewModel: viewModel, template: template)
-                } else {
-                    VStack(spacing: 20) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 60))
-                            .foregroundColor(Theme.darkGray)
-                        Text("No Lottery Form")
-                            .font(.title2)
-                            .foregroundColor(Theme.darkGray)
-                        Text("Manager has not set up the lottery form template yet")
-                            .font(.subheadline)
-                            .foregroundColor(Theme.darkGray)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    }
+            if isLoading {
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                    Text("Loading lottery form...")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
                 }
+            } else if hasUsableLotteryForm {
+                // Show selection view first
+                LotterySelectionView(viewModel: viewModel)
             } else {
                 VStack(spacing: 20) {
-                    Image(systemName: "clock.badge.xmark")
+                    Image(systemName: "doc.text")
                         .font(.system(size: 60))
                         .foregroundColor(Theme.darkGray)
-                    Text("No Active Shift")
+                    Text("No Lottery Form")
                         .font(.title2)
                         .foregroundColor(Theme.darkGray)
-                    Text("You need to clock in to access lottery forms")
+                    Text("Manager has not set up the lottery form template yet")
                         .font(.subheadline)
                         .foregroundColor(Theme.darkGray)
                         .multilineTextAlignment(.center)

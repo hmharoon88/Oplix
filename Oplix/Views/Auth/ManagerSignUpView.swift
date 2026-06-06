@@ -13,14 +13,22 @@ struct ManagerSignUpView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
-    @State private var username = ""
     @State private var showingError = false
     @State private var showingSuccess = false
+    @State private var verificationEmailSent = false
+    @State private var showingResendOption = false
     
     var body: some View {
         ZStack {
-            Theme.primaryGradient
-                .ignoresSafeArea()
+            LinearGradient(
+                colors: [
+                    Color(red: 0.1, green: 0.3, blue: 0.6),  // Dark blue
+                    Color(red: 0.15, green: 0.4, blue: 0.7)   // Medium dark blue
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
             
             VStack(spacing: 30) {
                 // Back button
@@ -56,10 +64,6 @@ struct ManagerSignUpView: View {
                 }
                 
                 VStack(spacing: 20) {
-                    TextField("Username", text: $username)
-                        .textFieldStyle(.roundedBorder)
-                        .autocapitalization(.none)
-                    
                     TextField("Email", text: $email)
                         .textFieldStyle(.roundedBorder)
                         .autocapitalization(.none)
@@ -73,7 +77,7 @@ struct ManagerSignUpView: View {
                     
                     Button(action: {
                         Task { @MainActor in
-                            guard !email.isEmpty, !password.isEmpty, !username.isEmpty else {
+                            guard !email.isEmpty, !password.isEmpty else {
                                 authViewModel.errorMessage = "Please fill in all fields"
                                 showingError = true
                                 return
@@ -91,11 +95,14 @@ struct ManagerSignUpView: View {
                                 return
                             }
                             
-                            await authViewModel.signUp(email: email, password: password, username: username)
-                            if let error = authViewModel.errorMessage {
-                                showingError = true
-                            } else {
+                            // Generate username from email (use part before @)
+                            let username = email.components(separatedBy: "@").first ?? email
+                            let success = await authViewModel.signUp(email: email, password: password, username: username)
+                            if success {
+                                verificationEmailSent = true
                                 showingSuccess = true
+                            } else {
+                                showingError = true
                             }
                         }
                     }) {
@@ -120,12 +127,22 @@ struct ManagerSignUpView: View {
         } message: {
             Text(authViewModel.errorMessage ?? "Unknown error")
         }
-        .alert("Success", isPresented: $showingSuccess) {
+        .alert("Verification Email Sent", isPresented: $showingSuccess) {
+            Button("Resend Email") {
+                Task { @MainActor in
+                    let success = await authViewModel.resendVerificationEmail(email: email, password: password)
+                    if success {
+                        showingSuccess = true
+                    } else {
+                        showingError = true
+                    }
+                }
+            }
             Button("OK", role: .cancel) {
                 dismiss()
             }
         } message: {
-            Text("Account created successfully! You can now sign in.")
+            Text("A verification email has been sent to \(email). Please check your inbox (and spam folder) and click the verification link before signing in. If you don't receive it, tap 'Resend Email'.")
         }
     }
 }

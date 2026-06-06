@@ -59,22 +59,45 @@ struct ShiftsScreen: View {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         
-        // Filter out today's shifts
+        // Filter out today's shifts and only include shifts with register data or clock out time
         let previousShifts = viewModel.shifts.filter { shift in
-            guard let clockOutTime = shift.clockOutTime else { return false }
-            return !calendar.isDate(clockOutTime, inSameDayAs: today)
+            // Determine the date to use for filtering (priority: registerClosedAt > clockOutTime > clockInTime)
+            let dateToCheck: Date?
+            if let registerClosedAt = shift.registerClosedAt {
+                dateToCheck = registerClosedAt
+            } else if let clockOutTime = shift.clockOutTime {
+                dateToCheck = clockOutTime
+            } else if let clockInTime = shift.clockInTime {
+                dateToCheck = clockInTime
+            } else {
+                return false // Skip shifts with no date
+            }
+            
+            // Exclude today's shifts
+            return !calendar.isDate(dateToCheck!, inSameDayAs: today)
+        }
+        
+        // Sort all shifts by date (newest first) before grouping
+        let sortedShifts = previousShifts.sorted { shift1, shift2 in
+            let date1: Date = shift1.registerClosedAt ?? shift1.clockOutTime ?? shift1.clockInTime ?? Date.distantPast
+            let date2: Date = shift2.registerClosedAt ?? shift2.clockOutTime ?? shift2.clockInTime ?? Date.distantPast
+            return date1 > date2
         }
         
         // Group by date
-        let grouped = Dictionary(grouping: previousShifts) { shift -> Date in
-            guard let clockOutTime = shift.clockOutTime else { return Date() }
-            return calendar.startOfDay(for: clockOutTime)
+        let grouped = Dictionary(grouping: sortedShifts) { shift -> Date in
+            // Use the same priority for grouping
+            let dateToUse: Date = shift.registerClosedAt ?? shift.clockOutTime ?? shift.clockInTime ?? Date()
+            return calendar.startOfDay(for: dateToUse)
         }
         
         // Convert to DateGroup array and sort by date (most recent first)
         return grouped.map { date, shifts in
             DateGroup(date: date, shifts: shifts.sorted { shift1, shift2 in
-                (shift1.clockOutTime ?? Date()) > (shift2.clockOutTime ?? Date())
+                // Sort within date group by the same date priority
+                let date1: Date = shift1.registerClosedAt ?? shift1.clockOutTime ?? shift1.clockInTime ?? Date.distantPast
+                let date2: Date = shift2.registerClosedAt ?? shift2.clockOutTime ?? shift2.clockInTime ?? Date.distantPast
+                return date1 > date2
             })
         }.sorted { $0.date > $1.date }
     }
@@ -339,28 +362,167 @@ struct TodayShiftDataCard: View {
                         .fontWeight(.semibold)
                         .foregroundColor(.secondary)
                     
-                    HStack(spacing: 12) {
-                        if let cashSale = shift.cashSale {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Cash Sale")
+                    if !shift.registers.isEmpty {
+                        // Display all registers
+                        ForEach(Array(shift.registers.enumerated()), id: \.element.id) { index, register in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Register \(index + 1)")
                                     .font(.caption2)
+                                    .fontWeight(.bold)
                                     .foregroundColor(.secondary)
-                                Text(formatCurrency(cashSale))
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.black)
+                                
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 12) {
+                                        if let cashSale = register.cashSale {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("Cash Sale")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                                Text(formatCurrency(cashSale))
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                                    .foregroundColor(.black)
+                                            }
+                                        }
+                                        
+                                        if let creditCard = register.creditCard {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("Credit Card")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                                Text(formatCurrency(creditCard))
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                                    .foregroundColor(.black)
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Additional register fields
+                                    if let cashInHand = register.cashInHand {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Cash In Hand")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                            Text(formatCurrency(cashInHand))
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                                .foregroundColor(.black)
+                                        }
+                                    }
+                                    
+                                    if let cashExpense = register.cashExpense {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Cash Expenses")
+                                                .font(.caption2)
+                                                .fontWeight(.semibold)
+                                                .foregroundColor(.secondary)
+                                            
+                                            // Display all cash expense descriptions with amounts
+                                            if let descriptions = register.cashExpenseDescriptions,
+                                               let amounts = register.cashExpenseAmounts,
+                                               !descriptions.isEmpty,
+                                               descriptions.count == amounts.count {
+                                                ForEach(Array(descriptions.enumerated()), id: \.offset) { index, description in
+                                                    if !description.isEmpty && index < amounts.count {
+                                                        HStack {
+                                                            Text(description)
+                                                                .font(.caption)
+                                                                .foregroundColor(.black)
+                                                            Spacer()
+                                                            Text(formatCurrency(amounts[index]))
+                                                                .font(.caption)
+                                                                .foregroundColor(.red)
+                                                                .fontWeight(.medium)
+                                                        }
+                                                    }
+                                                }
+                                            } else if let description = register.cashExpenseDescription, !description.isEmpty {
+                                                // Fallback to single description for backward compatibility
+                                                HStack {
+                                                    Text(description)
+                                                        .font(.caption)
+                                                        .foregroundColor(.black)
+                                                    Spacer()
+                                                    Text(formatCurrency(cashExpense))
+                                                        .font(.caption)
+                                                        .foregroundColor(.red)
+                                                        .fontWeight(.medium)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    if let overShort = register.overShort {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Over/Short")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                            Text(formatCurrency(overShort))
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                                .foregroundColor(overShort >= 0 ? .green : .red)
+                                        }
+                                    }
+                                    
+                                    // Fuel Sale
+                                    if let fuelGallons = register.fuelSaleGallons, let fuelDollars = register.fuelSaleDollars {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Fuel Sale")
+                                                .font(.caption2)
+                                                .fontWeight(.semibold)
+                                                .foregroundColor(.secondary)
+                                            HStack(spacing: 8) {
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text("Gallons")
+                                                        .font(.caption2)
+                                                        .foregroundColor(.secondary)
+                                                    Text(String(format: "%.2f", fuelGallons))
+                                                        .font(.caption)
+                                                        .fontWeight(.medium)
+                                                        .foregroundColor(.black)
+                                                }
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text("Dollars")
+                                                        .font(.caption2)
+                                                        .foregroundColor(.secondary)
+                                                    Text(formatCurrency(fuelDollars))
+                                                        .font(.caption)
+                                                        .fontWeight(.medium)
+                                                        .foregroundColor(.black)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
+                            .padding(.bottom, index < shift.registers.count - 1 ? 8 : 0)
                         }
-                        
-                        if let creditCard = shift.creditCard {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Credit Card")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Text(formatCurrency(creditCard))
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.black)
+                    } else {
+                        // Legacy single register display (for backward compatibility)
+                        HStack(spacing: 12) {
+                            if let cashSale = shift.cashSale {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Cash Sale")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Text(formatCurrency(cashSale))
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.black)
+                                }
+                            }
+                            
+                            if let creditCard = shift.creditCard {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Credit Card")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Text(formatCurrency(creditCard))
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.black)
+                                }
                             }
                         }
                     }
@@ -370,19 +532,47 @@ struct TodayShiftDataCard: View {
                 .cornerRadius(8)
             }
             
-            // Expenses Summary
+            // Expenses Section (Non Cash, Check)
             if !shift.expenses.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Expenses")
+                    Text("Expenses (Non Cash, Check)")
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundColor(.secondary)
                     
+                    ForEach(shift.expenses) { expense in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(expense.description)
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                                Text(expense.timestamp, style: .date)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Text(formatCurrency(expense.amount))
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.red)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    
+                    // Total Expenses
                     let totalExpenses = shift.expenses.reduce(0) { $0 + $1.amount }
-                    Text(formatCurrency(totalExpenses))
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundColor(.red)
+                    HStack {
+                        Text("Total:")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(formatCurrency(totalExpenses))
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.red)
+                    }
+                    .padding(.top, 4)
                 }
                 .padding(8)
                 .background(Color.red.opacity(0.1))

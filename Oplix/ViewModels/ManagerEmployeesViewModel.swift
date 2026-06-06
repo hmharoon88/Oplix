@@ -11,6 +11,14 @@ import Foundation
 class ManagerEmployeesViewModel: ObservableObject {
     @Published var employees: [Employee] = []
     @Published var locations: [Location] = []
+    // Manager-wide tasks across all locations. Used to compute today's
+    // task-completion badge on each employee row.
+    @Published var tasks: [WorkTask] = []
+    /// Resolved role for each employee, keyed by employee id. Populated on
+    /// load by reading each employee's matching User document. Used by the
+    /// edit screen to decide whether to surface supervisor-only permission
+    /// toggles (canManageTasks, canEditSchedules, canManageDocuments, etc.).
+    @Published var userRoles: [String: User.UserRole] = [:]
     @Published var isLoading = false
     @Published var errorMessage: String?
     
@@ -27,16 +35,61 @@ class ManagerEmployeesViewModel: ObservableObject {
         do {
             async let employeesTask = firebaseService.fetchManagerEmployees(userId: userId)
             async let locationsTask = firebaseService.fetchLocations(userId: userId)
+            async let tasksTask = firebaseService.fetchManagerTasks(userId: userId)
             
             employees = try await employeesTask
             locations = try await locationsTask
+            // Tasks are non-critical for the screen — if they fail, we just
+            // skip the progress badge rather than failing the whole screen.
+            do {
+                tasks = try await tasksTask
+            } catch {
+                tasks = []
+            }
+
+            // Resolve User.role for every employee in parallel so the edit
+            // screen knows which ones to render supervisor-only toggles for.
+            // Failures are silent (defaults to "employee") so this can never
+            // block the list from rendering.
+            await loadUserRoles(for: employees)
         } catch {
             errorMessage = "Failed to load data: \(error.localizedDescription)"
         }
         isLoading = false
     }
+
+    /// Fetch User docs in parallel for the given employees and merge their
+    /// roles into `userRoles`. Run as a non-throwing best-effort task — any
+    /// missing role just defaults to `.employee` at read time via
+    /// `role(for:)`.
+    private func loadUserRoles(for employees: [Employee]) async {
+        // Skip employees whose role we already resolved — covers the
+        // refresh-after-edit case so we don't re-fetch the whole org each
+        // time something tiny changes.
+        let unresolved = employees.filter { userRoles[$0.id] == nil }
+        guard !unresolved.isEmpty else { return }
+
+        await withTaskGroup(of: (String, User.UserRole?).self) { group in
+            for employee in unresolved {
+                group.addTask { [firebaseService] in
+                    let user = try? await firebaseService.fetchUser(userId: employee.id)
+                    return (employee.id, user?.role)
+                }
+            }
+            for await (id, role) in group {
+                userRoles[id] = role ?? .employee
+            }
+        }
+    }
+
+    /// Convenience: returns the cached role for an employee, or `.employee`
+    /// if we don't have a User doc on record. The supervisor-flag UI is
+    /// gated on this — non-supervisors stay on the leaner permission set.
+    func role(for employeeId: String) -> User.UserRole {
+        userRoles[employeeId] ?? .employee
+    }
     
-    func createEmployee(name: String, password: String, workingHoursStart: String? = nil, workingHoursEnd: String? = nil, weeklySchedule: WeeklySchedule? = nil, assignedLocationIds: [String] = [], hourlyRate: Double? = nil, canTakeRegister: Bool = false, canSubmitLottery: Bool = false) async throws -> (username: String, email: String, password: String) {
+    func createEmployee(name: String, password: String, workingHoursStart: String? = nil, workingHoursEnd: String? = nil, weeklySchedule: WeeklySchedule? = nil, is24Hours: Bool? = nil, assignedLocationIds: [String] = [], hourlyRate: Double? = nil, canTakeRegister: Bool = false, canSubmitLottery: Bool = false) async throws -> (username: String, email: String, password: String) {
         // Auto-generate username from name
         let baseUsername = name.lowercased()
             .replacingOccurrences(of: " ", with: "")
@@ -95,6 +148,7 @@ class ManagerEmployeesViewModel: ObservableObject {
             workingHoursStart: workingHoursStart,
             workingHoursEnd: workingHoursEnd,
             weeklySchedule: weeklySchedule,
+            is24Hours: is24Hours,
             assignedLocationIds: assignedLocationIds,
             hourlyRate: hourlyRate
         )
@@ -164,6 +218,22 @@ class ManagerEmployeesViewModel: ObservableObject {
         await loadData()
     }
     
+    /// Promote/demote an employee between `.employee` and `.supervisor`.
+    /// Writes the new role to the User document and updates the local
+    /// `userRoles` cache so any UI gated on `role(for:)` (the supervisor
+    /// permissions section in the master editor) reacts immediately.
+    /// Also forwards to `LocationDetailViewModel.setCachedRole` so the
+    /// per-location screens bucket this person correctly the next time
+    /// they load. The Employee record itself isn't touched here — the
+    /// caller is responsible for clearing supervisor flags on demotion
+    /// before saving the Employee, since those flags live on a different
+    /// document.
+    func updateUserRole(employeeId: String, newRole: User.UserRole) async throws {
+        try await firebaseService.updateUserRole(userId: employeeId, role: newRole)
+        userRoles[employeeId] = newRole
+        LocationDetailViewModel.setCachedRole(newRole, for: employeeId)
+    }
+
     func updateEmployeePassword(employeeId: String, newPassword: String) async throws {
         // Update password in manager-level employee
         guard var employee = employees.first(where: { $0.id == employeeId }) else {

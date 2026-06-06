@@ -17,6 +17,8 @@ class AuthViewModel: ObservableObject {
     @Published var errorMessage: String?
     
     private let firebaseService = FirebaseService.shared
+    private var isLoadCurrentUserInProgress = false // Prevent concurrent calls
+    private var hasLoadedCurrentUser = false // Track if user has been loaded
     
     init() {
         checkAuthState()
@@ -31,17 +33,47 @@ class AuthViewModel: ObservableObject {
     }
     
     func loadCurrentUser() async {
-        guard let userId = Auth.auth().currentUser?.uid else { return }
+        // Prevent concurrent calls
+        guard !isLoadCurrentUserInProgress else {
+            print("⚠️ loadCurrentUser already in progress, skipping...")
+            return
+        }
+        
+        // If user is already loaded and authenticated, don't reload
+        if hasLoadedCurrentUser && isAuthenticated && currentUser != nil {
+            print("⚠️ loadCurrentUser skipped - user already loaded: \(currentUser?.id ?? "nil")")
+            return
+        }
+        
+        // Don't load if already logged out
+        guard isAuthenticated || Auth.auth().currentUser != nil else {
+            print("⚠️ loadCurrentUser skipped - user not authenticated")
+            return
+        }
+        
+        guard let userId = Auth.auth().currentUser?.uid else {
+            isAuthenticated = false
+            currentUser = nil
+            hasLoadedCurrentUser = false
+            return
+        }
+        
+        isLoadCurrentUserInProgress = true
         isLoading = true
         do {
             currentUser = try await firebaseService.fetchUser(userId: userId)
             isAuthenticated = true
+            hasLoadedCurrentUser = true
         } catch {
+            print("🔴 Error loading current user: \(error.localizedDescription)")
             errorMessage = "Failed to load user: \(error.localizedDescription)"
             try? firebaseService.signOut()
             isAuthenticated = false
+            currentUser = nil
+            hasLoadedCurrentUser = false
         }
         isLoading = false
+        isLoadCurrentUserInProgress = false
     }
     
     func signIn(email: String, password: String) async {
@@ -51,29 +83,33 @@ class AuthViewModel: ObservableObject {
             currentUser = try await firebaseService.signIn(email: email, password: password)
             isAuthenticated = true
         } catch {
-            errorMessage = "Sign in failed: \(error.localizedDescription)"
+            errorMessage = error.localizedDescription
             isAuthenticated = false
         }
         isLoading = false
     }
     
-    func signUp(email: String, password: String, username: String) async {
+    func signUp(email: String, password: String, username: String, role: User.UserRole = .manager) async -> Bool {
         isLoading = true
         errorMessage = nil
         do {
-            currentUser = try await firebaseService.createUser(
+            _ = try await firebaseService.createUser(
                 email: email,
                 password: password,
                 username: username,
-                role: .manager,
+                role: role,
                 locationId: nil
             )
-            isAuthenticated = true
+            // Don't authenticate - user needs to verify email first
+            isAuthenticated = false
+            isLoading = false
+            return true // Success - email verification sent
         } catch {
             errorMessage = "Sign up failed: \(error.localizedDescription)"
             isAuthenticated = false
+            isLoading = false
+            return false
         }
-        isLoading = false
     }
     
     func resetPassword(email: String) async {
@@ -88,11 +124,31 @@ class AuthViewModel: ObservableObject {
         isLoading = false
     }
     
+    func resendVerificationEmail(email: String, password: String) async -> Bool {
+        isLoading = true
+        errorMessage = nil
+        do {
+            try await firebaseService.resendEmailVerification(email: email, password: password)
+            isLoading = false
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            isLoading = false
+            return false
+        }
+    }
+    
     func signOut() {
         do {
+            // Stop all listeners before signing out
+            firebaseService.removeAllListeners()
             try firebaseService.signOut()
             currentUser = nil
             isAuthenticated = false
+            errorMessage = nil
+            isLoading = false
+            hasLoadedCurrentUser = false // Reset flag on logout
+            isLoadCurrentUserInProgress = false
         } catch {
             errorMessage = "Sign out failed: \(error.localizedDescription)"
         }
@@ -101,6 +157,17 @@ class AuthViewModel: ObservableObject {
     func updateUser(_ user: User) async throws {
         let userId = user.id
         try await firebaseService.updateUser(userId: userId, user: user)
+        currentUser = user
+    }
+
+    /// Persist a new `notificationPrefs` value for the signed-in user.
+    /// Touches only the `notificationPrefs` map on Firestore (via
+    /// `updateNotificationPrefs`) so no other User fields are at risk
+    /// of being clobbered by a stale local copy.
+    func updateNotificationPrefs(_ prefs: NotificationPrefs) async throws {
+        guard var user = currentUser else { return }
+        try await firebaseService.updateNotificationPrefs(userId: user.id, prefs: prefs)
+        user.notificationPrefs = prefs
         currentUser = user
     }
     

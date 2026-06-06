@@ -16,8 +16,15 @@ struct EmployeeLoginView: View {
     
     var body: some View {
         ZStack {
-            Theme.primaryGradient
-                .ignoresSafeArea()
+            LinearGradient(
+                colors: [
+                    Color(red: 0.1, green: 0.3, blue: 0.6),  // Dark blue
+                    Color(red: 0.15, green: 0.4, blue: 0.7)   // Medium dark blue
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
             
             VStack(spacing: 30) {
                 // Back button
@@ -68,7 +75,7 @@ struct EmployeeLoginView: View {
                         Task { @MainActor in
                             let email = "\(username)@oplix.app"
                             await authViewModel.signIn(email: email, password: password)
-                            if let error = authViewModel.errorMessage {
+                            if authViewModel.errorMessage != nil {
                                 showingError = true
                             } else {
                                 dismiss()

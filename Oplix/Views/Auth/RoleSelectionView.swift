@@ -11,6 +11,13 @@ struct RoleSelectionView: View {
     @State private var selectedRole: User.UserRole?
     @EnvironmentObject var authViewModel: AuthViewModel
     
+    // Get app version from Bundle
+    private var appVersion: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        // Only show version number, not build number
+        return version
+    }
+    
     var body: some View {
         ZStack {
             LinearGradient(
@@ -35,6 +42,10 @@ struct RoleSelectionView: View {
                         .font(.system(size: 48, weight: .bold))
                         .foregroundColor(.white)
                     
+                    Text("Operation Link")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.8))
+                    
                     Text("Cloud-Based Management")
                         .font(.title3)
                         .foregroundColor(.white.opacity(0.9))
@@ -47,7 +58,7 @@ struct RoleSelectionView: View {
                         HStack {
                             Image(systemName: "person.badge.shield.checkmark.fill")
                                 .font(.title2)
-                            Text("Manager")
+                            Text("Executive")
                                 .font(.title2)
                                 .fontWeight(.semibold)
                         }
@@ -56,12 +67,26 @@ struct RoleSelectionView: View {
                     }
                     
                     Button(action: {
+                        selectedRole = .supervisor
+                    }) {
+                        HStack {
+                            Image(systemName: "person.badge.key.fill")
+                                .font(.title2)
+                            Text("Supervisor")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .cloudButton(backgroundColor: Color.purple)
+                    }
+                    
+                    Button(action: {
                         selectedRole = .employee
                     }) {
                         HStack {
                             Image(systemName: "person.fill")
                                 .font(.title2)
-                            Text("Employee")
+                            Text("Team Member")
                                 .font(.title2)
                                 .fontWeight(.semibold)
                         }
@@ -72,11 +97,20 @@ struct RoleSelectionView: View {
                 .padding(.horizontal, 40)
                 
                 Spacer()
+                
+                // App Version
+                Text("Version \(appVersion)")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
+                    .padding(.bottom, 20)
             }
         }
         .fullScreenCover(item: $selectedRole) { role in
             if role == .manager {
                 ManagerLoginView()
+                    .environmentObject(authViewModel)
+            } else if role == .supervisor {
+                SupervisorLoginView()
                     .environmentObject(authViewModel)
             } else {
                 EmployeeLoginView()

@@ -10,11 +10,12 @@ import UIKit
 
 struct TaskImageCaptureView: View {
     let task: WorkTask
-    let onImageCaptured: (Data) -> Void
+    let onImagesCaptured: ([Data]) -> Void
     let onCancel: () -> Void
     
     @State private var showingImagePicker = false
-    @State private var capturedImage: UIImage?
+    @State private var capturedImages: [(id: UUID, image: UIImage)] = []
+    @State private var previewImage: UIImage?
     @State private var showingPreview = false
     
     var body: some View {
@@ -23,76 +24,122 @@ struct TaskImageCaptureView: View {
                 Theme.secondaryGradient
                     .ignoresSafeArea()
                 
-                VStack(spacing: 30) {
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(Theme.cloudBlue)
-                    
-                    Text("Complete Task")
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .foregroundColor(.black)
-                    
-                    Text(task.description)
-                        .font(.body)
-                        .foregroundColor(.black)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                    
-                    Text("Take a photo to mark this task as complete")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                    
-                    Button(action: {
-                        showingImagePicker = true
-                    }) {
-                        HStack {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Header
+                        VStack(spacing: 12) {
                             Image(systemName: "camera.fill")
-                            Text("Take Photo")
+                                .font(.system(size: 50))
+                                .foregroundColor(Theme.cloudBlue)
+                            
+                            Text("Complete Task")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.black)
+                            
+                            Text(task.description)
+                                .font(.body)
+                                .foregroundColor(.black)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                            
+                            Text("Add photos to mark this task as complete")
+                                .font(.subheadline)
+                                .foregroundColor(.gray)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
                         }
-                        .frame(maxWidth: .infinity)
-                        .cloudButton()
-                    }
-                    .padding(.horizontal)
-                    
-                    if let image = capturedImage {
+                        .padding(.top)
+                        
+                        // Add Photo Button
                         Button(action: {
-                            showingPreview = true
+                            showingImagePicker = true
                         }) {
                             HStack {
-                                Image(systemName: "photo.fill")
-                                Text("View Photo")
+                                Image(systemName: "plus.circle.fill")
+                                Text("Add Photo")
                             }
                             .frame(maxWidth: .infinity)
-                            .cloudButton(backgroundColor: Theme.sunshineYellow)
+                            .cloudButton()
                         }
                         .padding(.horizontal)
                         
-                        Button(action: {
-                            // Resize to max 1024px and compress to 50% quality for faster upload
-                            if let resizedImage = image.resizedAndCompressed(maxDimension: 1024),
-                               let imageData = resizedImage.jpegData(compressionQuality: 0.5) {
-                                onImageCaptured(imageData)
-                            } else {
-                                // Fallback: use original image with lower quality
-                                if let imageData = image.jpegData(compressionQuality: 0.4) {
-                                    onImageCaptured(imageData)
+                        // Images Grid
+                        if !capturedImages.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Photos (\(capturedImages.count))")
+                                    .font(.headline)
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal)
+                                
+                                LazyVGrid(columns: [
+                                    GridItem(.flexible(), spacing: 10),
+                                    GridItem(.flexible(), spacing: 10),
+                                    GridItem(.flexible(), spacing: 10)
+                                ], spacing: 10) {
+                                    ForEach(capturedImages, id: \.id) { item in
+                                        ZStack(alignment: .topTrailing) {
+                                            // Image
+                                            Button(action: {
+                                                previewImage = item.image
+                                                showingPreview = true
+                                            }) {
+                                                Image(uiImage: item.image)
+                                                    .resizable()
+                                                    .scaledToFill()
+                                                    .frame(width: 100, height: 100)
+                                                    .clipped()
+                                                    .cornerRadius(8)
+                                            }
+                                            
+                                            // Delete Button
+                                            Button(action: {
+                                                capturedImages.removeAll { $0.id == item.id }
+                                            }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.red)
+                                                    .background(Color.white)
+                                                    .clipShape(Circle())
+                                                    .font(.title3)
+                                            }
+                                            .offset(x: 5, y: -5)
+                                        }
+                                    }
                                 }
+                                .padding(.horizontal)
                             }
-                        }) {
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                Text("Submit")
+                            
+                            // Submit Button
+                            Button(action: {
+                                // Convert all images to Data
+                                var imageDataList: [Data] = []
+                                for item in capturedImages {
+                                    // Resize to max 1024px and compress to 50% quality for faster upload
+                                    if let resizedImage = item.image.resizedAndCompressed(maxDimension: 1024),
+                                       let imageData = resizedImage.jpegData(compressionQuality: 0.5) {
+                                        imageDataList.append(imageData)
+                                    } else {
+                                        // Fallback: use original image with lower quality
+                                        if let imageData = item.image.jpegData(compressionQuality: 0.4) {
+                                            imageDataList.append(imageData)
+                                        }
+                                    }
+                                }
+                                onImagesCaptured(imageDataList)
+                            }) {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                    Text("Done")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .cloudButton(backgroundColor: .green)
                             }
-                            .frame(maxWidth: .infinity)
-                            .cloudButton(backgroundColor: .green)
+                            .padding(.horizontal)
+                            .padding(.bottom)
                         }
-                        .padding(.horizontal)
                     }
+                    .padding(.vertical)
                 }
-                .padding()
             }
             .navigationTitle("Task Completion")
             .navigationBarTitleDisplayMode(.inline)
@@ -104,10 +151,17 @@ struct TaskImageCaptureView: View {
                 }
             }
             .sheet(isPresented: $showingImagePicker) {
-                ImagePicker(image: $capturedImage)
+                ImagePicker(image: Binding(
+                    get: { nil },
+                    set: { newImage in
+                        if let newImage = newImage {
+                            capturedImages.append((id: UUID(), image: newImage))
+                        }
+                    }
+                ))
             }
             .sheet(isPresented: $showingPreview) {
-                if let image = capturedImage {
+                if let image = previewImage {
                     ImagePreviewView(image: image)
                 }
             }
@@ -241,7 +295,7 @@ extension UIImage {
             locationId: "loc1",
             employeeCompletions: [:]
         ),
-        onImageCaptured: { _ in },
+        onImagesCaptured: { _ in },
         onCancel: { }
     )
 }

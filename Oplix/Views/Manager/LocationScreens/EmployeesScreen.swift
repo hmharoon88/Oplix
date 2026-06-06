@@ -19,7 +19,7 @@ struct EmployeesScreen: View {
             List {
                 ForEach(viewModel.employees) { employee in
                     NavigationLink(value: employee) {
-                        EmployeeRow(employee: employee)
+                        EmployeeRow(employee: employee, tasks: viewModel.tasks)
                     }
                     .listRowBackground(Color.clear)
                 }

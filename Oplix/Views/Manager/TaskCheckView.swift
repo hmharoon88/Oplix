@@ -72,7 +72,10 @@ struct TaskCheckView: View {
                                     LocationRow(
                                         location: location,
                                         index: index,
-                                        userId: authViewModel.currentUser?.id
+                                        userId: authViewModel.currentUser?.id,
+                                        recurringCount: nil,
+                                        todayScore: viewModel.todayScore(for: location),
+                                        sevenDayScore: viewModel.sevenDayScore(for: location)
                                     )
                                 }
                                 .listRowBackground(Color.clear)
@@ -81,27 +84,6 @@ struct TaskCheckView: View {
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
                     }
-                    
-                    // Colored Footer
-                    HStack {
-                        Spacer()
-                        Text("© 2025 Oplix")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.8))
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.1, green: 0.3, blue: 0.6),
-                                Color(red: 0.15, green: 0.4, blue: 0.7)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
                 }
             }
             .navigationTitle("")
@@ -109,14 +91,12 @@ struct TaskCheckView: View {
             .fullScreenCover(item: $selectedLocation) { location in
                 if let userId = authViewModel.currentUser?.id {
                     NavigationStack {
-                        TaskStatusView(userId: userId, location: location)
-                            .toolbar {
-                                ToolbarItem(placement: .navigationBarTrailing) {
-                                    Button("Done") {
-                                        selectedLocation = nil
-                                    }
-                                }
-                            }
+                        TaskStatusView(
+                            userId: userId,
+                            location: location,
+                            allLocations: viewModel.locations,
+                            onDone: { selectedLocation = nil }
+                        )
                     }
                 }
             }

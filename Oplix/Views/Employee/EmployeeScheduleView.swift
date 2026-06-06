@@ -62,7 +62,6 @@ struct EmployeeScheduleView: View {
     }
     
     private func dailyHours(for date: Date) -> Double {
-        let calendar = Calendar.current
         guard let shifts = shiftsByDate[date] else { return 0.0 }
         
         return shifts
@@ -150,7 +149,7 @@ struct EmployeeScheduleView: View {
                                         Text(formatDate(date))
                                             .font(.headline)
                                             .foregroundColor(.black)
-                                        if let shifts = shiftsByDate[date] {
+                                        if shiftsByDate[date] != nil {
                                             let hours = dailyHours(for: date)
                                             if hours > 0 {
                                                 Text("\(String(format: "%.1f", hours)) hrs")

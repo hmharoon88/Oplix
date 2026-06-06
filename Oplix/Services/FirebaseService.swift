@@ -17,21 +17,75 @@ class FirebaseService: ObservableObject {
     private let db = Firestore.firestore()
     private var listeners: [String: ListenerRegistration] = [:]
     
+    // Static cache to prevent fetching same user multiple times
+    private static var userCache: [String: (user: User, timestamp: Date)] = [:]
+    private static var cacheLock = NSLock()
+    private static let cacheExpiration: TimeInterval = 60 // Cache for 60 seconds
+    private static var fetchInProgress: Set<String> = [] // Track which users are being fetched
+    
+    // Helper function for async-safe cache access
+    private static func withCacheLock<T>(_ operation: () -> T) -> T {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return operation()
+    }
+    
     private init() {}
     
     // MARK: - Authentication
     
     func signIn(email: String, password: String) async throws -> User {
         let result = try await Auth.auth().signIn(withEmail: email, password: password)
-        return try await fetchUser(userId: result.user.uid)
+        
+        // Fetch user to check their role
+        do {
+            let user = try await fetchUser(userId: result.user.uid)
+            
+            // Require email verification for managers only
+            if user.role == .manager {
+                guard result.user.isEmailVerified else {
+                    // Sign out and throw error
+                    try Auth.auth().signOut()
+                    throw NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Please verify your email before signing in. Check your inbox for the verification link."])
+                }
+            }
+            
+            return user
+        } catch {
+            // If user document doesn't exist, sign out and throw a clearer error
+            try? Auth.auth().signOut()
+            if let nsError = error as NSError?, nsError.domain == "FirebaseFirestore" {
+                throw NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "User account not found. Please contact your manager."])
+            }
+            throw error
+        }
     }
     
     func signOut() throws {
+        // Remove all listeners before signing out
+        removeAllListeners()
         try Auth.auth().signOut()
     }
     
     func resetPassword(email: String) async throws {
         try await Auth.auth().sendPasswordReset(withEmail: email)
+    }
+    
+    func resendEmailVerification(email: String, password: String) async throws {
+        // Sign in temporarily to get the user
+        let result = try await Auth.auth().signIn(withEmail: email, password: password)
+        
+        // Check if already verified
+        if result.user.isEmailVerified {
+            try Auth.auth().signOut()
+            throw NSError(domain: "FirebaseService", code: -2, userInfo: [NSLocalizedDescriptionKey: "Email is already verified. You can sign in now."])
+        }
+        
+        // Resend verification email
+        try await result.user.sendEmailVerification()
+        
+        // Sign out again
+        try Auth.auth().signOut()
     }
     
     func updateUserPassword(email: String, newPassword: String) async throws {
@@ -45,8 +99,24 @@ class FirebaseService: ObservableObject {
         // This is a limitation of client-side Firebase Auth
     }
     
-    func createUser(email: String, password: String, username: String, role: User.UserRole, locationId: String?, managerUserId: String? = nil) async throws -> User {
+    func createUser(email: String, password: String, username: String, role: User.UserRole, locationId: String?, managerUserId: String? = nil, signOutAfterCreation: Bool = true, managerEmail: String? = nil, managerPassword: String? = nil) async throws -> User {
+        // Store manager's email before creating employee (if provided)
+        let managerEmailBeforeCreation = managerEmail ?? Auth.auth().currentUser?.email
+        
         let result = try await Auth.auth().createUser(withEmail: email, password: password)
+        // Note: After createUser, Firebase automatically signs in as the new user
+        
+        // Send email verification only for managers (not for employees or supervisors)
+        if role == .manager {
+            do {
+                try await result.user.sendEmailVerification()
+            } catch {
+                // If email sending fails, still create the user but sign them out
+                // They can resend verification email later
+                print("⚠️ Warning: Failed to send verification email: \(error.localizedDescription)")
+                // Don't throw - allow user creation to succeed, they can resend email
+            }
+        }
         
         let user = User(
             id: result.user.uid,
@@ -57,17 +127,158 @@ class FirebaseService: ObservableObject {
             createdAt: Date()
         )
         
-        try await db.collection("users").document(user.id).setData(from: user)
+        // Create User document (employee is currently signed in, so this works)
+        do {
+            try db.collection("users").document(user.id).setData(from: user)
+            print("✅ User document created successfully for \(user.id) with role \(user.role.rawValue)")
+        } catch {
+            print("🔴 Error creating User document: \(error.localizedDescription)")
+            throw error
+        }
+        
+        // Sign out the newly created user if requested (default: true for manager sign-up)
+        // For employee creation, caller will handle sign-out after creating employee document
+        if signOutAfterCreation {
+            try Auth.auth().signOut()
+        } else if let managerEmail = managerEmailBeforeCreation,
+                  let managerPassword = managerPassword,
+                  let managerUID = managerUserId,
+                  managerUID != result.user.uid {
+            // For employee creation: sign out employee and re-authenticate manager
+            try Auth.auth().signOut()
+            
+            // Re-authenticate the manager
+            do {
+                _ = try await Auth.auth().signIn(withEmail: managerEmail, password: managerPassword)
+                print("✅ Manager re-authenticated after creating employee")
+            } catch {
+                print("⚠️ Warning: Failed to re-authenticate manager: \(error.localizedDescription)")
+                // Don't throw - the employee was created successfully, manager can sign in again
+            }
+        }
+        
         return user
     }
     
     func fetchUser(userId: String) async throws -> User {
+        // Check cache first
+        let cachedUser: User? = FirebaseService.withCacheLock {
+            if let cached = FirebaseService.userCache[userId] {
+                let age = Date().timeIntervalSince(cached.timestamp)
+                if age < FirebaseService.cacheExpiration {
+                    // Don't print cache hits to reduce log spam
+                    return cached.user
+                } else {
+                    // Cache expired, remove it
+                    FirebaseService.userCache.removeValue(forKey: userId)
+                }
+            }
+            return nil
+        }
+        
+        if let cached = cachedUser {
+            return cached
+        }
+        
+        // Check if already being fetched
+        let isInProgress = FirebaseService.withCacheLock {
+            return FirebaseService.fetchInProgress.contains(userId)
+        }
+        
+        if isInProgress {
+            // Wait a bit and check cache again (another call might have finished)
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+            let retryCached: User? = FirebaseService.withCacheLock {
+                if let cached = FirebaseService.userCache[userId] {
+                    let age = Date().timeIntervalSince(cached.timestamp)
+                    if age < FirebaseService.cacheExpiration {
+                        return cached.user
+                    }
+                }
+                return nil
+            }
+            if let retryCached = retryCached {
+                return retryCached
+            }
+        }
+        
+        // Mark as in progress
+        _ = FirebaseService.withCacheLock {
+            FirebaseService.fetchInProgress.insert(userId)
+        }
+        
+        defer {
+            // Remove from in-progress set when done
+            _ = FirebaseService.withCacheLock {
+                FirebaseService.fetchInProgress.remove(userId)
+            }
+        }
+        
+        // Not in cache or expired, fetch from Firestore
+        print("🔵 fetchUser called for userId: \(userId) (not in cache)")
         let document = try await db.collection("users").document(userId).getDocument()
-        return try document.data(as: User.self)
+        
+        guard document.exists else {
+            print("🔴 User document does not exist for userId: \(userId)")
+            throw NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "User account not found. Please contact your manager."])
+        }
+        
+        do {
+            let user = try document.data(as: User.self)
+            
+            // Cache the user
+            FirebaseService.withCacheLock {
+                FirebaseService.userCache[userId] = (user: user, timestamp: Date())
+            }
+            
+            print("✅ User fetched successfully: \(user.id), role: \(user.role.rawValue)")
+            return user
+        } catch {
+            print("🔴 Error decoding User document: \(error.localizedDescription)")
+            throw NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "User account data is invalid. Please contact your manager."])
+        }
     }
     
     func updateUser(userId: String, user: User) async throws {
-        try await db.collection("users").document(userId).setData(from: user, merge: true)
+        try db.collection("users").document(userId).setData(from: user, merge: true)
+    }
+
+    /// Update only the `role` field on a User document. Used by the
+    /// master Employees editor to promote/demote between
+    /// `.employee` and `.supervisor` without touching other User fields
+    /// (which include immutable `let` properties like `username` and
+    /// `id`). Uses `updateData` rather than re-encoding the whole doc so
+    /// we don't risk overwriting fields with stale values.
+    func updateUserRole(userId: String, role: User.UserRole) async throws {
+        try await db.collection("users").document(userId).updateData([
+            "role": role.rawValue
+        ])
+    }
+
+    /// Update only the `notificationPrefs` map on a User document.
+    /// We deliberately encode just this one field (rather than calling
+    /// `updateUser(user:)` with the whole struct) so the write touches
+    /// nothing else — that keeps it safe against races where the local
+    /// `User` copy might be slightly stale, and ensures we never alter
+    /// existing user data when a user just toggles a notification.
+    func updateNotificationPrefs(userId: String, prefs: NotificationPrefs) async throws {
+        // Encode the prefs struct into a Firestore-friendly dictionary
+        // via JSON round-trip. This honours the optional/`nil` fields
+        // so unchecked toggles don't get persisted as `false` — they
+        // simply remain absent and resolve to their defaults later.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(prefs)
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(
+                domain: "FirebaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to encode notification prefs"]
+            )
+        }
+        try await db.collection("users").document(userId).updateData([
+            "notificationPrefs": dict
+        ])
     }
     
     func deleteAccount(userId: String, password: String) async throws {
@@ -117,7 +328,7 @@ class FirebaseService: ObservableObject {
     }
     
     func getCurrentUser() -> User? {
-        guard let userId = Auth.auth().currentUser?.uid else { return nil }
+        guard Auth.auth().currentUser?.uid != nil else { return nil }
         // In production, you'd fetch from Firestore, but for simplicity we'll return nil
         // and let the app fetch it after auth
         return nil
@@ -145,7 +356,7 @@ class FirebaseService: ObservableObject {
     }
     
     func createLocation(userId: String, location: Location) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(location.id)
@@ -153,7 +364,7 @@ class FirebaseService: ObservableObject {
     }
     
     func updateLocation(userId: String, location: Location) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(location.id)
@@ -314,9 +525,22 @@ class FirebaseService: ObservableObject {
             try doc.data(as: Employee.self)
         }
     }
+
+    /// Fetch a single manager-level employee record. Faster than pulling
+    /// the entire `fetchManagerEmployees` list when the caller only needs
+    /// one record (e.g. the location-picker shell resolving the active
+    /// user's `assignedLocationIds`).
+    func fetchManagerEmployee(userId: String, employeeId: String) async throws -> Employee {
+        let document = try await db.collection("users")
+            .document(userId)
+            .collection("employees")
+            .document(employeeId)
+            .getDocument()
+        return try document.data(as: Employee.self)
+    }
     
     func createManagerEmployee(userId: String, employee: Employee) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("employees")
             .document(employee.id)
@@ -324,7 +548,7 @@ class FirebaseService: ObservableObject {
     }
     
     func updateManagerEmployee(userId: String, employee: Employee) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("employees")
             .document(employee.id)
@@ -374,7 +598,7 @@ class FirebaseService: ObservableObject {
         let userDoc = try await db.collection("users").document(employeeId).getDocument()
         if var user = try? userDoc.data(as: User.self), user.locationId == nil {
             user.locationId = locationId
-            try await db.collection("users").document(employeeId).setData(from: user, merge: true)
+            try db.collection("users").document(employeeId).setData(from: user, merge: true)
         }
         
         // Update location's employees list
@@ -452,7 +676,7 @@ class FirebaseService: ObservableObject {
     }
     
     func createEmployee(userId: String, locationId: String, employee: Employee) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
@@ -462,7 +686,7 @@ class FirebaseService: ObservableObject {
     }
     
     func updateEmployee(userId: String, locationId: String, employee: Employee) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
@@ -502,7 +726,7 @@ class FirebaseService: ObservableObject {
     }
     
     func createManagerTask(userId: String, task: WorkTask) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("tasks")
             .document(task.id)
@@ -510,7 +734,7 @@ class FirebaseService: ObservableObject {
     }
     
     func updateManagerTask(userId: String, task: WorkTask) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("tasks")
             .document(task.id)
@@ -621,7 +845,7 @@ class FirebaseService: ObservableObject {
     }
     
     func createTask(userId: String, locationId: String, task: WorkTask) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
@@ -631,7 +855,7 @@ class FirebaseService: ObservableObject {
     }
     
     func updateTask(userId: String, locationId: String, task: WorkTask) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
@@ -667,6 +891,24 @@ class FirebaseService: ObservableObject {
                 }
             }
         listeners["tasks_\(userId)_\(locationId)"] = listener
+    }
+
+    // Observe the manager-level task mirror (used by dashboard score bars).
+    // Fires whenever any task changes — completions, edits, adds, deletes.
+    func observeManagerTasks(userId: String, completion: @escaping ([WorkTask]) -> Void) {
+        let listener = db.collection("users")
+            .document(userId)
+            .collection("tasks")
+            .addSnapshotListener { snapshot, error in
+                guard let documents = snapshot?.documents else { return }
+                let tasks = documents.compactMap { doc in
+                    try? doc.data(as: WorkTask.self)
+                }
+                Task { @MainActor in
+                    completion(tasks)
+                }
+            }
+        listeners["managerTasks_\(userId)"] = listener
     }
     
     func observeEmployeeTasks(employeeId: String, completion: @escaping ([WorkTask]) -> Void) {
@@ -706,8 +948,37 @@ class FirebaseService: ObservableObject {
         return []
     }
     
+    // Fetch all shifts across all locations for a manager
+    func fetchAllShifts(userId: String) async throws -> [Shift] {
+        let locations = try await fetchLocations(userId: userId)
+        var allShifts: [Shift] = []
+        
+        for location in locations {
+            do {
+                let shifts = try await fetchShifts(userId: userId, locationId: location.id)
+                allShifts.append(contentsOf: shifts)
+            } catch {
+                // Continue with other locations if one fails
+                continue
+            }
+        }
+        
+        // Sort: active shifts first, then assigned, then completed (by clockOutTime desc)
+        return allShifts.sorted { shift1, shift2 in
+            if shift1.isActive && !shift2.isActive { return true }
+            if !shift1.isActive && shift2.isActive { return false }
+            if shift1.isAssigned && !shift2.isAssigned { return true }
+            if !shift1.isAssigned && shift2.isAssigned { return false }
+            // For completed shifts, sort by clockOutTime descending
+            if let out1 = shift1.clockOutTime, let out2 = shift2.clockOutTime {
+                return out1 > out2
+            }
+            return false
+        }
+    }
+    
     func createShift(userId: String, locationId: String, shift: Shift) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
@@ -717,7 +988,7 @@ class FirebaseService: ObservableObject {
     }
     
     func updateShift(userId: String, locationId: String, shift: Shift) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
@@ -785,13 +1056,56 @@ class FirebaseService: ObservableObject {
     }
     
     func createLotteryForm(userId: String, locationId: String, form: LotteryForm) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
             .collection("lotteryForms")
             .document(form.id)
             .setData(from: form)
+    }
+    
+    func updateLotteryFormOverShort(userId: String, locationId: String, formId: String, overShort: Double) async throws {
+        // Fetch the existing form
+        let formRef = db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryForms")
+            .document(formId)
+        
+        let document = try await formRef.getDocument()
+        guard document.exists else {
+            throw NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Lottery form not found"])
+        }
+        
+        // Decode the existing form
+        var form = try document.data(as: LotteryForm.self)
+        
+        // Update the overShort in shiftSummary
+        if var summary = form.shiftSummary {
+            // Create a new summary with updated overShort
+            // Since ShiftSummaryData is a struct with let properties, we need to create a new one
+            form.shiftSummary = ShiftSummaryData(
+                totalSold: summary.totalSold,
+                totalDollars: summary.totalDollars,
+                totalBooks: summary.totalBooks,
+                instantTotal: summary.instantTotal,
+                onlineTotal: summary.onlineTotal,
+                totalSoldAmount: summary.totalSoldAmount,
+                registerCash: summary.registerCash,
+                totalCash: summary.totalCash,
+                onlineCashes: summary.onlineCashes,
+                instantCashes: summary.instantCashes,
+                totalCashes: summary.totalCashes,
+                cashInBag: summary.cashInBag,
+                cashInBagNet: summary.cashInBagNet,
+                overShort: overShort
+            )
+        }
+        
+        // Save the updated form
+        try formRef.setData(from: form, merge: false)
     }
     
     func observeLotteryForms(userId: String, locationId: String, completion: @escaping ([LotteryForm]) -> Void) {
@@ -813,32 +1127,89 @@ class FirebaseService: ObservableObject {
     
     // MARK: - Lottery Form Template
     
+    /// Doc id used in the `lotteryFormTemplate` subcollection for a
+    /// given terminal. Terminal 1 — including the implicit/legacy
+    /// single-terminal case where `terminalNumber == nil` — keeps the
+    /// existing `"template"` doc id so we don't have to migrate a
+    /// single byte of existing data. Higher-numbered terminals use
+    /// `"terminal_2"`, `"terminal_3"`, …
+    private func lotteryTemplateDocId(for terminalNumber: Int?) -> String {
+        let n = terminalNumber ?? 1
+        return n <= 1 ? "template" : "terminal_\(n)"
+    }
+
     func saveLotteryFormTemplate(userId: String, locationId: String, template: LotteryFormTemplate) async throws {
-        var updatedTemplate = template
-        updatedTemplate = LotteryFormTemplate(locationId: locationId, rows: template.rows, lastUpdated: Date())
-        try await db.collection("users")
+        // Persist a fresh `lastUpdated`. We deliberately preserve the
+        // caller's `terminalNumber` (and treat nil as terminal 1) so
+        // single-terminal callers don't have to learn about terminals.
+        let updatedTemplate = LotteryFormTemplate(
+            locationId: locationId,
+            rows: template.rows,
+            lastUpdated: Date(),
+            lotteryRegisterAmount: template.lotteryRegisterAmount,
+            reverseOrder: template.reverseOrder,
+            terminalNumber: template.terminalNumber
+        )
+
+        let docId = lotteryTemplateDocId(for: template.terminalNumber)
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
             .collection("lotteryFormTemplate")
-            .document("template")
+            .document(docId)
             .setData(from: updatedTemplate)
     }
-    
+
+    /// Single-terminal / legacy fetch. Reads doc id `"template"` and
+    /// returns it unchanged. Used by the existing single-terminal code
+    /// paths so they don't have to know terminals exist.
     func fetchLotteryFormTemplate(userId: String, locationId: String) async throws -> LotteryFormTemplate? {
+        return try await fetchLotteryFormTemplate(userId: userId, locationId: locationId, terminalNumber: nil)
+    }
+
+    /// Terminal-aware fetch. `nil` (or `1`) reads the legacy `"template"`
+    /// doc; higher numbers read `"terminal_N"`. Returns nil if the doc
+    /// is absent (e.g. terminal 3 was never configured).
+    func fetchLotteryFormTemplate(
+        userId: String,
+        locationId: String,
+        terminalNumber: Int?
+    ) async throws -> LotteryFormTemplate? {
+        let docId = lotteryTemplateDocId(for: terminalNumber)
         let document = try await db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
             .collection("lotteryFormTemplate")
-            .document("template")
+            .document(docId)
             .getDocument()
-        
-        guard document.exists else {
-            return nil
-        }
-        
+
+        guard document.exists else { return nil }
         return try document.data(as: LotteryFormTemplate.self)
+    }
+
+    /// Fetch every template doc under `lotteryFormTemplate/`. Returns
+    /// them sorted by `effectiveTerminalNumber`. Used by the
+    /// multi-terminal customization UI to render one tab per terminal.
+    func fetchAllLotteryFormTemplates(
+        userId: String,
+        locationId: String
+    ) async throws -> [LotteryFormTemplate] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryFormTemplate")
+            .getDocuments()
+
+        let templates: [LotteryFormTemplate] = snapshot.documents.compactMap { doc in
+            try? doc.data(as: LotteryFormTemplate.self)
+        }
+
+        return templates.sorted {
+            $0.effectiveTerminalNumber < $1.effectiveTerminalNumber
+        }
     }
     
     // MARK: - Firebase Storage
@@ -846,6 +1217,77 @@ class FirebaseService: ObservableObject {
     func uploadTaskImage(imageData: Data, taskId: String, userId: String, locationId: String) async throws -> String {
         let storage = Storage.storage()
         let imageRef = storage.reference().child("task_images/\(userId)/\(locationId)/\(taskId).jpg")
+        
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            _ = imageRef.putData(imageData, metadata: metadata) { metadata, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                imageRef.downloadURL { url, error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else if let url = url {
+                        continuation.resume(returning: url.absoluteString)
+                    } else {
+                        continuation.resume(throwing: NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get download URL"]))
+                    }
+                }
+            }
+        }
+    }
+    
+    func uploadTaskImages(imageDataList: [Data], taskId: String, userId: String, locationId: String) async throws -> [String] {
+        let storage = Storage.storage()
+        var uploadedURLs: [String] = []
+        
+        // Upload all images in parallel
+        try await withThrowingTaskGroup(of: String.self) { group in
+            for imageData in imageDataList {
+                group.addTask {
+                    let imageId = UUID().uuidString
+                    let imageRef = storage.reference().child("task_images/\(userId)/\(locationId)/\(taskId)/\(imageId).jpg")
+                    
+                    let metadata = StorageMetadata()
+                    metadata.contentType = "image/jpeg"
+                    
+                    return try await withCheckedThrowingContinuation { continuation in
+                        _ = imageRef.putData(imageData, metadata: metadata) { metadata, error in
+                            if let error = error {
+                                continuation.resume(throwing: error)
+                                return
+                            }
+                            
+                            imageRef.downloadURL { url, error in
+                                if let error = error {
+                                    continuation.resume(throwing: error)
+                                } else if let url = url {
+                                    continuation.resume(returning: url.absoluteString)
+                                } else {
+                                    continuation.resume(throwing: NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get download URL"]))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Collect all uploaded URLs
+            for try await url in group {
+                uploadedURLs.append(url)
+            }
+        }
+        
+        return uploadedURLs
+    }
+    
+    func uploadLotteryFormImage(imageData: Data, formId: String, userId: String, locationId: String) async throws -> String {
+        let storage = Storage.storage()
+        let imageRef = storage.reference().child("lottery_form_images/\(userId)/\(locationId)/\(formId).jpg")
         
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
@@ -886,7 +1328,7 @@ class FirebaseService: ObservableObject {
     }
     
     func createDocument(userId: String, locationId: String, document: Document) async throws {
-        try await db.collection("users")
+        try db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
@@ -976,10 +1418,239 @@ class FirebaseService: ObservableObject {
         return allDocuments
     }
     
+    // MARK: - Global Game Database (accessible by all managers)
+    
+    func saveGameData(_ gameData: GameData) async throws {
+        var updatedGameData = gameData
+        updatedGameData = GameData(
+            id: gameData.id,
+            gameNumber: gameData.gameNumber,
+            value: gameData.value,
+            tickets: gameData.tickets,
+            createdAt: gameData.createdAt,
+            lastUpdated: Date()
+        )
+        // Store at global level: /gameDatabase/{gameData.id}
+        try db.collection("gameDatabase")
+            .document(gameData.id)
+            .setData(from: updatedGameData)
+    }
+    
+    func fetchAllGameData() async throws -> [GameData] {
+        let snapshot = try await db.collection("gameDatabase")
+            .order(by: "gameNumber")
+            .getDocuments()
+        return try snapshot.documents.compactMap { doc in
+            try doc.data(as: GameData.self)
+        }
+    }
+    
+    func fetchGameData(gameNumber: String) async throws -> GameData? {
+        let snapshot = try await db.collection("gameDatabase")
+            .whereField("gameNumber", isEqualTo: gameNumber)
+            .limit(to: 1)
+            .getDocuments()
+        
+        guard let document = snapshot.documents.first else {
+            return nil
+        }
+        
+        return try document.data(as: GameData.self)
+    }
+    
+    func deleteGameData(gameDataId: String) async throws {
+        try await db.collection("gameDatabase")
+            .document(gameDataId)
+            .delete()
+    }
+    
+    // MARK: - Invoices
+    
+    func saveInvoice(userId: String, invoice: Invoice) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("invoices")
+            .document(invoice.id)
+            .setData(from: invoice)
+    }
+    
+    func fetchInvoices(userId: String, locationId: String? = nil) async throws -> [Invoice] {
+        let collectionRef = db.collection("users")
+            .document(userId)
+            .collection("invoices")
+        
+        let snapshot: QuerySnapshot
+        if let locationId = locationId {
+            snapshot = try await collectionRef
+                .whereField("locationId", isEqualTo: locationId)
+                .order(by: "createdAt", descending: true)
+                .getDocuments()
+        } else {
+            snapshot = try await collectionRef
+                .order(by: "createdAt", descending: true)
+                .getDocuments()
+        }
+        return try snapshot.documents.compactMap { doc in
+            try doc.data(as: Invoice.self)
+        }
+    }
+    
+    func updateInvoice(userId: String, invoice: Invoice) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("invoices")
+            .document(invoice.id)
+            .setData(from: invoice, merge: true)
+    }
+    
+    func deleteInvoice(userId: String, invoiceId: String) async throws {
+        try await db.collection("users")
+            .document(userId)
+            .collection("invoices")
+            .document(invoiceId)
+            .delete()
+    }
+    
+    func uploadInvoiceFile(fileData: Data, invoiceId: String, userId: String, fileType: String, fileName: String) async throws -> String {
+        let storage = Storage.storage()
+        let fileExtension = fileType.lowercased()
+        let fileRef = storage.reference().child("invoice_files/\(userId)/\(invoiceId).\(fileExtension)")
+        
+        let metadata = StorageMetadata()
+        
+        // Set content type based on file type
+        switch fileExtension {
+        case "pdf":
+            metadata.contentType = "application/pdf"
+        case "jpg", "jpeg":
+            metadata.contentType = "image/jpeg"
+        case "png":
+            metadata.contentType = "image/png"
+        case "xlsx":
+            metadata.contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        case "xls":
+            metadata.contentType = "application/vnd.ms-excel"
+        case "doc", "docx":
+            metadata.contentType = "application/msword"
+        default:
+            metadata.contentType = "application/octet-stream"
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            _ = fileRef.putData(fileData, metadata: metadata) { metadata, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                fileRef.downloadURL { url, error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else if let url = url {
+                        continuation.resume(returning: url.absoluteString)
+                    } else {
+                        continuation.resume(throwing: NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get download URL"]))
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Payables & Receivables
+    
+    func savePayable(userId: String, locationId: String, payable: Payable) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("payables")
+            .document(payable.id)
+            .setData(from: payable)
+    }
+    
+    func fetchPayables(userId: String, locationId: String) async throws -> [Payable] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("payables")
+            .getDocuments()
+        return try snapshot.documents.compactMap { doc in
+            try doc.data(as: Payable.self)
+        }
+    }
+    
+    func updatePayable(userId: String, locationId: String, payable: Payable) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("payables")
+            .document(payable.id)
+            .setData(from: payable, merge: true)
+    }
+    
+    func deletePayable(userId: String, locationId: String, payableId: String) async throws {
+        try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("payables")
+            .document(payableId)
+            .delete()
+    }
+    
+    func saveReceivable(userId: String, locationId: String, receivable: Receivable) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("receivables")
+            .document(receivable.id)
+            .setData(from: receivable)
+    }
+    
+    func fetchReceivables(userId: String, locationId: String) async throws -> [Receivable] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("receivables")
+            .getDocuments()
+        return try snapshot.documents.compactMap { doc in
+            try doc.data(as: Receivable.self)
+        }
+    }
+    
+    func updateReceivable(userId: String, locationId: String, receivable: Receivable) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("receivables")
+            .document(receivable.id)
+            .setData(from: receivable, merge: true)
+    }
+    
+    func deleteReceivable(userId: String, locationId: String, receivableId: String) async throws {
+        try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("receivables")
+            .document(receivableId)
+            .delete()
+    }
+    
     // MARK: - Cleanup
     
     func removeAllListeners() {
-        listeners.values.forEach { $0.remove() }
+        print("🟢 Removing all Firestore listeners...")
+        for (key, listener) in listeners {
+            listener.remove()
+            print("🟢 Removed listener: \(key)")
+        }
         listeners.removeAll()
+        print("🟢 All listeners removed - count: \(listeners.count)")
     }
 }
