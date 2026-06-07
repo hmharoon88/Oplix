@@ -1,5 +1,5 @@
 /**
- * Daily books — monthly books entry (daily sheet, utilities, payroll, receivables).
+ * Daily books — monthly books entry (daily sheet, utilities, payroll, receivables, cash reconciliation).
  */
 (function () {
     const M = () => window.OplixBooksModel;
@@ -205,12 +205,23 @@
                 state.dayId = e.target.value;
                 state.day = M().normalizeDayDoc(state.daysById[state.dayId]);
                 render();
+                return;
+            }
+            if (
+                state.tab === "cash-recon" &&
+                e.target.name &&
+                String(e.target.name).startsWith("cr_")
+            ) {
+                syncFromForm();
+                state.dirty = true;
+                render();
             }
         });
 
         panel.addEventListener("click", (e) => {
             const tab = e.target.closest("[data-di-tab]");
             if (tab) {
+                syncFromForm();
                 state.tab = tab.dataset.diTab;
                 render();
                 return;
@@ -264,6 +275,13 @@
                 if (e.target.closest(".data-input-form")) {
                     syncFromForm();
                     state.dirty = true;
+                    if (
+                        state.tab === "cash-recon" &&
+                        e.target.name &&
+                        String(e.target.name).startsWith("cr_")
+                    ) {
+                        render();
+                    }
                 }
             },
             true
@@ -283,6 +301,14 @@
             });
         } else if (list === "otherExpenses") {
             state.day.otherExpenses.push({ id: lineId(), description: "", amount: 0 });
+        } else if (list === "pulltabs") {
+            state.day.pulltabs.push({
+                id: lineId(),
+                ticketNumber: "",
+                cash: 0,
+                winner: 0,
+                overShort: 0,
+            });
         } else if (list === "receivables") {
             state.month.receivables.push({ id: lineId(), description: "", amount: 0 });
         }
@@ -328,11 +354,7 @@
             });
         });
 
-        ["cash", "winner", "overShort"].forEach((f) => {
-            const el = root.querySelector(`[name="pull_${f}"]`);
-            if (el) state.day.pulltab[f] = M().num(el.value);
-        });
-
+        syncLinesFromDom("pulltabs", ["ticketNumber", "cash", "winner", "overShort"]);
         if (hasGasStation()) {
             const merch = root.querySelector('[name="merch_sale"]');
             if (merch) state.day.merchSale = M().num(merch.value);
@@ -352,6 +374,33 @@
         syncLinesFromDom("checksAch", ["date", "description", "checkNo", "amount"]);
         syncLinesFromDom("otherExpenses", ["description", "amount"]);
         syncLinesFromDom("receivables", ["description", "amount"], true);
+
+        if (!state.day.cashReconciliation) {
+            state.day.cashReconciliation = M().defaultCashReconciliation();
+        }
+        ["register1", "register2"].forEach((regKey) => {
+            ["shift1", "shift2"].forEach((sh) => {
+                const counted = root.querySelector(`[name="cr_${regKey}_${sh}_counted"]`);
+                const verified = root.querySelector(`[name="cr_${regKey}_${sh}_verified"]`);
+                const note = root.querySelector(`[name="cr_${regKey}_${sh}_note"]`);
+                if (counted) {
+                    state.day.cashReconciliation[regKey][sh].countedCash = M().num(counted.value);
+                }
+                if (verified) {
+                    state.day.cashReconciliation[regKey][sh].verified = verified.checked;
+                }
+                if (note) {
+                    state.day.cashReconciliation[regKey][sh].note = note.value;
+                }
+            });
+        });
+        const deposit = root.querySelector('[name="cr_day_deposit"]');
+        const dayNote = root.querySelector('[name="cr_day_note"]');
+        if (deposit) {
+            const v = String(deposit.value ?? "").trim();
+            state.day.cashReconciliation.dayDeposit = v === "" ? null : M().num(v);
+        }
+        if (dayNote) state.day.cashReconciliation.note = dayNote.value;
     }
 
     function syncLinesFromDom(listKey, fields, isMonth) {
@@ -365,7 +414,14 @@
             const obj = { ...existing, id };
             fields.forEach((f) => {
                 const inp = row.querySelector(`[name="${f}"]`);
-                if (inp) obj[f] = f === "amount" || f === "overShort" ? M().num(inp.value) : inp.value;
+                if (inp) {
+                    const isNum =
+                        f === "amount" ||
+                        f === "overShort" ||
+                        f === "cash" ||
+                        f === "winner";
+                    obj[f] = isNum ? M().num(inp.value) : inp.value;
+                }
             });
             updated.push(obj);
         });
@@ -484,7 +540,7 @@
             </fieldset>`;
     }
 
-    function renderLineList(listKey, columns, rows, isMonth) {
+    function renderLineList(listKey, columns, rows, isMonth, addLabel) {
         const list = isMonth ? state.month[listKey] : state.day[listKey];
         return `
             <div class="books-lines" data-di-list="${listKey}">
@@ -511,8 +567,28 @@
                     </div>`;
                     })
                     .join("")}
-                <button type="button" class="books-add-line" data-di-add="${listKey}">+ Add line</button>
+                <button type="button" class="books-add-line" data-di-add="${listKey}">${escapeHtml(addLabel || "+ Add line")}</button>
             </div>`;
+    }
+
+    function renderPulltabs() {
+        const total = M().pulltabDayTotal(state.day);
+        return `
+            <h3 class="books-subtitle">Pulltab</h3>
+            <p class="books-hint">One row per pulltab machine — enter the ticket number and amounts from each machine report.</p>
+            ${renderLineList(
+                "pulltabs",
+                [
+                    { name: "ticketNumber", label: "Ticket #" },
+                    { name: "cash", label: "Cash", type: "number" },
+                    { name: "winner", label: "Winners", type: "number" },
+                    { name: "overShort", label: "O/S", type: "number" },
+                ],
+                null,
+                false,
+                "+ Add pulltab machine"
+            )}
+            <p class="books-total-line">Pulltab total: ${money(total.cash)} cash · Winners ${money(total.winner)} · O/S ${money(total.overShort)}</p>`;
     }
 
     function renderUtilitiesPayroll() {
@@ -671,12 +747,7 @@
                         </label>
                     </div>
 
-                    <h3 class="books-subtitle">Pulltab</h3>
-                    ${renderShiftBlock("Pulltab", "pull", state.day.pulltab, [
-                        { name: "cash", label: "Cash" },
-                        { name: "winner", label: "Winners" },
-                        { name: "overShort", label: "Over / short" },
-                    ])}
+                    ${renderPulltabs()}
 
                     <h3 class="books-subtitle">Cash expense</h3>
                     ${renderLineList("cashExpenses", [
@@ -711,12 +782,7 @@
             ${renderRegisterUnit("Register 2", "register2", state.day.register2)}
             <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash · O/S ${money(reg.overShort)}</p>
 
-            <h3 class="books-subtitle">Pulltab</h3>
-            ${renderShiftBlock("Pulltab", "pull", state.day.pulltab, [
-                { name: "cash", label: "Cash" },
-                { name: "winner", label: "Winners" },
-                { name: "overShort", label: "Over / short" },
-            ])}
+            ${renderPulltabs()}
 
             <h3 class="books-subtitle">Cash expense</h3>
             ${renderLineList("cashExpenses", [
@@ -771,6 +837,154 @@
             </div>`;
     }
 
+    function renderCashReconciliation() {
+        const summary = M().cashReconciliationSummary(state.day);
+        const summaryCls = summary.matched
+            ? "books-cash-recon-summary books-cash-recon-summary--matched"
+            : Math.abs(summary.variance) < 0.005 &&
+                summary.countedTotal > 0 &&
+                !summary.allVerified &&
+                (summary.deposit == null || summary.depositMatch)
+              ? "books-cash-recon-summary books-cash-recon-summary--pending"
+              : "books-cash-recon-summary books-cash-recon-summary--variance";
+        const matchLabel = summary.matched
+            ? "Day cash reconciled — counted matches books and deposit accounts for register expenses"
+            : summary.countedTotal === 0 && summary.expectedTotal === 0
+              ? "Enter counted cash after verification"
+              : !summary.depositMatch && summary.deposit != null
+                ? `Deposit variance ${money(summary.depositVariance)} — expected ${money(summary.expectedDeposit)} (counted − cash expenses)`
+                : !summary.allVerified && Math.abs(summary.variance) < 0.005
+                  ? "Totals match — mark each shift verified to complete reconciliation"
+                  : `Variance ${money(summary.variance)} — counted should match books cash`;
+
+        const rows = summary.rows
+            .map((row) => {
+                const varCls =
+                    Math.abs(row.variance) < 0.005
+                        ? "books-cash-recon-var--ok"
+                        : row.counted === 0 && row.expected === 0
+                          ? ""
+                          : "books-cash-recon-var--bad";
+                return `
+                    <tr>
+                        <td>${escapeHtml(row.regLabel)}</td>
+                        <td>${escapeHtml(row.shiftLabel)}</td>
+                        <td class="home-cc-num">${money(row.expected)}</td>
+                        <td class="home-cc-num">
+                            <input ${amountInputAttrs(`cr_${row.regKey}_${row.shiftKey}_counted`, row.counted)} aria-label="Counted cash">
+                        </td>
+                        <td class="home-cc-num ${varCls}">${money(row.variance)}</td>
+                        <td class="books-cash-recon-verified">
+                            <label class="books-check-label">
+                                <input type="checkbox" name="cr_${row.regKey}_${row.shiftKey}_verified"${row.verified ? " checked" : ""}>
+                                Verified
+                            </label>
+                        </td>
+                        <td>
+                            <input type="text" class="books-input" name="cr_${row.regKey}_${row.shiftKey}_note" value="${escapeHtml(row.note)}" placeholder="Note">
+                        </td>
+                    </tr>`;
+            })
+            .join("");
+
+        const depositVal =
+            summary.deposit == null ? "" : M().formatAmountForInput(summary.deposit);
+
+        const cashExpenseLines = (state.day.cashExpenses || []).filter(
+            (row) => M().num(row.amount) !== 0 || (row.description && String(row.description).trim())
+        );
+        const cashExpenseList =
+            cashExpenseLines.length === 0
+                ? ""
+                : `<ul class="books-cash-recon-expense-list">
+                    ${cashExpenseLines
+                        .map(
+                            (row) =>
+                                `<li><span>${escapeHtml(row.description || "(no description)")}</span> <strong>${money(M().num(row.amount))}</strong></li>`
+                        )
+                        .join("")}
+                   </ul>`;
+
+        const depositVarCls =
+            summary.deposit == null
+                ? ""
+                : summary.depositMatch
+                  ? "books-cash-recon-var--ok"
+                  : "books-cash-recon-var--bad";
+
+        return `
+            <div class="books-panel data-input-form">
+                <label class="books-label">Day
+                    <select id="di-day" class="books-select">${dayOptions()}</select>
+                </label>
+
+                <div class="${summaryCls}">
+                    <p class="books-cash-recon-summary-title">${escapeHtml(matchLabel)}</p>
+                    <div class="books-cash-recon-totals">
+                        <span><em>Books cash</em> <strong>${money(summary.expectedTotal)}</strong></span>
+                        <span><em>Counted</em> <strong>${money(summary.countedTotal)}</strong></span>
+                        <span><em>Cash expenses</em> <strong>${money(summary.cashExpensesTotal)}</strong></span>
+                        <span><em>Expected deposit</em> <strong>${money(summary.expectedDeposit)}</strong></span>
+                        <span><em>Verified</em> <strong>${summary.verifiedCount} / ${summary.shiftCount}</strong></span>
+                    </div>
+                </div>
+
+                <p class="books-hint">Expected cash comes from the <strong>Daily sheet</strong> register cash sales. After physically verifying each drawer, enter the counted amount and mark verified. Register <strong>cash expenses</strong> (Daily sheet) reduce what goes to the bank — expected deposit = counted − cash expenses.</p>
+
+                <div class="home-card home-cc-table-wrap">
+                    <table class="home-cc-table books-cash-recon-table">
+                        <thead>
+                            <tr>
+                                <th>Register</th>
+                                <th>Shift</th>
+                                <th class="home-cc-num">Books cash</th>
+                                <th class="home-cc-num">Counted</th>
+                                <th class="home-cc-num">Variance</th>
+                                <th>Status</th>
+                                <th>Note</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                        <tfoot>
+                            <tr class="books-cash-recon-total-row">
+                                <td colspan="2"><strong>Day total</strong></td>
+                                <td class="home-cc-num"><strong>${money(summary.expectedTotal)}</strong></td>
+                                <td class="home-cc-num"><strong>${money(summary.countedTotal)}</strong></td>
+                                <td class="home-cc-num"><strong>${money(summary.variance)}</strong></td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                ${
+                    summary.cashExpensesTotal > 0
+                        ? `<div class="books-cash-recon-expenses">
+                            <h3 class="books-subtitle">Register cash expenses (from Daily sheet)</h3>
+                            ${cashExpenseList}
+                            <p class="books-hint">Edit on the <strong>Daily sheet</strong> tab — totals refresh here when you reload or save.</p>
+                           </div>`
+                        : ""
+                }
+
+                <h3 class="books-subtitle">Bank deposit (optional)</h3>
+                <p class="books-hint">Actual deposit should match <strong>expected deposit</strong> above (counted cash minus register cash expenses).</p>
+                <label class="books-label">Deposit amount ($)
+                    <input ${amountInputAttrs("cr_day_deposit", depositVal)}>
+                </label>
+                ${
+                    summary.deposit != null
+                        ? `<p class="books-total-line books-cash-recon-deposit-check ${depositVarCls}">Deposit vs expected: ${money(summary.depositVariance)}${summary.depositMatch ? " — matches" : ""}</p>`
+                        : ""
+                }
+                <label class="books-label">Day notes
+                    <input type="text" class="books-input" name="cr_day_note" value="${escapeHtml(state.day.cashReconciliation?.note || "")}" placeholder="Optional">
+                </label>
+
+                <button type="button" class="btn books-save" id="di-save-day">Save cash reconciliation</button>
+            </div>`;
+    }
+
     function renderReceivables() {
         return `
             <div class="books-panel data-input-form">
@@ -803,6 +1017,7 @@
             { id: "utilities", label: "Utilities & payroll" },
             { id: "payables", label: "Payables" },
             { id: "receivables", label: "Receivables" },
+            { id: "cash-recon", label: "Cash reconciliation" },
         ];
 
         let body = "";
@@ -817,7 +1032,8 @@
                       payables: state.payables,
                   })
                 : '<p class="data-list-empty">Payables unavailable.</p>';
-        } else body = renderReceivables();
+        } else if (state.tab === "cash-recon") body = renderCashReconciliation();
+        else body = renderReceivables();
 
         root.innerHTML = `
             <div class="books-toolbar">

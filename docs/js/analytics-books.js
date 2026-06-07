@@ -346,6 +346,87 @@
         return renderKpis(agg, title, options);
     }
 
+    function renderCashReconciliationSection(agg) {
+        const cr = agg?.cashReconciliation;
+        const rows = cr?.dailyRows || [];
+
+        if (!rows.length) {
+            return `
+                <section class="bs-panel bs-panel--cash-recon">
+                    <div class="bs-panel-head">
+                        <div class="bs-panel-head-text">
+                            <h3 class="bs-panel-title">Cash reconciliation</h3>
+                            <p class="bs-panel-sub">Register cash counted vs books, by day.</p>
+                        </div>
+                    </div>
+                    <p class="books-hint">No register cash this month yet. Enter register cash on <strong>Daily books → Daily sheet</strong>, then reconcile on <strong>Daily books → Cash reconciliation</strong>.</p>
+                </section>`;
+        }
+
+        const summaryLine =
+            cr.daysWithBooksCash > 0
+                ? `<p class="books-cash-recon-month-summary"><strong>${cr.daysReconciled}</strong> of <strong>${cr.daysWithBooksCash}</strong> days with register cash fully reconciled${
+                      cr.daysNeedingAttention > 0
+                          ? ` · <span class="bs-cash-recon-attn">${cr.daysNeedingAttention} need attention</span>`
+                          : ""
+                  }</p>`
+                : "";
+
+        const tableRows = rows
+            .map((row) => {
+                const tone = row.status?.tone || "missing";
+                const depositCell =
+                    row.deposit == null ? "—" : money(row.deposit);
+                return `
+                    <tr>
+                        <td>${escapeHtml(formatDayId(row.dayId))}</td>
+                        <td class="home-cc-num">${money(row.expectedTotal)}</td>
+                        <td class="home-cc-num">${money(row.countedTotal)}</td>
+                        <td class="home-cc-num">${money(row.variance)}</td>
+                        <td class="home-cc-num">${money(row.cashExpensesTotal)}</td>
+                        <td class="home-cc-num">${money(row.expectedDeposit)}</td>
+                        <td class="home-cc-num">${depositCell}</td>
+                        <td><span class="bs-cash-recon-badge bs-cash-recon-badge--${tone}">${escapeHtml(row.status?.label || "—")}</span></td>
+                    </tr>`;
+            })
+            .join("");
+
+        return `
+            <section class="bs-panel bs-panel--cash-recon">
+                <div class="bs-panel-head">
+                    <div class="bs-panel-head-text">
+                        <h3 class="bs-panel-title">Cash reconciliation</h3>
+                        <p class="bs-panel-sub">Daily register counts vs books for this month. Enter or edit in Daily books → Cash reconciliation.</p>
+                    </div>
+                </div>
+                ${summaryLine}
+                <div class="books-cash-recon-totals bs-cash-recon-month-totals">
+                    <span><em>Books cash</em> <strong>${money(cr.totalExpected)}</strong></span>
+                    <span><em>Counted</em> <strong>${money(cr.totalCounted)}</strong></span>
+                    <span><em>Variance</em> <strong>${money(cr.totalVariance)}</strong></span>
+                    <span><em>Cash expenses</em> <strong>${money(cr.totalCashExpenses)}</strong></span>
+                    <span><em>Expected deposit</em> <strong>${money(cr.totalExpectedDeposit)}</strong></span>
+                </div>
+                <div class="home-card home-cc-table-wrap">
+                    <table class="home-cc-table bs-cash-recon-month-table">
+                        <thead>
+                            <tr>
+                                <th>Day</th>
+                                <th class="home-cc-num">Books</th>
+                                <th class="home-cc-num">Counted</th>
+                                <th class="home-cc-num">Variance</th>
+                                <th class="home-cc-num">Expenses</th>
+                                <th class="home-cc-num">Exp. deposit</th>
+                                <th class="home-cc-num">Deposit</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                </div>
+            </section>`;
+    }
+
     function renderMonthPicker() {
         const locOpts = locations
             .map(
@@ -405,6 +486,7 @@
             overviewHtml = `
             <div class="bs-report">
                 ${renderMainDashboard(primaryPack.aggregate, drillPack.title)}
+                ${renderCashReconciliationSection(primaryPack.aggregate)}
             </div>`;
         } catch (err) {
             console.error("[Oplix] Summary render failed:", err);

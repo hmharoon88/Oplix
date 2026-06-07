@@ -830,6 +830,160 @@
     margin: 12px 0;
 }
 
+.books-cash-recon-summary {
+    border-radius: var(--dash-radius);
+    padding: 14px 16px;
+    margin: 16px 0;
+    border: 1px solid var(--dash-border);
+    background: var(--dash-surface);
+}
+
+.books-cash-recon-summary--matched {
+    border-color: #86efac;
+    background: #f0fdf4;
+}
+
+.books-cash-recon-summary--pending {
+    border-color: #93c5fd;
+    background: #eff6ff;
+}
+
+.books-cash-recon-summary--variance {
+    border-color: #fed7aa;
+    background: #fff7ed;
+}
+
+.books-cash-recon-summary-title {
+    margin: 0 0 10px;
+    font-weight: 600;
+    font-size: 0.9375rem;
+}
+
+.books-cash-recon-totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 24px;
+    font-size: 0.875rem;
+}
+
+.books-cash-recon-totals em {
+    display: block;
+    font-style: normal;
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--dash-muted);
+    margin-bottom: 2px;
+}
+
+.books-cash-recon-table input.books-input-amount {
+    width: 100%;
+    min-width: 5rem;
+    text-align: right;
+}
+
+.books-cash-recon-table input.books-input:not(.books-input-amount) {
+    width: 100%;
+    min-width: 6rem;
+}
+
+.books-cash-recon-var--ok {
+    color: #166534;
+}
+
+.books-cash-recon-var--bad {
+    color: #c2410c;
+    font-weight: 600;
+}
+
+.books-cash-recon-verified {
+    white-space: nowrap;
+}
+
+.books-check-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.books-cash-recon-expense-list {
+    margin: 0 0 8px;
+    padding-left: 1.25rem;
+    font-size: 0.875rem;
+}
+
+.books-cash-recon-expense-list li {
+    margin: 4px 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    max-width: 28rem;
+}
+
+.books-cash-recon-expenses {
+    margin: 16px 0;
+}
+
+.books-cash-recon-deposit-check {
+    margin-top: 8px;
+}
+
+.bs-panel--cash-recon {
+    margin-top: 24px;
+}
+
+.books-cash-recon-month-summary {
+    margin: 0 0 12px;
+    font-size: 0.9375rem;
+}
+
+.bs-cash-recon-attn {
+    color: #c2410c;
+    font-weight: 600;
+}
+
+.bs-cash-recon-month-totals {
+    margin-bottom: 16px;
+}
+
+.bs-cash-recon-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.bs-cash-recon-badge--ok {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.bs-cash-recon-badge--pending {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.bs-cash-recon-badge--missing {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.bs-cash-recon-badge--bad {
+    background: #ffedd5;
+    color: #c2410c;
+}
+
+.books-cash-recon-total-row td {
+    border-top: 2px solid var(--dash-border);
+    padding-top: 10px;
+}
+
 .books-save {
     margin-top: 16px;
 }
@@ -861,6 +1015,11 @@
 
 .books-lines[data-di-list="checksAch"] .books-lines-row {
     display: grid;
+}
+
+.books-lines[data-di-list="pulltabs"] .books-lines-head,
+.books-lines[data-di-list="pulltabs"] .books-lines-row {
+    grid-template-columns: 120px 100px 100px 80px 32px;
 }
 
 .books-lines[data-di-list="otherExpenses"] .books-lines-head,

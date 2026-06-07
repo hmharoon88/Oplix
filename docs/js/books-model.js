@@ -34,8 +34,36 @@
         return { cash: 0, overShort: 0 };
     }
 
-    function emptyPulltab() {
-        return { cash: 0, winner: 0, overShort: 0 };
+    function emptyPulltabEntry() {
+        return { ticketNumber: "", cash: 0, winner: 0, overShort: 0 };
+    }
+
+    function normalizePulltabEntry(raw, fallbackId) {
+        const row = raw || {};
+        return {
+            id: row.id || fallbackId || `pt_${Date.now()}`,
+            ticketNumber: String(row.ticketNumber ?? ""),
+            cash: num(row.cash),
+            winner: num(row.winner),
+            overShort: num(row.overShort),
+        };
+    }
+
+    /** Multiple pulltab machines per day; migrates legacy single `pulltab` object. */
+    function normalizePulltabs(pulltabs, legacyPulltab) {
+        if (Array.isArray(pulltabs) && pulltabs.length > 0) {
+            return pulltabs.map((row, i) => normalizePulltabEntry(row, `pt_${i}`));
+        }
+        const leg = legacyPulltab || {};
+        if (
+            num(leg.cash) !== 0 ||
+            num(leg.winner) !== 0 ||
+            num(leg.overShort) !== 0 ||
+            String(leg.ticketNumber ?? "").trim()
+        ) {
+            return [normalizePulltabEntry(leg, "pt_legacy")];
+        }
+        return [normalizePulltabEntry({}, "pt_0")];
     }
 
     function defaultFuelSale() {
@@ -197,13 +225,14 @@
                 shift1: emptyGamingShift(),
                 shift2: emptyGamingShift(),
             },
-            pulltab: emptyPulltab(),
+            pulltabs: [],
             fuelSale: defaultFuelSale(),
             merchSale: 0,
             creditCard: 0,
             cashExpenses: [],
             checksAch: [],
             otherExpenses: [],
+            cashReconciliation: defaultCashReconciliation(),
             updatedAt: null,
         };
     }
@@ -312,12 +341,15 @@
     }
 
     function pulltabDayTotal(day) {
-        const p = day.pulltab || {};
-        return {
-            cash: num(p.cash),
-            winner: num(p.winner),
-            overShort: num(p.overShort),
-        };
+        const entries = normalizePulltabs(day?.pulltabs, day?.pulltab);
+        return entries.reduce(
+            (acc, p) => ({
+                cash: acc.cash + num(p.cash),
+                winner: acc.winner + num(p.winner),
+                overShort: acc.overShort + num(p.overShort),
+            }),
+            { cash: 0, winner: 0, overShort: 0 }
+        );
     }
 
     function fuelDayTotal(day) {
@@ -349,13 +381,15 @@
             shift1: { ...emptyGamingShift(), ...(day.lottery?.shift1 || {}) },
             shift2: { ...emptyGamingShift(), ...(day.lottery?.shift2 || {}) },
         };
-        d.pulltab = { ...emptyPulltab(), ...(day.pulltab || {}) };
+        d.pulltabs = normalizePulltabs(day.pulltabs, day.pulltab);
+        delete d.pulltab;
         d.fuelSale = { ...defaultFuelSale(), ...(day.fuelSale || {}) };
         d.merchSale = num(day.merchSale);
         d.creditCard = num(day.creditCard);
         d.cashExpenses = day.cashExpenses || [];
         d.checksAch = day.checksAch || [];
         d.otherExpenses = day.otherExpenses || [];
+        d.cashReconciliation = normalizeCashReconciliation(day.cashReconciliation);
         delete d._dayId;
         return d;
     }
@@ -516,6 +550,84 @@
         return reg.card + reg.cash;
     }
 
+    /** Status label for one day's cash reconciliation row. */
+    function cashReconciliationDayStatus(summary) {
+        if (summary.matched) return { label: "Reconciled", tone: "ok" };
+        if (summary.countedTotal === 0 && summary.expectedTotal > 0) {
+            return { label: "Not entered", tone: "missing" };
+        }
+        if (
+            Math.abs(summary.variance) < 0.005 &&
+            summary.countedTotal > 0 &&
+            !summary.allVerified
+        ) {
+            return { label: "Pending verification", tone: "pending" };
+        }
+        if (summary.deposit != null && !summary.depositMatch) {
+            return { label: "Deposit variance", tone: "bad" };
+        }
+        return { label: "Variance", tone: "bad" };
+    }
+
+    /** Month-level cash reconciliation rollup from daily books entries. */
+    function aggregateCashReconciliation(daysById) {
+        const dailyRows = [];
+        let daysWithBooksCash = 0;
+        let daysReconciled = 0;
+        let daysNeedingAttention = 0;
+        let totalExpected = 0;
+        let totalCounted = 0;
+        let totalVariance = 0;
+        let totalCashExpenses = 0;
+        let totalExpectedDeposit = 0;
+        let totalDeposit = 0;
+
+        Object.entries(daysById || {})
+            .sort(([a], [b]) => a.localeCompare(b))
+            .forEach(([dayId, rawDay]) => {
+                const day = normalizeDayDoc(rawDay);
+                const summary = cashReconciliationSummary(day);
+                const hasBooksCash = summary.expectedTotal > 0;
+                const hasReconActivity =
+                    summary.countedTotal > 0 ||
+                    summary.deposit != null ||
+                    summary.verifiedCount > 0;
+
+                if (!hasBooksCash && !hasReconActivity) return;
+
+                const status = cashReconciliationDayStatus(summary);
+                if (hasBooksCash) daysWithBooksCash += 1;
+                if (summary.matched) daysReconciled += 1;
+                else if (hasBooksCash || hasReconActivity) daysNeedingAttention += 1;
+
+                totalExpected += summary.expectedTotal;
+                totalCounted += summary.countedTotal;
+                totalVariance += summary.variance;
+                totalCashExpenses += summary.cashExpensesTotal;
+                totalExpectedDeposit += summary.expectedDeposit;
+                if (summary.deposit != null) totalDeposit += summary.deposit;
+
+                dailyRows.push({
+                    dayId,
+                    ...summary,
+                    status,
+                });
+            });
+
+        return {
+            dailyRows,
+            daysWithBooksCash,
+            daysReconciled,
+            daysNeedingAttention,
+            totalExpected,
+            totalCounted,
+            totalVariance,
+            totalCashExpenses,
+            totalExpectedDeposit,
+            totalDeposit,
+        };
+    }
+
     /** Aggregate one month (month doc + all days) for Books summary. */
     function aggregateMonth(monthDoc, daysById, options) {
         const month = monthDoc || defaultMonthDoc();
@@ -639,6 +751,7 @@
             ...aggCore,
             salesBreakdown: salesBreakdownFromAggregate(aggCore),
             expenseDetail: buildExpenseDetail(month, daysById),
+            cashReconciliation: aggregateCashReconciliation(daysById),
         };
     }
 
@@ -698,6 +811,116 @@
         };
     }
 
+    function emptyCashReconShift() {
+        return { countedCash: 0, verified: false, note: "" };
+    }
+
+    function defaultCashReconRegisterUnit() {
+        return {
+            shift1: emptyCashReconShift(),
+            shift2: emptyCashReconShift(),
+        };
+    }
+
+    function defaultCashReconciliation() {
+        return {
+            register1: defaultCashReconRegisterUnit(),
+            register2: defaultCashReconRegisterUnit(),
+            dayDeposit: null,
+            note: "",
+        };
+    }
+
+    function normalizeCashReconciliation(raw) {
+        const base = defaultCashReconciliation();
+        if (!raw) return base;
+        ["register1", "register2"].forEach((regKey) => {
+            ["shift1", "shift2"].forEach((sh) => {
+                const src = raw[regKey]?.[sh] || {};
+                base[regKey][sh] = {
+                    countedCash: num(src.countedCash),
+                    verified: src.verified === true,
+                    note: src.note || "",
+                };
+            });
+        });
+        base.dayDeposit = raw.dayDeposit == null || raw.dayDeposit === "" ? null : num(raw.dayDeposit);
+        base.note = raw.note || "";
+        return base;
+    }
+
+    /** Total cash paid from registers on a day (Daily sheet → Cash expense). */
+    function dayCashExpensesTotal(day) {
+        return sumLines(normalizeDayDoc(day).cashExpenses, "amount");
+    }
+
+    /** Expected register cash for one shift (from daily sheet). */
+    function expectedRegisterCash(day, regKey, shiftKey) {
+        const unit = day?.[regKey];
+        return num(unit?.[shiftKey]?.cashSale);
+    }
+
+    /** Cash reconciliation totals for a day — books cash vs counted. */
+    function cashReconciliationSummary(day) {
+        const recon = normalizeCashReconciliation(day?.cashReconciliation);
+        let expectedTotal = 0;
+        let countedTotal = 0;
+        let verifiedCount = 0;
+        let shiftCount = 0;
+        const rows = [];
+
+        ["register1", "register2"].forEach((regKey, regIdx) => {
+            ["shift1", "shift2"].forEach((sh, shIdx) => {
+                const expected = expectedRegisterCash(day, regKey, sh);
+                const entry = recon[regKey][sh];
+                const counted = num(entry.countedCash);
+                expectedTotal += expected;
+                countedTotal += counted;
+                shiftCount += 1;
+                if (entry.verified) verifiedCount += 1;
+                rows.push({
+                    regKey,
+                    regLabel: `Register ${regIdx + 1}`,
+                    shiftKey: sh,
+                    shiftLabel: `Shift ${shIdx + 1}`,
+                    expected,
+                    counted,
+                    variance: counted - expected,
+                    verified: entry.verified === true,
+                    note: entry.note || "",
+                });
+            });
+        });
+
+        const variance = countedTotal - expectedTotal;
+        const cashExpensesTotal = dayCashExpensesTotal(day);
+        const expectedDeposit = countedTotal - cashExpensesTotal;
+        const deposit = recon.dayDeposit;
+        const depositAmount = deposit == null ? null : num(deposit);
+        const totalsMatch = Math.abs(variance) < 0.005;
+        const depositMatch =
+            depositAmount == null || Math.abs(depositAmount - expectedDeposit) < 0.005;
+        const depositVariance = depositAmount == null ? 0 : depositAmount - expectedDeposit;
+        const allVerified = verifiedCount === shiftCount && shiftCount > 0;
+        const matched = totalsMatch && depositMatch && allVerified;
+
+        return {
+            rows,
+            expectedTotal,
+            countedTotal,
+            variance,
+            cashExpensesTotal,
+            expectedDeposit,
+            deposit: depositAmount,
+            depositVariance,
+            depositMatch,
+            verifiedCount,
+            shiftCount,
+            allVerified,
+            matched,
+        };
+    }
+
     window.OplixBooksModel = {
         UTILITY_KEYS,
         UTILITY_VENDOR_GROUPS,
@@ -705,7 +928,8 @@
         defaultRegisterUnit,
         registerBlockTotal,
         emptyGamingShift,
-        emptyPulltab,
+        emptyPulltabEntry,
+        normalizePulltabs,
         defaultFuelSale,
         fuelDayTotal,
         normalizeDayDoc,
@@ -740,5 +964,12 @@
         buildExpenseDetail,
         aggregateMonth,
         compareAggregates,
+        dayCashExpensesTotal,
+        defaultCashReconciliation,
+        normalizeCashReconciliation,
+        expectedRegisterCash,
+        cashReconciliationSummary,
+        cashReconciliationDayStatus,
+        aggregateCashReconciliation,
     };
 })();
