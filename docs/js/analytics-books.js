@@ -155,6 +155,7 @@
         const parts = dayId.split("-").map(Number);
         if (parts.length < 3) return dayId;
         return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString("en-US", {
+            weekday: "short",
             month: "short",
             day: "numeric",
         });
@@ -382,7 +383,7 @@
                     : "";
                 return `
                     <tr class="an-daily-row${emptyCls}">
-                        <td>${escapeHtml(dayLabel)}</td>
+                        <td class="an-daily-day-col">${escapeHtml(dayLabel)}</td>
                         ${extraGas}
                         <td class="home-cc-num">${cell(hasGas ? row.totalRevenue : row.sales)}</td>
                         <td class="home-cc-num">${cell(row.cashExpense)}</td>
@@ -417,7 +418,7 @@
                     <table class="home-cc-table an-daily-table">
                         <thead>
                             <tr>
-                                <th>Day</th>
+                                <th class="an-daily-day-col">Day / date</th>
                                 ${gasHead}
                                 <th class="home-cc-num">${escapeHtml(salesHeader)}</th>
                                 <th class="home-cc-num">Cash exp.</th>

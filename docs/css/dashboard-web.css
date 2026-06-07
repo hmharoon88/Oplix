@@ -267,6 +267,10 @@
     font-variant-numeric: tabular-nums;
 }
 
+.home-cc-table th.home-cc-num {
+    text-align: right;
+}
+
 .home-cc-table--mtd th.home-cc-num,
 .home-cc-table--mtd td.home-cc-num {
     text-align: right;
@@ -4792,6 +4796,19 @@
     top: 0;
     z-index: 1;
     background: var(--dash-surface, #f8fafc);
+    vertical-align: bottom;
+}
+
+.an-daily-day-col {
+    min-width: 6.5rem;
+    white-space: nowrap;
+}
+
+.an-daily-table th.home-cc-num,
+.an-daily-table td.home-cc-num {
+    text-align: right;
+    padding-left: 8px;
+    padding-right: 16px;
 }
 
 .an-daily-row--empty td {
