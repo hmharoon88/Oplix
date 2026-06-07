@@ -984,6 +984,42 @@
     padding-top: 10px;
 }
 
+.books-cash-recon-block {
+    margin: 20px 0 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--dash-border);
+}
+
+.books-cash-recon-block:last-of-type {
+    border-bottom: none;
+}
+
+.books-subtitle--sm {
+    font-size: 0.9rem;
+    margin-top: 12px;
+}
+
+.bs-cash-recon-category {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--dash-border);
+}
+
+.bs-cash-recon-category:first-of-type {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+.bs-cash-recon-category-title {
+    margin: 0 0 6px;
+    font-size: 1rem;
+}
+
+.bs-cash-recon-category-sub {
+    margin: 0 0 10px;
+}
+
 .books-save {
     margin-top: 16px;
 }
@@ -4739,5 +4775,47 @@
 
 .lottery-back {
     margin-bottom: 8px;
+}
+
+/* Summary — daily sales & expenses table */
+.an-daily-table-wrap {
+    max-height: 420px;
+    overflow: auto;
+}
+
+.an-daily-table {
+    font-size: 0.8125rem;
+}
+
+.an-daily-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--dash-surface, #f8fafc);
+}
+
+.an-daily-row--empty td {
+    color: var(--dash-muted, #94a3b8);
+}
+
+.an-daily-net.pos {
+    color: #16a34a;
+}
+
+.an-daily-net.neg {
+    color: #dc2626;
+}
+
+.an-daily-month-totals {
+    margin-bottom: 12px;
+}
+
+.an-daily-footnote {
+    margin-top: 10px;
+}
+
+.an-daily-table tfoot .an-total-row td {
+    background: rgba(37, 99, 235, 0.06);
+    border-top: 2px solid var(--dash-border);
 }
 

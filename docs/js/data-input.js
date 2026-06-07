@@ -367,6 +367,13 @@
 
         syncLinesFromDom("pulltabs", ["ticketNumber", "cash", "winner", "overShort"]);
         syncLinesFromDom("windStations", ["station", "cash"]);
+        ["shift1", "shift2"].forEach((sh) => {
+            const cash = root.querySelector(`[name="lot_shift${sh === "shift1" ? "1" : "2"}_cash"]`);
+            const os = root.querySelector(`[name="lot_shift${sh === "shift1" ? "1" : "2"}_overShort"]`);
+            if (!state.day.lottery) state.day.lottery = { shift1: M().emptyGamingShift(), shift2: M().emptyGamingShift() };
+            if (cash) state.day.lottery[sh].cash = M().num(cash.value);
+            if (os) state.day.lottery[sh].overShort = M().num(os.value);
+        });
         if (hasGasStation()) {
             const merch = root.querySelector('[name="merch_sale"]');
             if (merch) state.day.merchSale = M().num(merch.value);
@@ -413,6 +420,60 @@
             state.day.cashReconciliation.dayDeposit = v === "" ? null : M().num(v);
         }
         if (dayNote) state.day.cashReconciliation.note = dayNote.value;
+
+        ["shift1", "shift2"].forEach((sh) => {
+            const counted = root.querySelector(`[name="cr_lottery_${sh}_counted"]`);
+            const verified = root.querySelector(`[name="cr_lottery_${sh}_verified"]`);
+            const note = root.querySelector(`[name="cr_lottery_${sh}_note"]`);
+            if (!state.day.cashReconciliation.lottery) {
+                state.day.cashReconciliation.lottery = M().defaultCashReconciliation().lottery;
+            }
+            if (counted) state.day.cashReconciliation.lottery[sh].countedCash = M().num(counted.value);
+            if (verified) state.day.cashReconciliation.lottery[sh].verified = verified.checked;
+            if (note) state.day.cashReconciliation.lottery[sh].note = note.value;
+        });
+
+        (state.day.pulltabs || []).forEach((pt) => {
+            const counted = root.querySelector(`[name="cr_pt_${pt.id}_counted"]`);
+            const verified = root.querySelector(`[name="cr_pt_${pt.id}_verified"]`);
+            const note = root.querySelector(`[name="cr_pt_${pt.id}_note"]`);
+            if (!state.day.cashReconciliation.pulltabs) state.day.cashReconciliation.pulltabs = {};
+            if (!state.day.cashReconciliation.pulltabs[pt.id]) {
+                state.day.cashReconciliation.pulltabs[pt.id] = { countedCash: 0, verified: false, note: "" };
+            }
+            if (counted) state.day.cashReconciliation.pulltabs[pt.id].countedCash = M().num(counted.value);
+            if (verified) state.day.cashReconciliation.pulltabs[pt.id].verified = verified.checked;
+            if (note) state.day.cashReconciliation.pulltabs[pt.id].note = note.value;
+        });
+
+        (state.day.windStations || []).forEach((ws) => {
+            const counted = root.querySelector(`[name="cr_ws_${ws.id}_counted"]`);
+            const verified = root.querySelector(`[name="cr_ws_${ws.id}_verified"]`);
+            const note = root.querySelector(`[name="cr_ws_${ws.id}_note"]`);
+            if (!state.day.cashReconciliation.windStations) state.day.cashReconciliation.windStations = {};
+            if (!state.day.cashReconciliation.windStations[ws.id]) {
+                state.day.cashReconciliation.windStations[ws.id] = { countedCash: 0, verified: false, note: "" };
+            }
+            if (counted) state.day.cashReconciliation.windStations[ws.id].countedCash = M().num(counted.value);
+            if (verified) state.day.cashReconciliation.windStations[ws.id].verified = verified.checked;
+            if (note) state.day.cashReconciliation.windStations[ws.id].note = note.value;
+        });
+
+        const lotteryDeposit = root.querySelector('[name="cr_lottery_deposit"]');
+        const pulltabDeposit = root.querySelector('[name="cr_pulltab_deposit"]');
+        const windDeposit = root.querySelector('[name="cr_wind_deposit"]');
+        if (lotteryDeposit) {
+            const v = String(lotteryDeposit.value ?? "").trim();
+            state.day.cashReconciliation.lotteryDeposit = v === "" ? null : M().num(v);
+        }
+        if (pulltabDeposit) {
+            const v = String(pulltabDeposit.value ?? "").trim();
+            state.day.cashReconciliation.pulltabDeposit = v === "" ? null : M().num(v);
+        }
+        if (windDeposit) {
+            const v = String(windDeposit.value ?? "").trim();
+            state.day.cashReconciliation.windDeposit = v === "" ? null : M().num(v);
+        }
     }
 
     function syncLinesFromDom(listKey, fields, isMonth) {
@@ -599,6 +660,29 @@
                         : ""
                 }
             </div>`;
+    }
+
+    function renderLotteryDaily() {
+        const lot = state.day.lottery || { shift1: M().emptyGamingShift(), shift2: M().emptyGamingShift() };
+        const total = M().lotteryDayTotal(state.day);
+        const shiftFields = (prefix, data) => `
+            <fieldset class="books-fieldset">
+                <legend>${escapeHtml(prefix.replace("lot_", "").replace("_", " "))}</legend>
+                <div class="books-grid-2">
+                    <label class="books-label">Cash
+                        <input ${amountInputAttrs(`${prefix}_cash`, data.cash)}>
+                    </label>
+                    <label class="books-label">O/S
+                        <input ${amountInputAttrs(`${prefix}_overShort`, data.overShort)}>
+                    </label>
+                </div>
+            </fieldset>`;
+        return `
+            <h3 class="books-subtitle">Lottery</h3>
+            <p class="books-hint">Lottery cash collected per shift. Reconcile received amounts on <strong>Cash reconciliation</strong>.</p>
+            ${shiftFields("lot_shift1", lot.shift1 || M().emptyGamingShift())}
+            ${shiftFields("lot_shift2", lot.shift2 || M().emptyGamingShift())}
+            <p class="books-total-line">Lottery total: ${money(total.cash)} cash · O/S ${money(total.overShort)}</p>`;
     }
 
     function renderPulltabs() {
@@ -801,6 +885,8 @@
 
                     ${renderWindStations()}
 
+                    ${renderLotteryDaily()}
+
                     <h3 class="books-subtitle">Cash expense</h3>
                     ${renderLineList("cashExpenses", [
                         { name: "description", label: "Description" },
@@ -837,6 +923,8 @@
             ${renderPulltabs()}
 
             ${renderWindStations()}
+
+            ${renderLotteryDaily()}
 
             <h3 class="books-subtitle">Cash expense</h3>
             ${renderLineList("cashExpenses", [
@@ -891,30 +979,10 @@
             </div>`;
     }
 
-    function renderCashReconciliation() {
-        const summary = M().cashReconciliationSummary(state.day);
-        const summaryCls = summary.matched
-            ? "books-cash-recon-summary books-cash-recon-summary--matched"
-            : Math.abs(summary.variance) < 0.005 &&
-                summary.countedTotal > 0 &&
-                !summary.allVerified &&
-                (summary.deposit == null || summary.depositMatch)
-              ? "books-cash-recon-summary books-cash-recon-summary--pending"
-              : "books-cash-recon-summary books-cash-recon-summary--variance";
-        const matchLabel = summary.matched
-            ? "Day cash reconciled — received matches and deposit is on target"
-            : summary.countedTotal === 0 && summary.expectedTotal === 0
-              ? "Enter received amounts after verification"
-              : summary.deposit != null && !summary.depositMatch
-                ? `Deposit variance ${money(summary.depositVariance)} — expected ${money(summary.expectedDeposit)} after cash expenses`
-                : !summary.allVerified && Math.abs(summary.variance) < 0.005
-                  ? "Received totals match — mark each shift verified to complete"
-                  : Math.abs(summary.variance) >= 0.005
-                    ? `Variance ${money(summary.variance)} — check received amounts by shift`
-                    : "Enter received / deposited amount for the day";
-
-        const rows = summary.rows
+    function renderReconTableRows(rows, col1, col2) {
+        return rows
             .map((row) => {
+                const prefix = row.namePrefix;
                 const varCls =
                     Math.abs(row.variance) < 0.005
                         ? "books-cash-recon-var--ok"
@@ -923,27 +991,118 @@
                           : "books-cash-recon-var--bad";
                 return `
                     <tr>
-                        <td>${escapeHtml(row.regLabel)}</td>
-                        <td>${escapeHtml(row.shiftLabel)}</td>
+                        <td>${escapeHtml(row[col1] || row.rowLabel)}</td>
+                        <td>${escapeHtml(row[col2] || row.shiftLabel)}</td>
                         <td class="home-cc-num">
-                            <input ${amountInputAttrs(`cr_${row.regKey}_${row.shiftKey}_counted`, row.counted)} aria-label="Received">
+                            <input ${amountInputAttrs(`${prefix}_counted`, row.counted)} aria-label="Received">
                         </td>
                         <td class="home-cc-num ${varCls}">${money(row.variance)}</td>
                         <td class="books-cash-recon-verified">
                             <label class="books-check-label">
-                                <input type="checkbox" name="cr_${row.regKey}_${row.shiftKey}_verified"${row.verified ? " checked" : ""}>
+                                <input type="checkbox" name="${prefix}_verified"${row.verified ? " checked" : ""}>
                                 Verified
                             </label>
                         </td>
                         <td>
-                            <input type="text" class="books-input" name="cr_${row.regKey}_${row.shiftKey}_note" value="${escapeHtml(row.note)}" placeholder="Note">
+                            <input type="text" class="books-input" name="${prefix}_note" value="${escapeHtml(row.note)}" placeholder="Note">
                         </td>
                     </tr>`;
             })
             .join("");
+    }
 
-        const depositVal =
-            summary.deposit == null ? "" : M().formatAmountForInput(summary.deposit);
+    function renderReconSection(title, hint, section, depositField, depositLabel, extraHtml) {
+        if (!section.applicable) return "";
+        const rows = section.rows || [];
+        const summaryCls = section.matched
+            ? "books-cash-recon-summary books-cash-recon-summary--matched"
+            : Math.abs(section.variance) < 0.005 &&
+                section.countedTotal > 0 &&
+                !section.allVerified &&
+                (section.deposit == null || section.depositMatch)
+              ? "books-cash-recon-summary books-cash-recon-summary--pending"
+              : "books-cash-recon-summary books-cash-recon-summary--variance";
+        const depositVal = section.deposit == null ? "" : M().formatAmountForInput(section.deposit);
+        const depositVarCls =
+            section.deposit == null
+                ? ""
+                : section.depositMatch
+                  ? "books-cash-recon-var--ok"
+                  : "books-cash-recon-var--bad";
+
+        return `
+            <section class="books-cash-recon-block">
+                <h3 class="books-subtitle">${escapeHtml(title)}</h3>
+                ${hint ? `<p class="books-hint">${hint}</p>` : ""}
+                <div class="${summaryCls}">
+                    <div class="books-cash-recon-totals">
+                        <span><em>Received</em> <strong>${money(section.countedTotal)}</strong></span>
+                        ${
+                            section.cashExpensesTotal > 0
+                                ? `<span><em>Cash expenses</em> <strong>${money(section.cashExpensesTotal)}</strong></span>`
+                                : ""
+                        }
+                        <span><em>Expected</em> <strong>${money(section.expectedDeposit)}</strong></span>
+                        ${
+                            section.deposit != null
+                                ? `<span><em>Received / deposited</em> <strong>${money(section.deposit)}</strong></span>
+                                   <span><em>Variance</em> <strong class="${section.depositMatch ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(section.depositVariance)}</strong></span>`
+                                : `<span><em>Shift variance</em> <strong>${money(section.variance)}</strong></span>`
+                        }
+                        <span><em>Verified</em> <strong>${section.verifiedCount} / ${section.shiftCount}</strong></span>
+                    </div>
+                </div>
+                ${
+                    rows.length
+                        ? `<div class="home-card home-cc-table-wrap">
+                    <table class="home-cc-table books-cash-recon-table">
+                        <thead>
+                            <tr>
+                                <th>${escapeHtml(title.includes("Register") ? "Register" : title.split(" ")[0])}</th>
+                                <th>${rows[0]?.kind === "pulltab" ? "Ticket" : rows[0]?.kind === "wind" ? "Type" : "Shift"}</th>
+                                <th class="home-cc-num">Received</th>
+                                <th class="home-cc-num">Variance</th>
+                                <th>Status</th>
+                                <th>Note</th>
+                            </tr>
+                        </thead>
+                        <tbody>${renderReconTableRows(rows)}</tbody>
+                        <tfoot>
+                            <tr class="books-cash-recon-total-row">
+                                <td colspan="2"><strong>Day total</strong></td>
+                                <td class="home-cc-num"><strong>${money(section.countedTotal)}</strong></td>
+                                <td class="home-cc-num"><strong>${money(section.variance)}</strong></td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>`
+                        : `<p class="books-hint">Enter ${escapeHtml(title.toLowerCase())} amounts on the <strong>Daily sheet</strong> first.</p>`
+                }
+                ${extraHtml || ""}
+                <label class="books-label">${escapeHtml(depositLabel)}
+                    <input ${amountInputAttrs(depositField, depositVal)}>
+                </label>
+                ${
+                    section.deposit != null
+                        ? `<p class="books-total-line books-cash-recon-deposit-check ${depositVarCls}">Variance: ${money(section.depositVariance)}${section.depositMatch ? " — matches expected" : ""}</p>`
+                        : ""
+                }
+            </section>`;
+    }
+
+    function renderCashReconciliation() {
+        const summary = M().cashReconciliationSummary(state.day);
+        const reg = summary.register;
+        const sections = [summary.register, summary.lottery, summary.pulltab, summary.wind].filter(
+            (s) => s.applicable
+        );
+        const matchLabel =
+            sections.length === 0
+                ? "No cash to reconcile — enter shift or machine data on the Daily sheet first"
+                : summary.matched
+                  ? "All cash reconciled for this day"
+                  : `Complete ${sections.length} section${sections.length === 1 ? "" : "s"} below`;
 
         const cashExpenseLines = (state.day.cashExpenses || []).filter(
             (row) => M().num(row.amount) !== 0 || (row.description && String(row.description).trim())
@@ -959,13 +1118,13 @@
                         )
                         .join("")}
                    </ul>`;
-
-        const depositVarCls =
-            summary.deposit == null
-                ? ""
-                : summary.depositMatch
-                  ? "books-cash-recon-var--ok"
-                  : "books-cash-recon-var--bad";
+        const registerExtra =
+            reg.cashExpensesTotal > 0
+                ? `<div class="books-cash-recon-expenses">
+                    <h4 class="books-subtitle books-subtitle--sm">Register cash expenses (from Daily sheet)</h4>
+                    ${cashExpenseList}
+                   </div>`
+                : "";
 
         return `
             <div class="books-panel data-input-form">
@@ -973,68 +1132,51 @@
                     <select id="di-day" class="books-select">${dayOptions()}</select>
                 </label>
 
-                <div class="${summaryCls}">
+                <div class="books-cash-recon-summary${summary.matched ? " books-cash-recon-summary--matched" : ""}">
                     <p class="books-cash-recon-summary-title">${escapeHtml(matchLabel)}</p>
-                    <div class="books-cash-recon-totals">
-                        <span><em>Received</em> <strong>${money(summary.countedTotal)}</strong></span>
-                        <span><em>Cash expenses</em> <strong>${money(summary.cashExpensesTotal)}</strong></span>
-                        <span><em>Expected</em> <strong>${money(summary.expectedDeposit)}</strong></span>
-                        ${
-                            summary.deposit != null
-                                ? `<span><em>Received / deposited</em> <strong>${money(summary.deposit)}</strong></span>
-                                   <span><em>Variance</em> <strong class="${summary.depositMatch ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(summary.depositVariance)}</strong></span>`
-                                : `<span><em>Shift variance</em> <strong>${money(summary.variance)}</strong></span>`
-                        }
-                        <span><em>Verified</em> <strong>${summary.verifiedCount} / ${summary.shiftCount}</strong></span>
-                    </div>
                 </div>
 
-                <p class="books-hint">After verifying each drawer, enter the <strong>received</strong> amount per shift. Register cash expenses (Daily sheet) are deducted automatically — enter the <strong>received / deposited</strong> bank amount below to check variance.</p>
-
-                <div class="home-card home-cc-table-wrap">
-                    <table class="home-cc-table books-cash-recon-table">
-                        <thead>
-                            <tr>
-                                <th>Register</th>
-                                <th>Shift</th>
-                                <th class="home-cc-num">Received</th>
-                                <th class="home-cc-num">Variance</th>
-                                <th>Status</th>
-                                <th>Note</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                        <tfoot>
-                            <tr class="books-cash-recon-total-row">
-                                <td colspan="2"><strong>Day total</strong></td>
-                                <td class="home-cc-num"><strong>${money(summary.countedTotal)}</strong></td>
-                                <td class="home-cc-num"><strong>${money(summary.variance)}</strong></td>
-                                <td colspan="2"></td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
+                <p class="books-hint">Only shifts and machines with data on the <strong>Daily sheet</strong> appear here. Enter <strong>received</strong> amounts, verify each row, then the <strong>received / deposited</strong> total for that section.</p>
 
                 ${
-                    summary.cashExpensesTotal > 0
-                        ? `<div class="books-cash-recon-expenses">
-                            <h3 class="books-subtitle">Register cash expenses (from Daily sheet)</h3>
-                            ${cashExpenseList}
-                            <p class="books-hint">Edit on the <strong>Daily sheet</strong> tab — totals refresh here when you reload or save.</p>
-                           </div>`
+                    sections.length === 0
+                        ? `<p class="data-list-empty">Nothing to reconcile for this day yet.</p>`
                         : ""
                 }
 
-                <h3 class="books-subtitle">Received / deposited</h3>
-                <p class="books-hint">Actual amount received or deposited for this day. Variance is calculated against <strong>expected</strong> (register cash minus cash expenses from Daily sheet).</p>
-                <label class="books-label">Received / deposited ($)
-                    <input ${amountInputAttrs("cr_day_deposit", depositVal)}>
-                </label>
-                ${
-                    summary.deposit != null
-                        ? `<p class="books-total-line books-cash-recon-deposit-check ${depositVarCls}">Variance: ${money(summary.depositVariance)}${summary.depositMatch ? " — matches expected" : ""}</p>`
-                        : ""
-                }
+                ${renderReconSection(
+                    "Register cash",
+                    "Register cash minus cash expenses (Daily sheet) = expected deposit.",
+                    reg,
+                    "cr_day_deposit",
+                    "Register received / deposited ($)",
+                    registerExtra
+                )}
+
+                ${renderReconSection(
+                    "Lottery cash",
+                    "Expected from lottery cash per shift on the Daily sheet.",
+                    summary.lottery,
+                    "cr_lottery_deposit",
+                    "Lottery received / deposited ($)"
+                )}
+
+                ${renderReconSection(
+                    "Pulltab cash",
+                    "Expected from pulltab machine cash on the Daily sheet (one row per machine).",
+                    summary.pulltab,
+                    "cr_pulltab_deposit",
+                    "Pulltab received / deposited ($)"
+                )}
+
+                ${renderReconSection(
+                    "Wind station cash",
+                    "Expected from wind station cash on the Daily sheet.",
+                    summary.wind,
+                    "cr_wind_deposit",
+                    "Wind station received / deposited ($)"
+                )}
+
                 <label class="books-label">Day notes
                     <input type="text" class="books-input" name="cr_day_note" value="${escapeHtml(state.day.cashReconciliation?.note || "")}" placeholder="Optional">
                 </label>

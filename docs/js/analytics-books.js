@@ -346,28 +346,121 @@
         return renderKpis(agg, title, options);
     }
 
-    function renderCashReconciliationSection(agg) {
-        const cr = agg?.cashReconciliation;
-        const rows = cr?.dailyRows || [];
+    function renderDailySalesExpenseSection(pack) {
+        const hasGas = !!pack?.aggregate?.hasGasStation;
+        const { rows, totals } = M().dailySalesExpenseRows(pack.monthId, pack.daysById, {
+            hasGasStation: hasGas,
+        });
 
-        if (!rows.length) {
+        if (!totals.daysWithData) {
             return `
-                <section class="bs-panel bs-panel--cash-recon">
+                <section class="bs-panel bs-panel--daily-sales">
                     <div class="bs-panel-head">
                         <div class="bs-panel-head-text">
-                            <h3 class="bs-panel-title">Cash reconciliation</h3>
-                            <p class="bs-panel-sub">Received and deposited amounts by day for this month.</p>
+                            <h3 class="bs-panel-title">Daily sales &amp; expenses</h3>
+                            <p class="bs-panel-sub">Day-by-day totals for ${escapeHtml(monthLabel(pack.monthId))}.</p>
                         </div>
                     </div>
-                    <p class="books-hint">No register cash this month yet. Enter data on <strong>Daily books → Daily sheet</strong>, then reconcile on <strong>Cash reconciliation</strong>.</p>
+                    <p class="books-hint">No daily entries yet. Enter sales and expenses on <strong>Daily books → Daily sheet</strong>.</p>
                 </section>`;
         }
 
+        const salesHeader = hasGas ? "Revenue" : "Sales";
+        const salesHint = hasGas
+            ? "Revenue = merch + pump credit + fuel + pulltab for each day."
+            : "Sales = register card + cash for each day.";
+
+        const tableRows = rows
+            .map((row) => {
+                const dayLabel = formatDayId(row.dayId);
+                const emptyCls = row.hasData ? "" : " an-daily-row--empty";
+                const cell = (v) => (row.hasData ? money(v) : "—");
+                const extraGas = hasGas
+                    ? `<td class="home-cc-num">${cell(row.merchSale)}</td>
+                       <td class="home-cc-num">${cell(row.fuelDollars)}</td>
+                       <td class="home-cc-num">${cell(row.creditCard)}</td>`
+                    : "";
+                return `
+                    <tr class="an-daily-row${emptyCls}">
+                        <td>${escapeHtml(dayLabel)}</td>
+                        ${extraGas}
+                        <td class="home-cc-num">${cell(hasGas ? row.totalRevenue : row.sales)}</td>
+                        <td class="home-cc-num">${cell(row.cashExpense)}</td>
+                        <td class="home-cc-num">${cell(row.checksAch)}</td>
+                        <td class="home-cc-num">${cell(row.otherExpense)}</td>
+                        <td class="home-cc-num">${cell(row.expenses)}</td>
+                        <td class="home-cc-num an-daily-net${row.net >= 0 ? " pos" : " neg"}">${cell(row.net)}</td>
+                    </tr>`;
+            })
+            .join("");
+
+        const gasHead = hasGas
+            ? `<th class="home-cc-num">Merch</th>
+               <th class="home-cc-num">Fuel ($)</th>
+               <th class="home-cc-num">Pump credit</th>`
+            : "";
+
+        return `
+            <section class="bs-panel bs-panel--daily-sales">
+                <div class="bs-panel-head">
+                    <div class="bs-panel-head-text">
+                        <h3 class="bs-panel-title">Daily sales &amp; expenses</h3>
+                        <p class="bs-panel-sub">${escapeHtml(monthLabel(pack.monthId))} · ${totals.daysWithData} of ${rows.length} days with entries. ${escapeHtml(salesHint)}</p>
+                    </div>
+                </div>
+                <div class="books-cash-recon-totals an-daily-month-totals">
+                    <span><em>${escapeHtml(salesHeader)}</em> <strong>${money(hasGas ? totals.totalRevenue : totals.sales)}</strong></span>
+                    <span><em>Expenses</em> <strong>${money(totals.expenses)}</strong></span>
+                    <span><em>Net</em> <strong class="${totals.net >= 0 ? "pos" : "neg"}">${money(totals.net)}</strong></span>
+                </div>
+                <div class="home-card home-cc-table-wrap an-daily-table-wrap">
+                    <table class="home-cc-table an-daily-table">
+                        <thead>
+                            <tr>
+                                <th>Day</th>
+                                ${gasHead}
+                                <th class="home-cc-num">${escapeHtml(salesHeader)}</th>
+                                <th class="home-cc-num">Cash exp.</th>
+                                <th class="home-cc-num">Checks</th>
+                                <th class="home-cc-num">Other</th>
+                                <th class="home-cc-num">Total exp.</th>
+                                <th class="home-cc-num">Net</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                        <tfoot>
+                            <tr class="an-total-row">
+                                <td><strong>Month (days entered)</strong></td>
+                                ${hasGas ? `<td class="home-cc-num">—</td><td class="home-cc-num">${money(totals.fuelDollars)}</td><td class="home-cc-num">—</td>` : ""}
+                                <td class="home-cc-num"><strong>${money(hasGas ? totals.totalRevenue : totals.sales)}</strong></td>
+                                <td class="home-cc-num"><strong>${money(totals.cashExpense)}</strong></td>
+                                <td class="home-cc-num"><strong>${money(totals.checksAch)}</strong></td>
+                                <td class="home-cc-num"><strong>${money(totals.otherExpense)}</strong></td>
+                                <td class="home-cc-num"><strong>${money(totals.expenses)}</strong></td>
+                                <td class="home-cc-num"><strong class="${totals.net >= 0 ? "pos" : "neg"}">${money(totals.net)}</strong></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <p class="books-hint an-daily-footnote">Daily expenses are from the Daily sheet only. Monthly utilities, payroll, sales tax, and accountant fees are included in the month totals above, not in this table.</p>
+            </section>`;
+    }
+
+    function renderCashReconciliationCategory(title, subtitle, category) {
+        const rows = category?.dailyRows || [];
+        if (!rows.length) {
+            return `
+                <div class="bs-cash-recon-category">
+                    <h4 class="bs-cash-recon-category-title">${escapeHtml(title)}</h4>
+                    <p class="books-hint">No ${escapeHtml(title.toLowerCase())} entries this month.</p>
+                </div>`;
+        }
+
         const summaryLine =
-            cr.daysWithBooksCash > 0
-                ? `<p class="books-cash-recon-month-summary"><strong>${cr.daysReconciled}</strong> of <strong>${cr.daysWithBooksCash}</strong> days with register cash fully reconciled${
-                      cr.daysNeedingAttention > 0
-                          ? ` · <span class="bs-cash-recon-attn">${cr.daysNeedingAttention} need attention</span>`
+            category.daysWithExpected > 0
+                ? `<p class="books-cash-recon-month-summary"><strong>${category.daysReconciled}</strong> of <strong>${category.daysWithExpected}</strong> days reconciled${
+                      category.daysNeedingAttention > 0
+                          ? ` · <span class="bs-cash-recon-attn">${category.daysNeedingAttention} need attention</span>`
                           : ""
                   }</p>`
                 : "";
@@ -382,7 +475,11 @@
                     <tr>
                         <td>${escapeHtml(formatDayId(row.dayId))}</td>
                         <td class="home-cc-num">${money(row.countedTotal)}</td>
-                        <td class="home-cc-num">${money(row.cashExpensesTotal)}</td>
+                        ${
+                            category.totalCashExpenses > 0
+                                ? `<td class="home-cc-num">${money(row.cashExpensesTotal || 0)}</td>`
+                                : ""
+                        }
                         <td class="home-cc-num">${money(row.expectedDeposit)}</td>
                         <td class="home-cc-num">${depositCell}</td>
                         <td class="home-cc-num">${varianceCell}</td>
@@ -391,21 +488,19 @@
             })
             .join("");
 
+        const showExpenses = category.totalCashExpenses > 0;
+
         return `
-            <section class="bs-panel bs-panel--cash-recon">
-                <div class="bs-panel-head">
-                    <div class="bs-panel-head-text">
-                        <h3 class="bs-panel-title">Cash reconciliation</h3>
-                        <p class="bs-panel-sub">Daily received and deposited amounts for this month. Edit in Daily books → Cash reconciliation.</p>
-                    </div>
-                </div>
+            <div class="bs-cash-recon-category">
+                <h4 class="bs-cash-recon-category-title">${escapeHtml(title)}</h4>
+                ${subtitle ? `<p class="books-hint bs-cash-recon-category-sub">${escapeHtml(subtitle)}</p>` : ""}
                 ${summaryLine}
                 <div class="books-cash-recon-totals bs-cash-recon-month-totals">
-                    <span><em>Received</em> <strong>${money(cr.totalCounted)}</strong></span>
-                    <span><em>Cash expenses</em> <strong>${money(cr.totalCashExpenses)}</strong></span>
-                    <span><em>Expected</em> <strong>${money(cr.totalExpectedDeposit)}</strong></span>
-                    <span><em>Received / deposited</em> <strong>${money(cr.totalDeposit)}</strong></span>
-                    <span><em>Variance</em> <strong>${money(cr.totalDepositVariance || cr.totalVariance)}</strong></span>
+                    <span><em>Received</em> <strong>${money(category.totalCounted)}</strong></span>
+                    ${showExpenses ? `<span><em>Cash expenses</em> <strong>${money(category.totalCashExpenses)}</strong></span>` : ""}
+                    <span><em>Expected</em> <strong>${money(category.totalExpectedDeposit)}</strong></span>
+                    <span><em>Received / deposited</em> <strong>${money(category.totalDeposit)}</strong></span>
+                    <span><em>Variance</em> <strong>${money(category.totalDepositVariance || category.totalVariance)}</strong></span>
                 </div>
                 <div class="home-card home-cc-table-wrap">
                     <table class="home-cc-table bs-cash-recon-month-table">
@@ -413,7 +508,7 @@
                             <tr>
                                 <th>Day</th>
                                 <th class="home-cc-num">Received</th>
-                                <th class="home-cc-num">Expenses</th>
+                                ${showExpenses ? `<th class="home-cc-num">Expenses</th>` : ""}
                                 <th class="home-cc-num">Expected</th>
                                 <th class="home-cc-num">Received / deposited</th>
                                 <th class="home-cc-num">Variance</th>
@@ -423,6 +518,58 @@
                         <tbody>${tableRows}</tbody>
                     </table>
                 </div>
+            </div>`;
+    }
+
+    function renderCashReconciliationSection(agg) {
+        const cr = agg?.cashReconciliation;
+        const categories = [
+            {
+                title: "Register cash",
+                subtitle: "Register cash minus cash expenses = expected deposit.",
+                data: cr?.register || cr,
+            },
+            {
+                title: "Lottery cash",
+                subtitle: "Lottery cash per shift from the Daily sheet.",
+                data: cr?.lottery,
+            },
+            {
+                title: "Pulltab cash",
+                subtitle: "Pulltab machine cash from the Daily sheet.",
+                data: cr?.pulltab,
+            },
+            {
+                title: "Wind station cash",
+                subtitle: "Wind station cash from the Daily sheet.",
+                data: cr?.wind,
+            },
+        ];
+
+        const hasAny = categories.some((c) => (c.data?.dailyRows || []).length > 0);
+
+        if (!hasAny) {
+            return `
+                <section class="bs-panel bs-panel--cash-recon">
+                    <div class="bs-panel-head">
+                        <div class="bs-panel-head-text">
+                            <h3 class="bs-panel-title">Cash reconciliation</h3>
+                            <p class="bs-panel-sub">Register, lottery, pulltab, and wind station cash by day.</p>
+                        </div>
+                    </div>
+                    <p class="books-hint">No cash entries this month yet. Enter amounts on <strong>Daily books → Daily sheet</strong>, then reconcile on <strong>Cash reconciliation</strong>.</p>
+                </section>`;
+        }
+
+        return `
+            <section class="bs-panel bs-panel--cash-recon">
+                <div class="bs-panel-head">
+                    <div class="bs-panel-head-text">
+                        <h3 class="bs-panel-title">Cash reconciliation</h3>
+                        <p class="bs-panel-sub">Daily received and deposited amounts by category. Edit in Daily books → Cash reconciliation.</p>
+                    </div>
+                </div>
+                ${categories.map((c) => renderCashReconciliationCategory(c.title, c.subtitle, c.data)).join("")}
             </section>`;
     }
 
@@ -485,6 +632,7 @@
             overviewHtml = `
             <div class="bs-report">
                 ${renderMainDashboard(primaryPack.aggregate, drillPack.title)}
+                ${renderDailySalesExpenseSection(primaryPack)}
                 ${renderCashReconciliationSection(primaryPack.aggregate)}
             </div>`;
         } catch (err) {

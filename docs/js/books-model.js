@@ -421,7 +421,7 @@
         d.cashExpenses = day.cashExpenses || [];
         d.checksAch = day.checksAch || [];
         d.otherExpenses = day.otherExpenses || [];
-        d.cashReconciliation = normalizeCashReconciliation(day.cashReconciliation);
+        d.cashReconciliation = normalizeCashReconciliation(day.cashReconciliation, d);
         delete d._dayId;
         return d;
     }
@@ -608,68 +608,113 @@
         return { label: "Variance", tone: "bad" };
     }
 
-    /** Month-level cash reconciliation rollup from daily books entries. */
-    function aggregateCashReconciliation(daysById) {
-        const dailyRows = [];
-        let daysWithBooksCash = 0;
-        let daysReconciled = 0;
-        let daysNeedingAttention = 0;
-        let totalExpected = 0;
-        let totalCounted = 0;
-        let totalVariance = 0;
-        let totalCashExpenses = 0;
-        let totalExpectedDeposit = 0;
-        let totalDeposit = 0;
-        let totalDepositVariance = 0;
+    /** One calendar day's sales and expenses from Daily books. */
+    function dailySalesExpenseRow(dayId, rawDay, hasGasStation) {
+        const empty = {
+            dayId,
+            sales: 0,
+            totalRevenue: 0,
+            expenses: 0,
+            net: 0,
+            cashExpense: 0,
+            checksAch: 0,
+            otherExpense: 0,
+            fuelDollars: 0,
+            fuelGallons: 0,
+            merchSale: 0,
+            creditCard: 0,
+            registerCard: 0,
+            registerCash: 0,
+            hasData: false,
+        };
+        if (!rawDay) return empty;
 
-        Object.entries(daysById || {})
-            .sort(([a], [b]) => a.localeCompare(b))
-            .forEach(([dayId, rawDay]) => {
-                const day = normalizeDayDoc(rawDay);
-                const summary = cashReconciliationSummary(day);
-                const hasBooksCash = summary.expectedTotal > 0;
-                const hasReconActivity =
-                    summary.countedTotal > 0 ||
-                    summary.deposit != null ||
-                    summary.verifiedCount > 0;
+        const day = normalizeDayDoc({ ...rawDay, _dayId: dayId });
+        const reg = registerDayTotal(day);
+        const fuel = fuelDayTotal(day);
+        const pull = pulltabDayTotal(day);
+        const dayMerch = num(day.merchSale);
+        const dayCredit = num(day.creditCard);
+        const dayCash = sumLines(day.cashExpenses, "amount");
+        const dayChecks = sumLines(day.checksAch, "amount");
+        const dayOther = sumLines(day.otherExpenses, "amount");
+        const expenses = dayCash + dayChecks + dayOther;
 
-                if (!hasBooksCash && !hasReconActivity) return;
+        let sales;
+        let totalRevenue;
+        if (hasGasStation) {
+            sales = dayMerch;
+            totalRevenue = dayMerch + dayCredit + fuel.dollars + pull.cash;
+        } else {
+            sales = reg.card + reg.cash;
+            totalRevenue = sales;
+        }
 
-                const status = cashReconciliationDayStatus(summary);
-                if (hasBooksCash) daysWithBooksCash += 1;
-                if (summary.matched) daysReconciled += 1;
-                else if (hasBooksCash || hasReconActivity) daysNeedingAttention += 1;
-
-                totalExpected += summary.expectedTotal;
-                totalCounted += summary.countedTotal;
-                totalVariance += summary.variance;
-                totalCashExpenses += summary.cashExpensesTotal;
-                totalExpectedDeposit += summary.expectedDeposit;
-                if (summary.deposit != null) {
-                    totalDeposit += summary.deposit;
-                    totalDepositVariance += summary.depositVariance;
-                }
-
-                dailyRows.push({
-                    dayId,
-                    ...summary,
-                    status,
-                });
-            });
+        const hasData =
+            totalRevenue !== 0 ||
+            expenses !== 0 ||
+            fuel.gallons !== 0 ||
+            reg.overShort !== 0;
 
         return {
-            dailyRows,
-            daysWithBooksCash,
-            daysReconciled,
-            daysNeedingAttention,
-            totalExpected,
-            totalCounted,
-            totalVariance,
-            totalCashExpenses,
-            totalExpectedDeposit,
-            totalDeposit,
-            totalDepositVariance,
+            dayId,
+            sales,
+            totalRevenue,
+            expenses,
+            net: totalRevenue - expenses,
+            cashExpense: dayCash,
+            checksAch: dayChecks,
+            otherExpense: dayOther,
+            fuelDollars: fuel.dollars,
+            fuelGallons: fuel.gallons,
+            merchSale: dayMerch,
+            creditCard: dayCredit,
+            registerCard: reg.card,
+            registerCash: reg.cash,
+            hasData,
         };
+    }
+
+    /** Every calendar day in a month with daily sales and expense totals. */
+    function dailySalesExpenseRows(monthId, daysById, options) {
+        const hasGasStation = !!(options && options.hasGasStation);
+        const count = daysInMonth(monthId);
+        const anchor = parseMonthId(monthId);
+        const rows = [];
+
+        for (let d = 1; d <= count; d++) {
+            const dayId = dayIdFromDate(new Date(anchor.getFullYear(), anchor.getMonth(), d));
+            rows.push(dailySalesExpenseRow(dayId, daysById?.[dayId], hasGasStation));
+        }
+
+        const totals = rows.reduce(
+            (acc, row) => {
+                if (!row.hasData) return acc;
+                acc.daysWithData += 1;
+                acc.sales += row.sales;
+                acc.totalRevenue += row.totalRevenue;
+                acc.expenses += row.expenses;
+                acc.net += row.net;
+                acc.cashExpense += row.cashExpense;
+                acc.checksAch += row.checksAch;
+                acc.otherExpense += row.otherExpense;
+                acc.fuelDollars += row.fuelDollars;
+                return acc;
+            },
+            {
+                daysWithData: 0,
+                sales: 0,
+                totalRevenue: 0,
+                expenses: 0,
+                net: 0,
+                cashExpense: 0,
+                checksAch: 0,
+                otherExpense: 0,
+                fuelDollars: 0,
+            }
+        );
+
+        return { rows, totals };
     }
 
     /** Aggregate one month (month doc + all days) for Books summary. */
@@ -863,6 +908,15 @@
         return { countedCash: 0, verified: false, note: "" };
     }
 
+    function normalizeReconEntry(raw) {
+        const src = raw || {};
+        return {
+            countedCash: num(src.countedCash),
+            verified: src.verified === true,
+            note: src.note || "",
+        };
+    }
+
     function defaultCashReconRegisterUnit() {
         return {
             shift1: emptyCashReconShift(),
@@ -874,25 +928,40 @@
         return {
             register1: defaultCashReconRegisterUnit(),
             register2: defaultCashReconRegisterUnit(),
+            lottery: defaultCashReconRegisterUnit(),
+            pulltabs: {},
+            windStations: {},
             dayDeposit: null,
+            lotteryDeposit: null,
+            pulltabDeposit: null,
+            windDeposit: null,
             note: "",
         };
     }
 
-    function normalizeCashReconciliation(raw) {
+    function normalizeCashReconciliation(raw, day) {
         const base = defaultCashReconciliation();
-        if (!raw) return base;
+        if (!raw) raw = {};
         ["register1", "register2"].forEach((regKey) => {
             ["shift1", "shift2"].forEach((sh) => {
-                const src = raw[regKey]?.[sh] || {};
-                base[regKey][sh] = {
-                    countedCash: num(src.countedCash),
-                    verified: src.verified === true,
-                    note: src.note || "",
-                };
+                base[regKey][sh] = normalizeReconEntry(raw[regKey]?.[sh]);
             });
         });
-        base.dayDeposit = raw.dayDeposit == null || raw.dayDeposit === "" ? null : num(raw.dayDeposit);
+        ["shift1", "shift2"].forEach((sh) => {
+            base.lottery[sh] = normalizeReconEntry(raw.lottery?.[sh]);
+        });
+        const pulltabs = day ? normalizePulltabs(day.pulltabs, day.pulltab) : [];
+        pulltabs.forEach((pt) => {
+            base.pulltabs[pt.id] = normalizeReconEntry(raw.pulltabs?.[pt.id]);
+        });
+        const windRows = day ? normalizeWindStations(day.windStations) : [];
+        windRows.forEach((ws) => {
+            base.windStations[ws.id] = normalizeReconEntry(raw.windStations?.[ws.id]);
+        });
+        const depositFields = ["dayDeposit", "lotteryDeposit", "pulltabDeposit", "windDeposit"];
+        depositFields.forEach((f) => {
+            base[f] = raw[f] == null || raw[f] === "" ? null : num(raw[f]);
+        });
         base.note = raw.note || "";
         return base;
     }
@@ -908,29 +977,111 @@
         return num(unit?.[shiftKey]?.cashSale);
     }
 
-    /** Cash reconciliation totals for a day — books cash vs received (books kept internal). */
-    function cashReconciliationSummary(day) {
-        const recon = normalizeCashReconciliation(day?.cashReconciliation);
+    function expectedLotteryCash(day, shiftKey) {
+        return num(day?.lottery?.[shiftKey]?.cash);
+    }
+
+    /** True when Daily sheet has register shift data worth reconciling. */
+    function registerShiftHasBooksData(day, regKey, shiftKey) {
+        const sh = day?.[regKey]?.[shiftKey] || {};
+        return num(sh.cashSale) !== 0 || num(sh.overShort) !== 0;
+    }
+
+    function lotteryShiftHasBooksData(day, shiftKey) {
+        const sh = day?.lottery?.[shiftKey] || {};
+        return num(sh.cash) !== 0 || num(sh.overShort) !== 0;
+    }
+
+    function pulltabRowHasBooksData(pt) {
+        return (
+            String(pt.ticketNumber || "").trim() !== "" ||
+            num(pt.cash) !== 0 ||
+            num(pt.winner) !== 0 ||
+            num(pt.overShort) !== 0
+        );
+    }
+
+    function windRowHasBooksData(ws) {
+        return num(ws.cash) !== 0;
+    }
+
+    /** Keep rows with Daily sheet data, or in-progress reconciliation entries. */
+    function filterReconRows(rows, hasBooksData) {
+        return (rows || []).filter((row) => {
+            const booksEntered = hasBooksData(row);
+            const hasReconActivity =
+                num(row.counted) !== 0 ||
+                row.verified ||
+                String(row.note || "").trim() !== "";
+            return booksEntered || hasReconActivity;
+        });
+    }
+
+    function summarizeReconSection(rows, depositAmount, expectedDeposit, cashExpensesTotal) {
         let expectedTotal = 0;
         let countedTotal = 0;
         let verifiedCount = 0;
-        let shiftCount = 0;
-        const rows = [];
+        const rowCount = rows.length;
 
+        rows.forEach((row) => {
+            expectedTotal += num(row.expected);
+            countedTotal += num(row.counted);
+            if (row.verified) verifiedCount += 1;
+        });
+
+        const variance = countedTotal - expectedTotal;
+        const totalsMatch = Math.abs(variance) < 0.005;
+        const deposit = depositAmount == null ? null : num(depositAmount);
+        const depositVariance = deposit == null ? 0 : deposit - expectedDeposit;
+        const depositMatch = deposit == null || Math.abs(depositVariance) < 0.005;
+        const allVerified = rowCount === 0 || verifiedCount === rowCount;
+        const applicable =
+            rowCount > 0 &&
+            (expectedTotal > 0 ||
+                countedTotal > 0 ||
+                deposit != null ||
+                verifiedCount > 0 ||
+                rows.some((r) => r.note));
+        const matched =
+            !applicable || (totalsMatch && depositMatch && allVerified);
+
+        return {
+            rows,
+            expectedTotal,
+            countedTotal,
+            variance,
+            cashExpensesTotal: cashExpensesTotal || 0,
+            expectedDeposit,
+            deposit,
+            depositVariance,
+            depositMatch,
+            verifiedCount,
+            shiftCount: rowCount,
+            allVerified,
+            totalsMatch,
+            applicable,
+            matched,
+        };
+    }
+
+    /** Cash reconciliation totals for a day — register, lottery, pulltab, and wind. */
+    function cashReconciliationSummary(day) {
+        const normalized = normalizeDayDoc(day);
+        const recon = normalized.cashReconciliation;
+
+        const registerRowsAll = [];
         ["register1", "register2"].forEach((regKey, regIdx) => {
             ["shift1", "shift2"].forEach((sh, shIdx) => {
-                const expected = expectedRegisterCash(day, regKey, sh);
+                const expected = expectedRegisterCash(normalized, regKey, sh);
                 const entry = recon[regKey][sh];
                 const counted = num(entry.countedCash);
-                expectedTotal += expected;
-                countedTotal += counted;
-                shiftCount += 1;
-                if (entry.verified) verifiedCount += 1;
-                rows.push({
+                registerRowsAll.push({
+                    kind: "register",
                     regKey,
-                    regLabel: `Register ${regIdx + 1}`,
                     shiftKey: sh,
+                    rowLabel: `Register ${regIdx + 1}`,
                     shiftLabel: `Shift ${shIdx + 1}`,
+                    namePrefix: `cr_${regKey}_${sh}`,
                     expected,
                     counted,
                     variance: counted - expected,
@@ -939,34 +1090,228 @@
                 });
             });
         });
+        const registerRows = filterReconRows(registerRowsAll, (row) =>
+            registerShiftHasBooksData(normalized, row.regKey, row.shiftKey)
+        );
 
-        const variance = countedTotal - expectedTotal;
-        const cashExpensesTotal = dayCashExpensesTotal(day);
-        /** What should be deposited — from daily sheet register cash minus register expenses. */
-        const expectedDeposit = expectedTotal - cashExpensesTotal;
-        const deposit = recon.dayDeposit;
-        const depositAmount = deposit == null ? null : num(deposit);
-        const totalsMatch = Math.abs(variance) < 0.005;
-        const depositVariance = depositAmount == null ? 0 : depositAmount - expectedDeposit;
-        const depositMatch =
-            depositAmount == null || Math.abs(depositVariance) < 0.005;
-        const allVerified = verifiedCount === shiftCount && shiftCount > 0;
-        const matched = totalsMatch && depositMatch && allVerified;
+        const lotteryRowsAll = [];
+        ["shift1", "shift2"].forEach((sh, shIdx) => {
+            const expected = expectedLotteryCash(normalized, sh);
+            const entry = recon.lottery[sh];
+            const counted = num(entry.countedCash);
+            lotteryRowsAll.push({
+                kind: "lottery",
+                shiftKey: sh,
+                rowLabel: "Lottery",
+                shiftLabel: `Shift ${shIdx + 1}`,
+                namePrefix: `cr_lottery_${sh}`,
+                expected,
+                counted,
+                variance: counted - expected,
+                verified: entry.verified === true,
+                note: entry.note || "",
+            });
+        });
+        const lotteryRows = filterReconRows(lotteryRowsAll, (row) =>
+            lotteryShiftHasBooksData(normalized, row.shiftKey)
+        );
+
+        const pulltabRowsAll = normalized.pulltabs.map((pt, idx) => {
+            const entry = recon.pulltabs[pt.id] || emptyCashReconShift();
+            const expected = num(pt.cash);
+            const counted = num(entry.countedCash);
+            const ticket = String(pt.ticketNumber || "").trim();
+            return {
+                kind: "pulltab",
+                rowId: pt.id,
+                rowLabel: `Machine ${idx + 1}`,
+                shiftLabel: ticket ? `#${ticket}` : "—",
+                namePrefix: `cr_pt_${pt.id}`,
+                expected,
+                counted,
+                variance: counted - expected,
+                verified: entry.verified === true,
+                note: entry.note || "",
+            };
+        });
+        const pulltabRows = filterReconRows(pulltabRowsAll, (row) => {
+            const pt = normalized.pulltabs.find((p) => p.id === row.rowId);
+            return pt ? pulltabRowHasBooksData(pt) : false;
+        });
+
+        const windRowsAll = normalized.windStations.map((ws, idx) => {
+            const entry = recon.windStations[ws.id] || emptyCashReconShift();
+            const expected = num(ws.cash);
+            const counted = num(entry.countedCash);
+            const station = String(ws.station || "").trim() || String(idx + 1);
+            return {
+                kind: "wind",
+                rowId: ws.id,
+                rowLabel: `Station ${station}`,
+                shiftLabel: "Cash",
+                namePrefix: `cr_ws_${ws.id}`,
+                expected,
+                counted,
+                variance: counted - expected,
+                verified: entry.verified === true,
+                note: entry.note || "",
+            };
+        });
+        const windRows = filterReconRows(windRowsAll, (row) => {
+            const ws = normalized.windStations.find((w) => w.id === row.rowId);
+            return ws ? windRowHasBooksData(ws) : false;
+        });
+
+        const cashExpensesTotal = dayCashExpensesTotal(normalized);
+        const registerCashExpected = registerRows.reduce((s, r) => s + r.expected, 0);
+        const registerExpectedDeposit =
+            registerRows.length > 0 ? registerCashExpected - cashExpensesTotal : 0;
+        const registerExpenses =
+            registerRows.length > 0 ? cashExpensesTotal : 0;
+
+        const register = summarizeReconSection(
+            registerRows,
+            registerRows.length > 0 ? recon.dayDeposit : null,
+            registerExpectedDeposit,
+            registerExpenses
+        );
+        const lotteryExpected = lotteryRows.reduce((s, r) => s + r.expected, 0);
+        const lottery = summarizeReconSection(
+            lotteryRows,
+            lotteryRows.length > 0 ? recon.lotteryDeposit : null,
+            lotteryExpected,
+            0
+        );
+        const pulltabExpected = pulltabRows.reduce((s, r) => s + r.expected, 0);
+        const pulltab = summarizeReconSection(
+            pulltabRows,
+            pulltabRows.length > 0 ? recon.pulltabDeposit : null,
+            pulltabExpected,
+            0
+        );
+        const windExpected = windRows.reduce((s, r) => s + r.expected, 0);
+        const wind = summarizeReconSection(
+            windRows,
+            windRows.length > 0 ? recon.windDeposit : null,
+            windExpected,
+            0
+        );
+
+        const applicableSections = [register, lottery, pulltab, wind].filter((s) => s.applicable);
+        const matched =
+            applicableSections.length === 0 || applicableSections.every((s) => s.matched);
 
         return {
-            rows,
-            expectedTotal,
-            countedTotal,
-            variance,
-            cashExpensesTotal,
-            expectedDeposit,
-            deposit: depositAmount,
-            depositVariance,
-            depositMatch,
-            verifiedCount,
-            shiftCount,
-            allVerified,
+            register,
+            lottery,
+            pulltab,
+            wind,
             matched,
+            // Legacy register aliases
+            rows: registerRows,
+            expectedTotal: register.expectedTotal,
+            countedTotal: register.countedTotal,
+            variance: register.variance,
+            cashExpensesTotal: register.cashExpensesTotal,
+            expectedDeposit: register.expectedDeposit,
+            deposit: register.deposit,
+            depositVariance: register.depositVariance,
+            depositMatch: register.depositMatch,
+            verifiedCount: register.verifiedCount,
+            shiftCount: register.shiftCount,
+            allVerified: register.allVerified,
+        };
+    }
+
+    function aggregateReconCategory(daysById, pickSection) {
+        const dailyRows = [];
+        let daysWithExpected = 0;
+        let daysReconciled = 0;
+        let daysNeedingAttention = 0;
+        let totalExpected = 0;
+        let totalCounted = 0;
+        let totalVariance = 0;
+        let totalCashExpenses = 0;
+        let totalExpectedDeposit = 0;
+        let totalDeposit = 0;
+        let totalDepositVariance = 0;
+
+        Object.entries(daysById || {})
+            .sort(([a], [b]) => a.localeCompare(b))
+            .forEach(([dayId, rawDay]) => {
+                const day = normalizeDayDoc({ ...rawDay, _dayId: dayId });
+                const section = pickSection(cashReconciliationSummary(day));
+                if (!section.applicable) return;
+
+                const hasExpected = section.expectedTotal > 0;
+                const hasActivity =
+                    section.countedTotal > 0 ||
+                    section.deposit != null ||
+                    section.verifiedCount > 0;
+
+                if (!hasExpected && !hasActivity) return;
+
+                const status = cashReconciliationDayStatus(section);
+                if (hasExpected) daysWithExpected += 1;
+                if (section.matched) daysReconciled += 1;
+                else daysNeedingAttention += 1;
+
+                totalExpected += section.expectedTotal;
+                totalCounted += section.countedTotal;
+                totalVariance += section.variance;
+                totalCashExpenses += section.cashExpensesTotal || 0;
+                totalExpectedDeposit += section.expectedDeposit;
+                if (section.deposit != null) {
+                    totalDeposit += section.deposit;
+                    totalDepositVariance += section.depositVariance;
+                }
+
+                dailyRows.push({
+                    dayId,
+                    ...section,
+                    status,
+                });
+            });
+
+        return {
+            dailyRows,
+            daysWithExpected,
+            daysReconciled,
+            daysNeedingAttention,
+            totalExpected,
+            totalCounted,
+            totalVariance,
+            totalCashExpenses,
+            totalExpectedDeposit,
+            totalDeposit,
+            totalDepositVariance,
+        };
+    }
+
+    /** Month-level cash reconciliation rollup from daily books entries. */
+    function aggregateCashReconciliation(daysById) {
+        const register = aggregateReconCategory(daysById, (s) => s.register);
+        const lottery = aggregateReconCategory(daysById, (s) => s.lottery);
+        const pulltab = aggregateReconCategory(daysById, (s) => s.pulltab);
+        const wind = aggregateReconCategory(daysById, (s) => s.wind);
+
+        return {
+            register,
+            lottery,
+            pulltab,
+            wind,
+            // Legacy register aliases
+            dailyRows: register.dailyRows,
+            daysWithBooksCash: register.daysWithExpected,
+            daysReconciled: register.daysReconciled,
+            daysNeedingAttention: register.daysNeedingAttention,
+            totalExpected: register.totalExpected,
+            totalCounted: register.totalCounted,
+            totalVariance: register.totalVariance,
+            totalCashExpenses: register.totalCashExpenses,
+            totalExpectedDeposit: register.totalExpectedDeposit,
+            totalDeposit: register.totalDeposit,
+            totalDepositVariance: register.totalDepositVariance,
         };
     }
 
@@ -1025,5 +1370,7 @@
         cashReconciliationSummary,
         cashReconciliationDayStatus,
         aggregateCashReconciliation,
+        dailySalesExpenseRow,
+        dailySalesExpenseRows,
     };
 })();
