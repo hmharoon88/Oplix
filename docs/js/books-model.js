@@ -956,6 +956,8 @@
         utilitiesTotalFrom,
         sumLines,
         registerDayTotal,
+        pulltabDayTotal,
+        lotteryDayTotal,
         daySalesForAggregate,
         cardCashBreakdownFromAggregate,
         gasSalesSlicesFromAggregate,

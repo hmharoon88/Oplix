@@ -431,19 +431,33 @@
 
     async function loadCurrent() {
         if (!state.locationId) return;
-        $("di-status").textContent = "Loading…";
-        const { month, daysById } = await Store().loadMonth(userId, state.locationId, state.monthId);
-        await Promise.all([loadUtilityProviders(), loadPayables()]);
-        state.month = month;
-        state.month.utilities = M().normalizeMonthUtilities(
-            state.month.utilities,
-            M().mergeUtilityKeys(state.utilityProviders, state.month.utilities)
-        );
-        state.daysById = daysById;
-        state.day = M().normalizeDayDoc(daysById[state.dayId]);
-        state.dirty = false;
-        $("di-status").textContent = "";
-        render();
+        const statusEl = $("di-status");
+        if (statusEl) statusEl.textContent = "Loading…";
+        try {
+            const { month, daysById } = await Store().loadMonth(
+                userId,
+                state.locationId,
+                state.monthId
+            );
+            await Promise.all([loadUtilityProviders(), loadPayables()]);
+            state.month = month;
+            state.month.utilities = M().normalizeMonthUtilities(
+                state.month.utilities,
+                M().mergeUtilityKeys(state.utilityProviders, state.month.utilities)
+            );
+            state.daysById = daysById;
+            state.day = M().normalizeDayDoc(daysById[state.dayId]);
+            state.dirty = false;
+            if (statusEl) statusEl.textContent = "";
+            render();
+        } catch (err) {
+            console.error("[Oplix] Daily books load failed:", err);
+            if (statusEl) statusEl.textContent = "";
+            const root = $("data-input-root");
+            if (root) {
+                root.innerHTML = `<p class="app-error">${escapeHtml(err.message || "Failed to load Daily books.")}</p>`;
+            }
+        }
     }
 
     async function saveMonth() {
@@ -1007,6 +1021,15 @@
         const root = $("data-input-root");
         if (!root) return;
 
+        try {
+            renderInner(root);
+        } catch (err) {
+            console.error("[Oplix] Daily books render failed:", err);
+            root.innerHTML = `<p class="app-error">${escapeHtml(err.message || "Could not load Daily books.")}</p>`;
+        }
+    }
+
+    function renderInner(root) {
         if (!locations.length) {
             root.innerHTML = '<p class="data-list-empty">Add a facility first (Facilities tab).</p>';
             return;
