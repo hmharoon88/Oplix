@@ -500,7 +500,11 @@ struct LocationDetailView: View {
         }
         .sheet(isPresented: $showingSalesExpenses) {
             print("🟡 SHEET - SalesExpensesScreen PRESENTED")
-            return SalesExpensesScreen(viewModel: viewModel)
+            return SalesExpensesScreen(
+                userId: viewModel.userId,
+                locationId: locationId,
+                hasGasStation: viewModel.location?.hasGasStation ?? false
+            )
         }
         .sheet(isPresented: $showingEditLocation) {
             EditLocationView(viewModel: viewModel)

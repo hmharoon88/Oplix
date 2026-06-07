@@ -495,7 +495,14 @@
             case "shifts":
                 return renderShiftsScreen(data);
             case "lottery":
-                return renderLotteryScreen(data);
+                return window.OplixLotteryUI
+                    ? OplixLotteryUI.renderEmbedded({
+                          userId,
+                          locationId: data.location.id,
+                          locationName: data.location.name,
+                          data,
+                      })
+                    : renderLotteryScreen(data);
             case "documents":
                 return window.OplixFacilityDocuments
                     ? OplixFacilityDocuments.renderSection({
@@ -868,6 +875,14 @@
                 locationId: currentDetail.location.id,
                 locationName: currentDetail.location.name,
                 locations: locations.length ? locations : [currentDetail.location],
+            });
+        }
+        if (sectionId === "lottery" && window.OplixLotteryUI) {
+            OplixLotteryUI.bindEmbedded(content, {
+                userId,
+                locationId: currentDetail.location.id,
+                locationName: currentDetail.location.name,
+                data: currentDetail,
             });
         }
         content.querySelectorAll("[data-fac-add-employee]").forEach((btn) => {

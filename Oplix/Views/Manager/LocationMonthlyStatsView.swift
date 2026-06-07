@@ -68,9 +68,14 @@ struct LocationMonthlyStatsView: View {
                             Image(systemName: "chart.bar.fill")
                                 .font(.system(size: 60))
                                 .foregroundColor(Theme.cloudBlue)
-                            Text("No data available")
+                            Text("No Daily books data yet")
                                 .font(.title2)
                                 .foregroundColor(.secondary)
+                            Text("Enter data on the web dashboard under Daily books.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
                         }
                         Spacer()
                     } else {
