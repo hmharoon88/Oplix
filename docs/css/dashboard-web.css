@@ -1022,6 +1022,11 @@
     grid-template-columns: 120px 100px 100px 80px 32px;
 }
 
+.books-lines[data-di-list="windStations"] .books-lines-head,
+.books-lines[data-di-list="windStations"] .books-lines-row {
+    grid-template-columns: 120px 100px 32px;
+}
+
 .books-lines[data-di-list="otherExpenses"] .books-lines-head,
 .books-lines[data-di-list="otherExpenses"] .books-lines-row,
 .books-lines[data-di-list="receivables"] .books-lines-head,

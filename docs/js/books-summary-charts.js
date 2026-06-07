@@ -419,6 +419,7 @@
             { label: "Register — cash", get: (a) => a.registerCash },
             { label: "Lottery", get: (a) => a.lotteryCash },
             { label: "Pulltab", get: (a) => a.pulltabCash },
+            { label: "Wind station", get: (a) => a.windStationCash },
             { label: "Credit card (pump)", get: (a) => a.creditCard },
             { label: "Fuel ($)", get: (a) => a.fuelDollars },
             { label: "Fuel (gal.)", get: (a) => a.fuelGallons, format: "number" },

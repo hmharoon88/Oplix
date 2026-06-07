@@ -356,10 +356,10 @@
                     <div class="bs-panel-head">
                         <div class="bs-panel-head-text">
                             <h3 class="bs-panel-title">Cash reconciliation</h3>
-                            <p class="bs-panel-sub">Register cash counted vs books, by day.</p>
+                            <p class="bs-panel-sub">Received and deposited amounts by day for this month.</p>
                         </div>
                     </div>
-                    <p class="books-hint">No register cash this month yet. Enter register cash on <strong>Daily books → Daily sheet</strong>, then reconcile on <strong>Daily books → Cash reconciliation</strong>.</p>
+                    <p class="books-hint">No register cash this month yet. Enter data on <strong>Daily books → Daily sheet</strong>, then reconcile on <strong>Cash reconciliation</strong>.</p>
                 </section>`;
         }
 
@@ -375,17 +375,17 @@
         const tableRows = rows
             .map((row) => {
                 const tone = row.status?.tone || "missing";
-                const depositCell =
-                    row.deposit == null ? "—" : money(row.deposit);
+                const depositCell = row.deposit == null ? "—" : money(row.deposit);
+                const varianceCell =
+                    row.deposit != null ? money(row.depositVariance) : money(row.variance);
                 return `
                     <tr>
                         <td>${escapeHtml(formatDayId(row.dayId))}</td>
-                        <td class="home-cc-num">${money(row.expectedTotal)}</td>
                         <td class="home-cc-num">${money(row.countedTotal)}</td>
-                        <td class="home-cc-num">${money(row.variance)}</td>
                         <td class="home-cc-num">${money(row.cashExpensesTotal)}</td>
                         <td class="home-cc-num">${money(row.expectedDeposit)}</td>
                         <td class="home-cc-num">${depositCell}</td>
+                        <td class="home-cc-num">${varianceCell}</td>
                         <td><span class="bs-cash-recon-badge bs-cash-recon-badge--${tone}">${escapeHtml(row.status?.label || "—")}</span></td>
                     </tr>`;
             })
@@ -396,28 +396,27 @@
                 <div class="bs-panel-head">
                     <div class="bs-panel-head-text">
                         <h3 class="bs-panel-title">Cash reconciliation</h3>
-                        <p class="bs-panel-sub">Daily register counts vs books for this month. Enter or edit in Daily books → Cash reconciliation.</p>
+                        <p class="bs-panel-sub">Daily received and deposited amounts for this month. Edit in Daily books → Cash reconciliation.</p>
                     </div>
                 </div>
                 ${summaryLine}
                 <div class="books-cash-recon-totals bs-cash-recon-month-totals">
-                    <span><em>Books cash</em> <strong>${money(cr.totalExpected)}</strong></span>
-                    <span><em>Counted</em> <strong>${money(cr.totalCounted)}</strong></span>
-                    <span><em>Variance</em> <strong>${money(cr.totalVariance)}</strong></span>
+                    <span><em>Received</em> <strong>${money(cr.totalCounted)}</strong></span>
                     <span><em>Cash expenses</em> <strong>${money(cr.totalCashExpenses)}</strong></span>
-                    <span><em>Expected deposit</em> <strong>${money(cr.totalExpectedDeposit)}</strong></span>
+                    <span><em>Expected</em> <strong>${money(cr.totalExpectedDeposit)}</strong></span>
+                    <span><em>Received / deposited</em> <strong>${money(cr.totalDeposit)}</strong></span>
+                    <span><em>Variance</em> <strong>${money(cr.totalDepositVariance || cr.totalVariance)}</strong></span>
                 </div>
                 <div class="home-card home-cc-table-wrap">
                     <table class="home-cc-table bs-cash-recon-month-table">
                         <thead>
                             <tr>
                                 <th>Day</th>
-                                <th class="home-cc-num">Books</th>
-                                <th class="home-cc-num">Counted</th>
-                                <th class="home-cc-num">Variance</th>
+                                <th class="home-cc-num">Received</th>
                                 <th class="home-cc-num">Expenses</th>
-                                <th class="home-cc-num">Exp. deposit</th>
-                                <th class="home-cc-num">Deposit</th>
+                                <th class="home-cc-num">Expected</th>
+                                <th class="home-cc-num">Received / deposited</th>
+                                <th class="home-cc-num">Variance</th>
                                 <th>Status</th>
                             </tr>
                         </thead>

@@ -66,6 +66,31 @@
         return [normalizePulltabEntry({}, "pt_0")];
     }
 
+    function emptyWindStationEntry() {
+        return { station: "", cash: 0 };
+    }
+
+    function normalizeWindStationEntry(raw, fallbackId, index) {
+        const row = raw || {};
+        const stationDefault =
+            index != null && index >= 0 ? String(index + 1) : "";
+        return {
+            id: row.id || fallbackId || `ws_${Date.now()}`,
+            station: String(row.station ?? stationDefault),
+            cash: num(row.cash),
+        };
+    }
+
+    /** Up to 3 wind stations per day — cash collected at each station. */
+    function normalizeWindStations(windStations) {
+        if (Array.isArray(windStations) && windStations.length > 0) {
+            return windStations
+                .slice(0, 3)
+                .map((row, i) => normalizeWindStationEntry(row, `ws_${i}`, i));
+        }
+        return [normalizeWindStationEntry({ station: "1" }, "ws_0", 0)];
+    }
+
     function defaultFuelSale() {
         return { gallons: 0, dollars: 0 };
     }
@@ -226,6 +251,7 @@
                 shift2: emptyGamingShift(),
             },
             pulltabs: [],
+            windStations: [],
             fuelSale: defaultFuelSale(),
             merchSale: 0,
             creditCard: 0,
@@ -352,6 +378,11 @@
         );
     }
 
+    function windStationDayTotal(day) {
+        const entries = normalizeWindStations(day?.windStations);
+        return entries.reduce((sum, row) => sum + num(row.cash), 0);
+    }
+
     function fuelDayTotal(day) {
         const f = day.fuelSale || defaultFuelSale();
         return {
@@ -383,6 +414,7 @@
         };
         d.pulltabs = normalizePulltabs(day.pulltabs, day.pulltab);
         delete d.pulltab;
+        d.windStations = normalizeWindStations(day.windStations);
         d.fuelSale = { ...defaultFuelSale(), ...(day.fuelSale || {}) };
         d.merchSale = num(day.merchSale);
         d.creditCard = num(day.creditCard);
@@ -432,6 +464,7 @@
             { label: "Fuel gallons", amount: num(agg.fuelGallons), format: "number" },
             { label: "Fuel sales ($)", amount: num(agg.fuelDollars) },
             { label: "Pulltab", amount: num(agg.pulltabCash) },
+            { label: "Wind station", amount: num(agg.windStationCash) },
             { label: "Lottery", amount: num(agg.lotteryCash) },
         ];
     }
@@ -443,6 +476,9 @@
         return [
             { label: "Register — card", amount: num(agg.registerCard) },
             { label: "Register — cash", amount: num(agg.registerCash) },
+            ...(num(agg.windStationCash) !== 0
+                ? [{ label: "Wind station", amount: num(agg.windStationCash) }]
+                : []),
         ];
     }
 
@@ -566,6 +602,9 @@
         if (summary.deposit != null && !summary.depositMatch) {
             return { label: "Deposit variance", tone: "bad" };
         }
+        if (Math.abs(summary.variance) >= 0.005) {
+            return { label: "Variance", tone: "bad" };
+        }
         return { label: "Variance", tone: "bad" };
     }
 
@@ -581,6 +620,7 @@
         let totalCashExpenses = 0;
         let totalExpectedDeposit = 0;
         let totalDeposit = 0;
+        let totalDepositVariance = 0;
 
         Object.entries(daysById || {})
             .sort(([a], [b]) => a.localeCompare(b))
@@ -605,7 +645,10 @@
                 totalVariance += summary.variance;
                 totalCashExpenses += summary.cashExpensesTotal;
                 totalExpectedDeposit += summary.expectedDeposit;
-                if (summary.deposit != null) totalDeposit += summary.deposit;
+                if (summary.deposit != null) {
+                    totalDeposit += summary.deposit;
+                    totalDepositVariance += summary.depositVariance;
+                }
 
                 dailyRows.push({
                     dayId,
@@ -625,6 +668,7 @@
             totalCashExpenses,
             totalExpectedDeposit,
             totalDeposit,
+            totalDepositVariance,
         };
     }
 
@@ -642,6 +686,7 @@
         let pulltabCash = 0;
         let pulltabWinner = 0;
         let pulltabOverShort = 0;
+        let windStationCash = 0;
         let cashExpense = 0;
         let checksAch = 0;
         let otherExpense = 0;
@@ -656,6 +701,7 @@
             const reg = registerDayTotal(day);
             const lot = lotteryDayTotal(day);
             const pull = pulltabDayTotal(day);
+            const wind = windStationDayTotal(day);
             const fuel = fuelDayTotal(day);
             const dayMerch = num(day.merchSale);
             const dayCredit = num(day.creditCard);
@@ -671,6 +717,7 @@
             pulltabCash += pull.cash;
             pulltabWinner += pull.winner;
             pulltabOverShort += pull.overShort;
+            windStationCash += wind;
             fuelGallons += fuel.gallons;
             fuelDollars += fuel.dollars;
             merchSale += dayMerch;
@@ -722,6 +769,7 @@
             pulltabCash,
             pulltabWinner,
             pulltabOverShort,
+            windStationCash,
             fuelGallons,
             fuelDollars,
             merchSale,
@@ -860,7 +908,7 @@
         return num(unit?.[shiftKey]?.cashSale);
     }
 
-    /** Cash reconciliation totals for a day — books cash vs counted. */
+    /** Cash reconciliation totals for a day — books cash vs received (books kept internal). */
     function cashReconciliationSummary(day) {
         const recon = normalizeCashReconciliation(day?.cashReconciliation);
         let expectedTotal = 0;
@@ -894,13 +942,14 @@
 
         const variance = countedTotal - expectedTotal;
         const cashExpensesTotal = dayCashExpensesTotal(day);
-        const expectedDeposit = countedTotal - cashExpensesTotal;
+        /** What should be deposited — from daily sheet register cash minus register expenses. */
+        const expectedDeposit = expectedTotal - cashExpensesTotal;
         const deposit = recon.dayDeposit;
         const depositAmount = deposit == null ? null : num(deposit);
         const totalsMatch = Math.abs(variance) < 0.005;
-        const depositMatch =
-            depositAmount == null || Math.abs(depositAmount - expectedDeposit) < 0.005;
         const depositVariance = depositAmount == null ? 0 : depositAmount - expectedDeposit;
+        const depositMatch =
+            depositAmount == null || Math.abs(depositVariance) < 0.005;
         const allVerified = verifiedCount === shiftCount && shiftCount > 0;
         const matched = totalsMatch && depositMatch && allVerified;
 
@@ -930,6 +979,8 @@
         emptyGamingShift,
         emptyPulltabEntry,
         normalizePulltabs,
+        emptyWindStationEntry,
+        normalizeWindStations,
         defaultFuelSale,
         fuelDayTotal,
         normalizeDayDoc,
@@ -957,6 +1008,7 @@
         sumLines,
         registerDayTotal,
         pulltabDayTotal,
+        windStationDayTotal,
         lotteryDayTotal,
         daySalesForAggregate,
         cardCashBreakdownFromAggregate,

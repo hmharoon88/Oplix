@@ -309,6 +309,17 @@
                 winner: 0,
                 overShort: 0,
             });
+        } else if (list === "windStations") {
+            if ((state.day.windStations || []).length >= 3) {
+                window.alert("You can add up to 3 wind stations per day.");
+                return;
+            }
+            const next = (state.day.windStations || []).length + 1;
+            state.day.windStations.push({
+                id: lineId(),
+                station: String(next),
+                cash: 0,
+            });
         } else if (list === "receivables") {
             state.month.receivables.push({ id: lineId(), description: "", amount: 0 });
         }
@@ -355,6 +366,7 @@
         });
 
         syncLinesFromDom("pulltabs", ["ticketNumber", "cash", "winner", "overShort"]);
+        syncLinesFromDom("windStations", ["station", "cash"]);
         if (hasGasStation()) {
             const merch = root.querySelector('[name="merch_sale"]');
             if (merch) state.day.merchSale = M().num(merch.value);
@@ -581,7 +593,11 @@
                     </div>`;
                     })
                     .join("")}
-                <button type="button" class="books-add-line" data-di-add="${listKey}">${escapeHtml(addLabel || "+ Add line")}</button>
+                ${
+                    addLabel !== false
+                        ? `<button type="button" class="books-add-line" data-di-add="${listKey}">${escapeHtml(addLabel || "+ Add line")}</button>`
+                        : ""
+                }
             </div>`;
     }
 
@@ -603,6 +619,26 @@
                 "+ Add pulltab machine"
             )}
             <p class="books-total-line">Pulltab total: ${money(total.cash)} cash · Winners ${money(total.winner)} · O/S ${money(total.overShort)}</p>`;
+    }
+
+    function renderWindStations() {
+        const total = M().windStationDayTotal(state.day);
+        const count = (state.day.windStations || []).length;
+        const canAdd = count < 3;
+        return `
+            <h3 class="books-subtitle">Wind station</h3>
+            <p class="books-hint">Cash collected at each wind station (add up to 3 stations per day).</p>
+            ${renderLineList(
+                "windStations",
+                [
+                    { name: "station", label: "Station" },
+                    { name: "cash", label: "Cash", type: "number" },
+                ],
+                null,
+                false,
+                canAdd ? "+ Add wind station" : false
+            )}
+            <p class="books-total-line">Wind station total: ${money(total)} cash</p>`;
     }
 
     function renderUtilitiesPayroll() {
@@ -763,6 +799,8 @@
 
                     ${renderPulltabs()}
 
+                    ${renderWindStations()}
+
                     <h3 class="books-subtitle">Cash expense</h3>
                     ${renderLineList("cashExpenses", [
                         { name: "description", label: "Description" },
@@ -797,6 +835,8 @@
             <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash · O/S ${money(reg.overShort)}</p>
 
             ${renderPulltabs()}
+
+            ${renderWindStations()}
 
             <h3 class="books-subtitle">Cash expense</h3>
             ${renderLineList("cashExpenses", [
@@ -862,14 +902,16 @@
               ? "books-cash-recon-summary books-cash-recon-summary--pending"
               : "books-cash-recon-summary books-cash-recon-summary--variance";
         const matchLabel = summary.matched
-            ? "Day cash reconciled — counted matches books and deposit accounts for register expenses"
+            ? "Day cash reconciled — received matches and deposit is on target"
             : summary.countedTotal === 0 && summary.expectedTotal === 0
-              ? "Enter counted cash after verification"
-              : !summary.depositMatch && summary.deposit != null
-                ? `Deposit variance ${money(summary.depositVariance)} — expected ${money(summary.expectedDeposit)} (counted − cash expenses)`
+              ? "Enter received amounts after verification"
+              : summary.deposit != null && !summary.depositMatch
+                ? `Deposit variance ${money(summary.depositVariance)} — expected ${money(summary.expectedDeposit)} after cash expenses`
                 : !summary.allVerified && Math.abs(summary.variance) < 0.005
-                  ? "Totals match — mark each shift verified to complete reconciliation"
-                  : `Variance ${money(summary.variance)} — counted should match books cash`;
+                  ? "Received totals match — mark each shift verified to complete"
+                  : Math.abs(summary.variance) >= 0.005
+                    ? `Variance ${money(summary.variance)} — check received amounts by shift`
+                    : "Enter received / deposited amount for the day";
 
         const rows = summary.rows
             .map((row) => {
@@ -883,9 +925,8 @@
                     <tr>
                         <td>${escapeHtml(row.regLabel)}</td>
                         <td>${escapeHtml(row.shiftLabel)}</td>
-                        <td class="home-cc-num">${money(row.expected)}</td>
                         <td class="home-cc-num">
-                            <input ${amountInputAttrs(`cr_${row.regKey}_${row.shiftKey}_counted`, row.counted)} aria-label="Counted cash">
+                            <input ${amountInputAttrs(`cr_${row.regKey}_${row.shiftKey}_counted`, row.counted)} aria-label="Received">
                         </td>
                         <td class="home-cc-num ${varCls}">${money(row.variance)}</td>
                         <td class="books-cash-recon-verified">
@@ -935,15 +976,20 @@
                 <div class="${summaryCls}">
                     <p class="books-cash-recon-summary-title">${escapeHtml(matchLabel)}</p>
                     <div class="books-cash-recon-totals">
-                        <span><em>Books cash</em> <strong>${money(summary.expectedTotal)}</strong></span>
-                        <span><em>Counted</em> <strong>${money(summary.countedTotal)}</strong></span>
+                        <span><em>Received</em> <strong>${money(summary.countedTotal)}</strong></span>
                         <span><em>Cash expenses</em> <strong>${money(summary.cashExpensesTotal)}</strong></span>
-                        <span><em>Expected deposit</em> <strong>${money(summary.expectedDeposit)}</strong></span>
+                        <span><em>Expected</em> <strong>${money(summary.expectedDeposit)}</strong></span>
+                        ${
+                            summary.deposit != null
+                                ? `<span><em>Received / deposited</em> <strong>${money(summary.deposit)}</strong></span>
+                                   <span><em>Variance</em> <strong class="${summary.depositMatch ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(summary.depositVariance)}</strong></span>`
+                                : `<span><em>Shift variance</em> <strong>${money(summary.variance)}</strong></span>`
+                        }
                         <span><em>Verified</em> <strong>${summary.verifiedCount} / ${summary.shiftCount}</strong></span>
                     </div>
                 </div>
 
-                <p class="books-hint">Expected cash comes from the <strong>Daily sheet</strong> register cash sales. After physically verifying each drawer, enter the counted amount and mark verified. Register <strong>cash expenses</strong> (Daily sheet) reduce what goes to the bank — expected deposit = counted − cash expenses.</p>
+                <p class="books-hint">After verifying each drawer, enter the <strong>received</strong> amount per shift. Register cash expenses (Daily sheet) are deducted automatically — enter the <strong>received / deposited</strong> bank amount below to check variance.</p>
 
                 <div class="home-card home-cc-table-wrap">
                     <table class="home-cc-table books-cash-recon-table">
@@ -951,8 +997,7 @@
                             <tr>
                                 <th>Register</th>
                                 <th>Shift</th>
-                                <th class="home-cc-num">Books cash</th>
-                                <th class="home-cc-num">Counted</th>
+                                <th class="home-cc-num">Received</th>
                                 <th class="home-cc-num">Variance</th>
                                 <th>Status</th>
                                 <th>Note</th>
@@ -962,7 +1007,6 @@
                         <tfoot>
                             <tr class="books-cash-recon-total-row">
                                 <td colspan="2"><strong>Day total</strong></td>
-                                <td class="home-cc-num"><strong>${money(summary.expectedTotal)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(summary.countedTotal)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(summary.variance)}</strong></td>
                                 <td colspan="2"></td>
@@ -981,14 +1025,14 @@
                         : ""
                 }
 
-                <h3 class="books-subtitle">Bank deposit (optional)</h3>
-                <p class="books-hint">Actual deposit should match <strong>expected deposit</strong> above (counted cash minus register cash expenses).</p>
-                <label class="books-label">Deposit amount ($)
+                <h3 class="books-subtitle">Received / deposited</h3>
+                <p class="books-hint">Actual amount received or deposited for this day. Variance is calculated against <strong>expected</strong> (register cash minus cash expenses from Daily sheet).</p>
+                <label class="books-label">Received / deposited ($)
                     <input ${amountInputAttrs("cr_day_deposit", depositVal)}>
                 </label>
                 ${
                     summary.deposit != null
-                        ? `<p class="books-total-line books-cash-recon-deposit-check ${depositVarCls}">Deposit vs expected: ${money(summary.depositVariance)}${summary.depositMatch ? " — matches" : ""}</p>`
+                        ? `<p class="books-total-line books-cash-recon-deposit-check ${depositVarCls}">Variance: ${money(summary.depositVariance)}${summary.depositMatch ? " — matches expected" : ""}</p>`
                         : ""
                 }
                 <label class="books-label">Day notes
