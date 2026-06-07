@@ -19,6 +19,43 @@
     color: var(--dash-text);
 }
 
+/* Dashboard action buttons — primary blue by default (site.css .btn has no fill) */
+.dashboard-body button.btn {
+    padding: 10px 18px;
+    font-size: 0.875rem;
+    font-family: inherit;
+    line-height: 1.25;
+}
+
+.dashboard-body button.btn:not(.btn-nav):not(.btn-nav-outline):not(.btn-secondary):not(.dir-btn-edit):not(.dir-btn-delete):not(.fac-people-delete):not(.books-rm):not(.lottery-row-del):not(.sidebar-btn):not(.books-tab):not(.save-watch):not(:disabled) {
+    background: var(--dash-accent);
+    color: #fff;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.28);
+}
+
+.dashboard-body button.btn:not(.btn-nav):not(.btn-nav-outline):not(.btn-secondary):not(.dir-btn-edit):not(.dir-btn-delete):not(.fac-people-delete):not(.books-rm):not(.lottery-row-del):not(.sidebar-btn):not(.books-tab):not(.save-watch):not(:disabled):hover {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+}
+
+.dashboard-body button.btn.btn-secondary:not(:disabled) {
+    background: #fff;
+    color: var(--dash-accent);
+    border: 1px solid var(--dash-accent);
+    box-shadow: none;
+}
+
+.dashboard-body button.btn.btn-secondary:not(:disabled):hover {
+    background: var(--dash-accent-soft);
+}
+
+.dashboard-body button.btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
 /* Top bar */
 .dashboard-topbar {
     display: flex;
@@ -1084,13 +1121,22 @@
 
 .books-add-line {
     margin-top: 8px;
-    padding: 6px 12px;
-    border: 1px dashed var(--dash-border);
-    background: transparent;
-    border-radius: 6px;
+    padding: 8px 14px;
+    border: 1px solid #93c5fd;
+    background: var(--dash-accent-soft);
+    border-radius: 8px;
     cursor: pointer;
-    font-size: 0.85rem;
-    color: var(--dash-accent);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #1d4ed8;
+    font-family: inherit;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.books-add-line:hover {
+    background: var(--dash-accent);
+    border-color: var(--dash-accent);
+    color: #fff;
 }
 
 .books-rm {
@@ -2298,11 +2344,18 @@
     margin-top: 12px;
 }
 
-/* Save buttons — muted until the form is valid / changed */
+/* Save buttons — outline until the form is valid / changed */
 .dashboard-body button.btn.save-watch:not(.is-save-ready):not(:disabled) {
-    background: #e2e8f0;
-    color: #64748b;
+    background: #fff;
+    color: var(--dash-muted);
+    border: 1px solid var(--dash-border);
     box-shadow: none;
+}
+
+.dashboard-body button.btn.save-watch:not(.is-save-ready):not(:disabled):hover {
+    border-color: #93c5fd;
+    color: var(--dash-accent);
+    background: var(--dash-accent-soft);
 }
 
 .dashboard-body button.btn.save-watch.is-save-ready {

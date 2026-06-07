@@ -20,7 +20,98 @@
         utilityProviders: [],
         payables: [],
         dirty: false,
+        expenseDescriptions: [],
     };
+
+    const EXPENSE_DESC_LISTS = new Set(["cashExpenses", "checksAch", "otherExpenses"]);
+    const EXPENSE_DESC_DATALIST_ID = "di-expense-desc-list";
+
+    function expenseDescStorageKey() {
+        return `oplix.expenseDescriptions.${userId || "anon"}.${state.locationId || "none"}`;
+    }
+
+    function loadStoredExpenseDescriptions() {
+        try {
+            const raw = localStorage.getItem(expenseDescStorageKey());
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function saveStoredExpenseDescriptions(list) {
+        try {
+            localStorage.setItem(expenseDescStorageKey(), JSON.stringify(list.slice(0, 300)));
+        } catch {
+            /* ignore quota */
+        }
+    }
+
+    function collectExpenseDescriptionsFromDays(daysById) {
+        const out = [];
+        Object.values(daysById || {}).forEach((rawDay) => {
+            const day = M().normalizeDayDoc(rawDay);
+            EXPENSE_DESC_LISTS.forEach((key) => {
+                (day[key] || []).forEach((row) => {
+                    const d = String(row.description || "").trim();
+                    if (d) out.push(d);
+                });
+            });
+        });
+        return out;
+    }
+
+    function mergeExpenseDescriptions(...sources) {
+        const seen = new Set();
+        const out = [];
+        sources.forEach((list) => {
+            (list || []).forEach((item) => {
+                const d = String(item || "").trim();
+                if (!d) return;
+                const key = d.toLowerCase();
+                if (seen.has(key)) return;
+                seen.add(key);
+                out.push(d);
+            });
+        });
+        return out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    }
+
+    function refreshExpenseDescriptions() {
+        if (!state.locationId) {
+            state.expenseDescriptions = [];
+            return;
+        }
+        state.expenseDescriptions = mergeExpenseDescriptions(
+            loadStoredExpenseDescriptions(),
+            collectExpenseDescriptionsFromDays(state.daysById)
+        );
+        saveStoredExpenseDescriptions(state.expenseDescriptions);
+    }
+
+    function rememberExpenseDescriptionsFromDay(day) {
+        const normalized = M().normalizeDayDoc(day);
+        const fresh = collectExpenseDescriptionsFromDays({ _: normalized });
+        if (!fresh.length) return;
+        state.expenseDescriptions = mergeExpenseDescriptions(fresh, state.expenseDescriptions);
+        saveStoredExpenseDescriptions(state.expenseDescriptions);
+    }
+
+    function addExpenseDescription(text) {
+        const d = String(text || "").trim();
+        if (!d) return;
+        state.expenseDescriptions = mergeExpenseDescriptions([d], state.expenseDescriptions);
+        saveStoredExpenseDescriptions(state.expenseDescriptions);
+    }
+
+    function renderExpenseDescDatalist() {
+        const items = state.expenseDescriptions || [];
+        if (!items.length) return "";
+        return `<datalist id="${EXPENSE_DESC_DATALIST_ID}">
+            ${items.map((d) => `<option value="${escapeHtml(d)}"></option>`).join("")}
+        </datalist>`;
+    }
 
     function mergedUtilityKeys() {
         return M().mergeUtilityKeys(state.utilityProviders, state.month.utilities);
@@ -258,6 +349,14 @@
             if (utilRm) {
                 deleteUtility(utilRm.dataset.diUtilRm);
             }
+        });
+
+        panel.addEventListener("focusout", (e) => {
+            const input = e.target;
+            if (input?.name !== "description") return;
+            const listKey = input.closest("[data-di-list]")?.dataset?.diList;
+            if (!listKey || !EXPENSE_DESC_LISTS.has(listKey)) return;
+            addExpenseDescription(input.value);
         });
 
         panel.addEventListener("input", (e) => {
@@ -520,6 +619,7 @@
             );
             state.daysById = daysById;
             state.day = M().normalizeDayDoc(daysById[state.dayId]);
+            refreshExpenseDescriptions();
             state.dirty = false;
             if (statusEl) statusEl.textContent = "";
             render();
@@ -556,6 +656,7 @@
         ]);
         window.OplixAnalytics?.invalidateCache?.();
         state.daysById[state.dayId] = { ...state.day, _dayId: state.dayId };
+        rememberExpenseDescriptionsFromDay(state.day);
         state.dirty = false;
         $("di-status").textContent = "Day saved.";
         setTimeout(() => {
@@ -629,6 +730,7 @@
 
     function renderLineList(listKey, columns, rows, isMonth, addLabel) {
         const list = isMonth ? state.month[listKey] : state.day[listKey];
+        const suggestDescriptions = EXPENSE_DESC_LISTS.has(listKey);
         return `
             <div class="books-lines" data-di-list="${listKey}">
                 <div class="books-lines-head">
@@ -643,6 +745,9 @@
                                 const val = row[c.name] ?? "";
                                 if (type === "number") {
                                     return `<input ${amountInputAttrs(c.name, val)}>`;
+                                }
+                                if (c.name === "description" && suggestDescriptions) {
+                                    return `<input type="text" class="books-input" name="${c.name}" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(val)}" placeholder="Start typing…">`;
                                 }
                                 return `<input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}">`;
                             })
@@ -1261,6 +1366,7 @@
             <nav class="books-tabs">
                 ${tabs.map((t) => `<button type="button" class="books-tab${state.tab === t.id ? " active" : ""}" data-di-tab="${t.id}">${t.label}</button>`).join("")}
             </nav>
+            ${renderExpenseDescDatalist()}
             ${body}`;
 
         if (state.tab === "payables" && window.OplixPayablesUI) {
