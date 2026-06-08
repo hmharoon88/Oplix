@@ -27,6 +27,13 @@
             needsLocation: false,
         },
         {
+            id: "all_locations_compare",
+            label: "All locations — compare",
+            desc: "Side-by-side expenses and utilities — see what each facility pays.",
+            needsMonth: true,
+            needsLocation: false,
+        },
+        {
             id: "compliance",
             label: "Licenses & renewals",
             desc: "Registrations with expiry dates and status for one or all facilities.",
@@ -304,6 +311,129 @@
                     ? ["Total", totals.sales, totals.creditCard, totals.fuel, totals.expenses, totals.net]
                     : ["Total", totals.sales, totals.expenses, totals.net],
             ],
+        };
+    }
+
+    const COMPARE_GROUP_LABELS = {
+        sales: "Sales & revenue",
+        daily: "Daily expenses (from Daily sheet)",
+        utilities: "Utilities",
+        monthly: "Monthly fees",
+        totals: "Totals",
+    };
+
+    function compareLineDefs(packs) {
+        const M = window.OplixBooksModel;
+        const anyGas = packs.some((p) => p.aggregate?.hasGasStation);
+        const lines = [];
+
+        if (anyGas) {
+            lines.push({ label: "Merch sale", get: (a) => a.merchSale, group: "sales" });
+            lines.push({ label: "Register — card", get: (a) => a.registerCard, group: "sales" });
+            lines.push({ label: "Register — cash", get: (a) => a.registerCash, group: "sales" });
+            lines.push({ label: "Credit card (pump)", get: (a) => a.creditCard, group: "sales" });
+            lines.push({ label: "Fuel ($)", get: (a) => a.fuelDollars, group: "sales" });
+            lines.push({ label: "Pulltab", get: (a) => a.pulltabCash, group: "sales" });
+        } else {
+            lines.push({ label: "Register — card", get: (a) => a.registerCard, group: "sales" });
+            lines.push({ label: "Register — cash", get: (a) => a.registerCash, group: "sales" });
+            lines.push({ label: "Lottery", get: (a) => a.lotteryCash, group: "sales" });
+            lines.push({ label: "Pulltab", get: (a) => a.pulltabCash, group: "sales" });
+            lines.push({ label: "Total sales", get: (a) => a.sales, group: "sales" });
+        }
+        lines.push({ label: "Total revenue", get: (a) => a.totalRevenue ?? a.sales, group: "sales" });
+
+        lines.push({ label: "Cash expense", get: (a) => a.cashExpense, group: "daily" });
+        lines.push({ label: "Checks / ACH", get: (a) => a.checksAch, group: "daily" });
+        lines.push({ label: "Other expense", get: (a) => a.otherExpense, group: "daily" });
+
+        const utilityKeys = new Set();
+        M.UTILITY_KEYS.forEach((u) => utilityKeys.add(u.key));
+        packs.forEach((p) => {
+            Object.keys(p.aggregate?.utilities || {}).forEach((k) => utilityKeys.add(k));
+        });
+        [...utilityKeys]
+            .sort((a, b) => M.labelForUtilityKey(a, []).localeCompare(M.labelForUtilityKey(b, [])))
+            .forEach((key) => {
+                lines.push({
+                    label: M.labelForUtilityKey(key, []),
+                    get: (a) => num(a.utilities?.[key]),
+                    group: "utilities",
+                });
+            });
+
+        lines.push({ label: "Payroll", get: (a) => a.payrollTotal, group: "monthly" });
+        lines.push({ label: "Sales tax", get: (a) => a.salesTax, group: "monthly" });
+        lines.push({ label: "Accountant", get: (a) => a.accountant, group: "monthly" });
+        lines.push({ label: "Total expenses", get: (a) => a.expenses, group: "totals", emphasis: true });
+        lines.push({ label: "Net", get: (a) => a.net, group: "totals", emphasis: true });
+
+        return lines.filter(
+            (line) =>
+                line.emphasis ||
+                packs.some((p) => num(line.get(p.aggregate)) !== 0)
+        );
+    }
+
+    function buildAllLocationsCompareReport(packs, meta) {
+        const locations = packs.map((p) => ({
+            id: p.locationId,
+            name: p.locationName,
+            aggregate: p.aggregate,
+        }));
+        const lineDefs = compareLineDefs(packs);
+        let lastGroup = null;
+        const tableRows = lineDefs.map((def) => {
+            const values = locations.map((loc) => ({
+                locationId: loc.id,
+                locationName: loc.name,
+                value: num(def.get(loc.aggregate)),
+            }));
+            const total = values.reduce((s, v) => s + v.value, 0);
+            const groupHeader = def.group !== lastGroup ? def.group : null;
+            lastGroup = def.group;
+            return {
+                label: def.label,
+                values,
+                total,
+                emphasis: !!def.emphasis,
+                group: def.group,
+                groupHeader,
+            };
+        });
+
+        const totals = locations.reduce(
+            (t, loc) => ({
+                expenses: t.expenses + num(loc.aggregate.expenses),
+                net: t.net + num(loc.aggregate.net),
+            }),
+            { expenses: 0, net: 0 }
+        );
+
+        const csvRows = [
+            ["Line item", ...locations.map((l) => l.name), "Total"],
+            ...tableRows.map((r) => [
+                r.groupHeader ? `${COMPARE_GROUP_LABELS[r.group] || r.group}: ${r.label}` : r.label,
+                ...r.values.map((v) => v.value),
+                r.total,
+            ]),
+        ];
+
+        return {
+            type: "all_locations_compare",
+            title: "All locations — expense compare",
+            meta,
+            headline: "All facilities",
+            subhead: meta.monthLabel,
+            summary: [
+                { label: "Locations", value: locations.length, format: "number" },
+                { label: "Total expenses", value: totals.expenses },
+                { label: "Total net", value: totals.net },
+            ],
+            locations: locations.map((l) => ({ id: l.id, name: l.name })),
+            tableRows,
+            groupLabels: COMPARE_GROUP_LABELS,
+            csvRows,
         };
     }
 
@@ -665,6 +795,7 @@
         formatRange,
         buildMonthlyBooksReport,
         buildAllLocationsBooksReport,
+        buildAllLocationsCompareReport,
         buildAllLocationsDetailReport,
         buildComplianceReport,
         buildLotteryReport,

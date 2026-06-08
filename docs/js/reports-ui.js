@@ -306,6 +306,52 @@
             </table>`;
     }
 
+    function renderAllLocationsCompareBody(report) {
+        if (!report.tableRows?.length) {
+            return `<p class="data-list-empty">No expense or utility data for this month.</p>`;
+        }
+        const locs = report.locations || [];
+        return `
+            <p class="books-hint rpt-compare-hint">Each column is a facility. Compare electric, cash, checks, payroll, and more across locations.</p>
+            <div class="rpt-compare-scroll home-card home-cc-table-wrap">
+                <table class="home-cc-table rpt-table rpt-compare-table">
+                    <thead>
+                        <tr>
+                            <th class="rpt-compare-sticky">Line item</th>
+                            ${locs.map((l) => `<th class="home-cc-num rpt-compare-loc">${escapeHtml(l.name)}</th>`).join("")}
+                            <th class="home-cc-num rpt-compare-total-col">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${report.tableRows
+                            .map((row) => {
+                                const groupRow = row.groupHeader
+                                    ? `<tr class="rpt-compare-group-row"><td class="rpt-compare-sticky" colspan="${locs.length + 2}">${escapeHtml(report.groupLabels[row.groupHeader] || row.groupHeader)}</td></tr>`
+                                    : "";
+                                const rowCls = row.emphasis ? " an-total-row" : "";
+                                const cells = row.values
+                                    .map((v) => {
+                                        const empty = v.value === 0 ? " rpt-compare-zero" : "";
+                                        return `<td class="home-cc-num${empty}">${v.value === 0 ? "—" : money(v.value)}</td>`;
+                                    })
+                                    .join("");
+                                const totalCell =
+                                    row.total === 0
+                                        ? `<td class="home-cc-num rpt-compare-total-col rpt-compare-zero">—</td>`
+                                        : `<td class="home-cc-num rpt-compare-total-col"><strong>${money(row.total)}</strong></td>`;
+                                return `${groupRow}
+                                <tr class="${rowCls.trim()}">
+                                    <td class="rpt-compare-sticky">${row.emphasis ? `<strong>${escapeHtml(row.label)}</strong>` : escapeHtml(row.label)}</td>
+                                    ${cells}
+                                    ${totalCell}
+                                </tr>`;
+                            })
+                            .join("")}
+                    </tbody>
+                </table>
+            </div>`;
+    }
+
     function renderAllLocationsDetailBody(report) {
         if (!report.locationSections.length) {
             return `<p class="data-list-empty">No facilities to report.</p>`;
@@ -459,6 +505,8 @@
                 return renderAllLocationsBody(report);
             case "all_locations_detail":
                 return renderAllLocationsDetailBody(report);
+            case "all_locations_compare":
+                return renderAllLocationsCompareBody(report);
             case "compliance":
                 return renderComplianceBody(report);
             case "lottery":
@@ -579,6 +627,12 @@
                     state.monthId
                 );
                 report = RM().buildAllLocationsDetailReport(packs, {
+                    monthLabel: monthLabel(state.monthId),
+                    monthId: state.monthId,
+                });
+            } else if (state.reportType === "all_locations_compare") {
+                const packs = await RS().loadAllLocationsBooks(userId, locations, state.monthId);
+                report = RM().buildAllLocationsCompareReport(packs, {
                     monthLabel: monthLabel(state.monthId),
                     monthId: state.monthId,
                 });
