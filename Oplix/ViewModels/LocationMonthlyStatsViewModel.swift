@@ -15,6 +15,7 @@ struct DailyStats: Identifiable {
     let expenses: Double // Cash + Non-cash expenses
     let fuelGallons: Double
     let fuelDollars: Double
+    let lotterySales: Double
 }
 
 struct MonthlyStats: Identifiable {
@@ -72,9 +73,16 @@ class LocationMonthlyStatsViewModel: ObservableObject {
         errorMessage = nil
 
         do {
-            let location = try await firebaseService.fetchLocation(userId: userId, locationId: locationId)
+            async let locationTask = firebaseService.fetchLocation(userId: userId, locationId: locationId)
+            async let booksTask = booksService.loadAllMonths(userId: userId, locationId: locationId)
+            async let lotteryFormsTask = firebaseService.fetchLotteryForms(userId: userId, locationId: locationId)
+
+            let location = try await locationTask
             let hasGasStation = location.hasGasStation
-            let payloads = try await booksService.loadAllMonths(userId: userId, locationId: locationId)
+            let payloads = try await booksTask
+            let lotteryForms = try await lotteryFormsTask
+            let lotterySalesByMonth = Self.lotterySoldAmountByMonth(from: lotteryForms)
+            let lotterySalesByDay = Self.lotterySoldAmountByDay(from: lotteryForms)
 
             let calendar = Calendar.current
             let monthFormatter = DateFormatter()
@@ -103,14 +111,16 @@ class LocationMonthlyStatsViewModel: ObservableObject {
                 let monthName = monthFormatter.string(from: date)
 
                 let dailyStats = aggregate.dailySeries.map { point in
-                    DailyStats(
+                    let appLottery = lotterySalesByDay[point.dayId] ?? 0
+                    return DailyStats(
                         id: point.dayId,
                         date: point.date,
                         dayName: dayNameFormatter.string(from: point.date),
                         sales: point.sales,
                         expenses: point.expenses,
                         fuelGallons: point.fuelGallons,
-                        fuelDollars: point.fuelDollars
+                        fuelDollars: point.fuelDollars,
+                        lotterySales: appLottery > 0 ? appLottery : point.lotteryCash
                     )
                 }
 
@@ -121,10 +131,37 @@ class LocationMonthlyStatsViewModel: ObservableObject {
                         month: month,
                         monthName: monthName,
                         sales: aggregate.sales,
-                        lotterySales: aggregate.lotteryCash,
+                        lotterySales: Self.resolvedLotterySales(
+                            monthId: payload.monthId,
+                            booksLotteryCash: aggregate.lotteryCash,
+                            lotterySalesByMonth: lotterySalesByMonth
+                        ),
                         payroll: aggregate.payrollTotal,
                         expenses: aggregate.expenses,
                         dailyStats: dailyStats
+                    )
+                )
+            }
+
+            let existingMonthIds = Set(monthlyStats.map(\.id))
+            for (monthId, appLotterySales) in lotterySalesByMonth where appLotterySales > 0 && !existingMonthIds.contains(monthId) {
+                let components = monthId.split(separator: "-")
+                guard components.count == 2,
+                      let year = Int(components[0]),
+                      let month = Int(components[1]) else { continue }
+
+                let date = calendar.date(from: DateComponents(year: year, month: month)) ?? Date()
+                monthlyStats.append(
+                    MonthlyStats(
+                        id: monthId,
+                        year: year,
+                        month: month,
+                        monthName: monthFormatter.string(from: date),
+                        sales: 0,
+                        lotterySales: appLotterySales,
+                        payroll: 0,
+                        expenses: 0,
+                        dailyStats: []
                     )
                 )
             }
@@ -149,6 +186,63 @@ class LocationMonthlyStatsViewModel: ObservableObject {
         }
 
         isLoading = false
+    }
+
+    private static func lotterySoldAmount(from form: LotteryForm) -> Double? {
+        if let summary = form.shiftSummary {
+            return summary.totalSoldAmount
+        }
+        if let amountString = form.formData["amount"] ?? form.formData["sale"] ?? form.formData["total"],
+           let amount = Double(amountString) {
+            return amount
+        }
+        return nil
+    }
+
+    /// Sold amount from employee lottery closes, grouped by `YYYY-MM-DD`.
+    private static func lotterySoldAmountByDay(from forms: [LotteryForm]) -> [String: Double] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+
+        var byDay: [String: Double] = [:]
+        for form in forms {
+            guard let sold = lotterySoldAmount(from: form) else { continue }
+            let dayId = formatter.string(from: form.submittedAt)
+            byDay[dayId, default: 0] += sold
+        }
+        return byDay
+    }
+
+    /// Sold amount from employee lottery closes in the app (`shiftSummary.totalSoldAmount`),
+    /// grouped by `YYYY-MM`. Matches Home Month-to-Date lottery sales.
+    private static func lotterySoldAmountByMonth(from forms: [LotteryForm]) -> [String: Double] {
+        let calendar = Calendar.current
+        var byMonth: [String: Double] = [:]
+
+        for form in forms {
+            guard let sold = lotterySoldAmount(from: form) else { continue }
+
+            let year = calendar.component(.year, from: form.submittedAt)
+            let month = calendar.component(.month, from: form.submittedAt)
+            let monthId = String(format: "%04d-%02d", year, month)
+            byMonth[monthId, default: 0] += sold
+        }
+
+        return byMonth
+    }
+
+    /// Prefer app lottery sold amount when employees closed shifts in Oplix;
+    /// fall back to Daily Books lottery cash for web-only entry.
+    private static func resolvedLotterySales(
+        monthId: String,
+        booksLotteryCash: Double,
+        lotterySalesByMonth: [String: Double]
+    ) -> Double {
+        let appLottery = lotterySalesByMonth[monthId] ?? 0
+        if appLottery > 0 { return appLottery }
+        return booksLotteryCash
     }
 
     private func aggregateHasData(_ aggregate: BooksMonthAggregate, payload: BooksMonthPayload) -> Bool {

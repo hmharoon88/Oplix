@@ -25,7 +25,6 @@ import Combine
 //   3. Render it in ManagerOverviewView's `section(for:)` switch.
 enum HomeSection: String, CaseIterable, Identifiable, Codable {
     case actionCenter
-    case today
     case thisWeek
     case lotteryToday
     case shortcuts
@@ -36,7 +35,6 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .actionCenter: return "Needs Attention"
-        case .today:        return "Today"
         case .thisWeek:     return "This Week"
         case .lotteryToday: return "Lottery Today"
         case .shortcuts:    return "Shortcuts"
@@ -47,18 +45,16 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable {
     var subtitle: String {
         switch self {
         case .actionCenter: return "Cash variances, overdue items, missing data"
-        case .today:        return "Revenue, clocked-in employees, task completion"
         case .thisWeek:     return "Receivables and payables due in next 7 days"
         case .lotteryToday: return "Per-location lottery over/short for today"
         case .shortcuts:    return "Quick actions: shifts, payroll, status, broadcast"
-        case .monthToDate:  return "Per-location revenue, payroll, expenses"
+        case .monthToDate:  return "Per-location sales, fuel, lottery, payroll, expenses"
         }
     }
     
     var icon: String {
         switch self {
         case .actionCenter: return "exclamationmark.triangle.fill"
-        case .today:        return "sun.max.fill"
         case .thisWeek:     return "calendar.badge.clock"
         case .lotteryToday: return "ticket.fill"
         case .shortcuts:    return "bolt.fill"
@@ -69,7 +65,6 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable {
     var tint: String {
         switch self {
         case .actionCenter: return "orange"
-        case .today:        return "blue"
         case .thisWeek:     return "purple"
         case .lotteryToday: return "yellow"
         case .shortcuts:    return "green"
@@ -117,8 +112,10 @@ struct HomeLayoutPrefs: Codable, Equatable {
     
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.order = try c.decode([HomeSection].self, forKey: .order)
-        self.hidden = try c.decode(Set<HomeSection>.self, forKey: .hidden)
+        let orderRaw = (try? c.decode([String].self, forKey: .order)) ?? []
+        self.order = orderRaw.compactMap { HomeSection(rawValue: $0) }
+        let hiddenRaw = (try? c.decode([String].self, forKey: .hidden)) ?? []
+        self.hidden = Set(hiddenRaw.compactMap { HomeSection(rawValue: $0) })
         self.hiddenAlertCategories =
             (try? c.decode(Set<ManagerAlertCategory>.self, forKey: .hiddenAlertCategories)) ?? []
     }
@@ -130,23 +127,20 @@ struct HomeLayoutPrefs: Codable, Equatable {
         try c.encode(hiddenAlertCategories, forKey: .hiddenAlertCategories)
     }
     
-    /// Lottery Today sits directly under the Today revenue card.
     static let defaultOrder: [HomeSection] = [
         .actionCenter,
-        .today,
         .lotteryToday,
         .thisWeek,
         .shortcuts,
         .monthToDate,
     ]
     
-    /// Previous default (before lottery was moved under Today). Used only
-    /// to migrate saved UserDefaults layouts that still match this order.
-    static let legacyDefaultOrderBeforeLotteryUnderToday: [HomeSection] = [
+    /// Previous default (before Today section was removed). Migrates saved
+    /// layouts that still match this order exactly.
+    static let legacyDefaultOrderWithToday: [HomeSection] = [
         .actionCenter,
-        .today,
-        .thisWeek,
         .lotteryToday,
+        .thisWeek,
         .shortcuts,
         .monthToDate,
     ]
@@ -267,10 +261,11 @@ final class HomeLayoutStore: ObservableObject {
         
         let original = decoded.order
         
-        // Migration A — pre-rearrange default: if the user still has the
-        // exact old default (This Week before Lottery Today), swap to the
-        // new default order in one shot.
-        if decoded.order == HomeLayoutPrefs.legacyDefaultOrderBeforeLotteryUnderToday {
+        // Migration A — strip removed sections (e.g. legacy "today" raw value)
+        // and normalize if the saved order matches a known legacy default.
+        decoded.order = decoded.order.filter { HomeSection.allCases.contains($0) }
+        decoded.hidden = decoded.hidden.filter { HomeSection.allCases.contains($0) }
+        if decoded.order == HomeLayoutPrefs.legacyDefaultOrderWithToday {
             decoded.order = HomeLayoutPrefs.defaultOrder
         }
         

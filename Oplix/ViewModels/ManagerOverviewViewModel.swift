@@ -13,18 +13,44 @@ private struct ManagerOverviewLocationBundle {
     let shifts: [Shift]
     let lotteryForms: [LotteryForm]
     let locationEmployees: [Employee]
+    let booksCurrentMonth: BooksMonthPayload?
 }
 
 fileprivate func managerOverviewFetchLocationBundle(userId: String, locationId: String) async -> ManagerOverviewLocationBundle? {
     let fs = FirebaseService.shared
+    let calendar = Calendar.current
+    let now = Date()
+    let year = calendar.component(.year, from: now)
+    let month = calendar.component(.month, from: now)
+    let monthId = String(format: "%04d-%02d", year, month)
+
     do {
         async let shiftsTask = fs.fetchShifts(userId: userId, locationId: locationId)
         async let lotteryFormsTask = fs.fetchLotteryForms(userId: userId, locationId: locationId)
         async let locationEmployeesTask = fs.fetchEmployees(userId: userId, locationId: locationId)
+        async let booksTask: BooksMonthPayload? = {
+            do {
+                return try await BooksService.shared.loadMonth(
+                    userId: userId,
+                    locationId: locationId,
+                    monthId: monthId
+                )
+            } catch {
+                return nil
+            }
+        }()
+
         let shifts = try await shiftsTask
         let lotteryForms = try await lotteryFormsTask
         let locationEmployees = try await locationEmployeesTask
-        return ManagerOverviewLocationBundle(shifts: shifts, lotteryForms: lotteryForms, locationEmployees: locationEmployees)
+        let booksCurrentMonth = await booksTask
+
+        return ManagerOverviewLocationBundle(
+            shifts: shifts,
+            lotteryForms: lotteryForms,
+            locationEmployees: locationEmployees,
+            booksCurrentMonth: booksCurrentMonth
+        )
     } catch {
         print("⚠️ Failed to fetch overview stats for location id \(locationId): \(error.localizedDescription)")
         return nil
@@ -37,7 +63,7 @@ struct LocationStats: Identifiable {
     // Merchandise sales only (cash + credit). Historically this field
     // ALSO included fuel, which double-counted it against the separate
     // monthToDateFuelDollars row in the UI. We now keep them strictly
-    // disjoint so the breakdown adds up clean: merch + fuel + lottery.
+    // disjoint from fuel and lottery in the UI breakdown.
     let monthToDateSales: Double
     let monthToDateLotterySales: Double
     let monthToDatePayroll: Double
@@ -45,45 +71,10 @@ struct LocationStats: Identifiable {
     let monthToDateFuelGallons: Double
     let monthToDateFuelDollars: Double
     
-    // Total revenue across all streams. Computed from the disjoint
-    // components above so the relationship is obvious and we can't
-    // accidentally double-count again.
+    // Merchandise / register sales only. Fuel and lottery each have their
+    // own row and are excluded from the headline total.
     var monthToDateTotalRevenue: Double {
-        monthToDateSales + monthToDateFuelDollars + monthToDateLotterySales
-    }
-}
-
-// Rolled-up "what's happening today" numbers shown on the Home screen.
-// Aggregated across every location the manager owns. Computed during
-// loadOverview so we never make a separate network round-trip just for these.
-struct TodaySnapshot: Equatable {
-    // Cash + credit + fuel + lottery summed across closed registers and
-    // submitted lottery forms whose date stamp falls inside today.
-    var revenue: Double = 0
-    // Same metric for the same weekday last week — drives the trend arrow.
-    // When zero we hide the trend rather than show a meaningless "▲ ∞%".
-    var revenueLastWeekSameDay: Double = 0
-    // Employees currently clocked in across all locations.
-    var clockedInCount: Int = 0
-    // How many employees have a shift assigned for today (the denominator
-    // in "2 of 5" — derived from `weeklySchedule.worksOn(today)`).
-    var scheduledTodayCount: Int = 0
-    // Names of locations that currently have at least one employee on shift.
-    // Surfaced under the count as small context.
-    var clockedInLocationNames: [String] = []
-    // Tasks across all locations that count as completed in the current
-    // cycle (today for daily, this week for weekly, etc) divided by total
-    // active tasks. Manager-level (locationless) tasks aren't counted.
-    var tasksCompleted: Int = 0
-    var tasksTotal: Int = 0
-    
-    var hasComparison: Bool { revenueLastWeekSameDay > 0 }
-    
-    // Signed % change vs same weekday last week. Returns nil when there's
-    // no baseline (last week's number is zero) so the UI can hide the chip.
-    var revenueChangePct: Double? {
-        guard hasComparison else { return nil }
-        return (revenue - revenueLastWeekSameDay) / revenueLastWeekSameDay * 100.0
+        monthToDateSales
     }
 }
 
@@ -96,12 +87,11 @@ class ManagerOverviewViewModel: ObservableObject {
     @Published var locationStats: [LocationStats] = []
     @Published var locations: [Location] = []
     @Published var isLoading = false
-    /// True while month-to-date / today stats are still computing after the
-    /// quick header counts (locations / employees / tasks) are already shown.
+    /// True while month-to-date stats are still computing after the quick
+    /// header counts (locations / employees / tasks) are already shown.
     @Published var isRefreshingHomeDetails = false
     @Published var errorMessage: String?
     @Published var expiringDocuments: [Document] = []
-    @Published var todaySnapshot: TodaySnapshot = TodaySnapshot()
     
     private let firebaseService = FirebaseService.shared
     private let userId: String
@@ -138,7 +128,7 @@ class ManagerOverviewViewModel: ObservableObject {
 
             // Stats + document scan are independent — run together. Per-location
             // Firestore reads inside `calculateLocationStats` are parallelized.
-            async let statsTask: Void = calculateLocationStats(locations: locations, employees: employees, tasks: tasks)
+            async let statsTask: Void = calculateLocationStats(locations: locations, employees: employees)
             async let docsTask: Void = checkExpiringDocuments()
             _ = await (statsTask, docsTask)
             isRefreshingHomeDetails = false
@@ -166,7 +156,7 @@ class ManagerOverviewViewModel: ObservableObject {
         }
     }
     
-    private func calculateLocationStats(locations: [Location], employees: [Employee], tasks: [WorkTask]) async {
+    private func calculateLocationStats(locations: [Location], employees: [Employee]) async {
         var stats: [LocationStats] = []
         let calendar = Calendar.current
         let now = Date()
@@ -177,18 +167,6 @@ class ManagerOverviewViewModel: ObservableObject {
         // Month-to-date means from start of month until end of today
         let monthEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
         
-        // --- Today + same-weekday-last-week ranges for the Today snapshot.
-        // Using startOfDay / next-day boundaries avoids the "23:59:59 hides
-        // some events" off-by-one bug seen elsewhere.
-        let todayStart = calendar.startOfDay(for: now)
-        let tomorrowStart = calendar.date(byAdding: .day, value: 1, to: todayStart) ?? now
-        let lastWeekSameDayStart = calendar.date(byAdding: .day, value: -7, to: todayStart) ?? todayStart
-        let lastWeekSameDayEnd = calendar.date(byAdding: .day, value: -7, to: tomorrowStart) ?? tomorrowStart
-        
-        // Snapshot accumulators — filled in per-location below.
-        var snapshot = TodaySnapshot()
-        var clockedInLocationNames = Set<String>()
-
         // Create a dictionary of all employees (manager-level + location-specific) for quick lookup
         var allEmployeesDict: [String: Employee] = [:]
         for employee in employees {
@@ -226,55 +204,6 @@ class ManagerOverviewViewModel: ObservableObject {
                     if allEmployeesDict[employee.id] == nil {
                         allEmployeesDict[employee.id] = employee
                     }
-                }
-                
-                // -- Today snapshot accumulation for this location ----------
-                // Walk shifts once and sum cash + credit + fuel for register
-                // closings dated today, plus the same date last week. Live
-                // shifts (clockOutTime == nil) feed clocked-in counts.
-                for shift in shifts {
-                    if shift.isActive {
-                        snapshot.clockedInCount += 1
-                        clockedInLocationNames.insert(location.name)
-                    }
-                    
-                    // For revenue: use registerClosedAt as the canonical
-                    // "the books closed" timestamp; otherwise fall back to
-                    // clockOutTime. (Matches the month-to-date logic above.)
-                    let dateRef = shift.registerClosedAt ?? shift.clockOutTime
-                    guard let ref = dateRef, shift.hasRegisterData else { continue }
-                    let bucket: WritableKeyPath<TodaySnapshot, Double>?
-                    if ref >= todayStart && ref < tomorrowStart {
-                        bucket = \.revenue
-                    } else if ref >= lastWeekSameDayStart && ref < lastWeekSameDayEnd {
-                        bucket = \.revenueLastWeekSameDay
-                    } else {
-                        bucket = nil
-                    }
-                    guard let bucketKey = bucket else { continue }
-                    
-                    if !shift.registers.isEmpty {
-                        for register in shift.registers {
-                            let cash = register.cashSale ?? 0
-                            let credit = register.creditCard ?? 0
-                            let fuel = register.fuelSaleDollars ?? 0
-                            snapshot[keyPath: bucketKey] += cash + credit + fuel
-                        }
-                    } else {
-                        snapshot[keyPath: bucketKey] += (shift.cashSale ?? 0) + (shift.creditCard ?? 0)
-                    }
-                }
-                for form in lotteryForms {
-                    let bucket: WritableKeyPath<TodaySnapshot, Double>?
-                    if form.submittedAt >= todayStart && form.submittedAt < tomorrowStart {
-                        bucket = \.revenue
-                    } else if form.submittedAt >= lastWeekSameDayStart && form.submittedAt < lastWeekSameDayEnd {
-                        bucket = \.revenueLastWeekSameDay
-                    } else {
-                        bucket = nil
-                    }
-                    guard let bucketKey = bucket else { continue }
-                    snapshot[keyPath: bucketKey] += form.shiftSummary?.totalSoldAmount ?? 0
                 }
                 
                 // Calculate month-to-date sales and fuel sales
@@ -444,6 +373,31 @@ class ManagerOverviewViewModel: ObservableObject {
                     }
                 }
 
+                // Daily Books (web dashboard) — align Home MTD with Monthly History "Sales".
+                if let books = bundle.booksCurrentMonth {
+                    let aggregate = BooksAggregator.aggregateMonth(
+                        monthId: books.monthId,
+                        month: books.month,
+                        daysById: books.daysById,
+                        hasGasStation: location.hasGasStation
+                    )
+                    let booksMTD = BooksAggregator.monthToDateSlice(
+                        from: aggregate,
+                        through: now,
+                        calendar: calendar
+                    )
+                    if booksMTD.sales > 0 {
+                        monthToDateSales = booksMTD.sales
+                    }
+                    if booksMTD.fuelDollars > 0 {
+                        monthToDateFuelDollars = booksMTD.fuelDollars
+                        monthToDateFuelGallons = booksMTD.fuelGallons
+                    }
+                    if booksMTD.expenses > monthToDateExpenses {
+                        monthToDateExpenses = booksMTD.expenses
+                    }
+                }
+
                 stats.append(LocationStats(
                     id: location.id,
                     locationName: location.name,
@@ -455,37 +409,8 @@ class ManagerOverviewViewModel: ObservableObject {
                     monthToDateFuelDollars: monthToDateFuelDollars
                 ))
         }
-        
-        // -- Finalize today snapshot -------------------------------------
-        // scheduledTodayCount: every employee whose weeklySchedule covers
-        // today's weekday. Approximation — if an employee splits across
-        // locations on different days, this still counts them once.
-        var scheduledToday = 0
-        for employee in employees {
-            if employee.weeklySchedule?.worksOn(date: now) == true {
-                scheduledToday += 1
-            }
-        }
-        snapshot.scheduledTodayCount = scheduledToday
-        // Stable display order so the UI doesn't reshuffle on each load.
-        snapshot.clockedInLocationNames = Array(clockedInLocationNames).sorted()
-        
-        // Tasks today: across all locations, count tasks whose current
-        // cycle has at least one completion that counts (= not disapproved).
-        // Manager-level tasks (locationId == nil) are scheduled but
-        // un-deployed; skip them to keep the denominator honest.
-        var taskCompleted = 0
-        var taskTotal = 0
-        for task in tasks where task.locationId != nil {
-            taskTotal += 1
-            let hasDone = task.currentCycleCompletions.values.contains { $0.countsAsCompleted }
-            if hasDone { taskCompleted += 1 }
-        }
-        snapshot.tasksCompleted = taskCompleted
-        snapshot.tasksTotal = taskTotal
-        
+
         locationStats = stats
-        todaySnapshot = snapshot
     }
 }
 

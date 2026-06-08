@@ -196,6 +196,10 @@ struct MonthlyStatsRow: View {
     private var hasFuelSales: Bool {
         monthlyStat.dailyStats.contains { $0.fuelGallons > 0 || $0.fuelDollars > 0 }
     }
+
+    private var hasLotterySales: Bool {
+        monthlyStat.dailyStats.contains { $0.lotterySales > 0 }
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -249,8 +253,12 @@ struct MonthlyStatsRow: View {
             
             // Daily Table (Expandable)
             if isExpanded && !monthlyStat.dailyStats.isEmpty {
-                DailyStatsTable(dailyStats: monthlyStat.dailyStats, hasFuelSales: hasFuelSales)
-                    .padding(.top, 8)
+                DailyStatsTable(
+                    dailyStats: monthlyStat.dailyStats,
+                    hasFuelSales: hasFuelSales,
+                    hasLotterySales: hasLotterySales
+                )
+                .padding(.top, 8)
             }
         }
         .padding()
@@ -272,10 +280,17 @@ struct MonthlyStatsRow: View {
 struct DailyStatsTable: View {
     let dailyStats: [DailyStats]
     let hasFuelSales: Bool
-    
-    private var totals: (sales: Double, expenses: Double, fuelGallons: Double, fuelDollars: Double) {
-        dailyStats.reduce((0, 0, 0, 0)) { result, stat in
-            (result.0 + stat.sales, result.1 + stat.expenses, result.2 + stat.fuelGallons, result.3 + stat.fuelDollars)
+    let hasLotterySales: Bool
+
+    private var totals: (sales: Double, expenses: Double, fuelGallons: Double, fuelDollars: Double, lottery: Double) {
+        dailyStats.reduce((0, 0, 0, 0, 0)) { result, stat in
+            (
+                result.0 + stat.sales,
+                result.1 + stat.expenses,
+                result.2 + stat.fuelGallons,
+                result.3 + stat.fuelDollars,
+                result.4 + stat.lotterySales
+            )
         }
     }
     
@@ -306,6 +321,14 @@ struct DailyStatsTable: View {
                     .fontWeight(.semibold)
                     .foregroundColor(.black)
                     .frame(maxWidth: .infinity, alignment: .trailing)
+
+                if hasLotterySales {
+                    Text("Lottery")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
                 
                 if hasFuelSales {
                     Text("Gallons")
@@ -349,6 +372,13 @@ struct DailyStatsTable: View {
                         .font(.caption)
                         .foregroundColor(.red)
                         .frame(maxWidth: .infinity, alignment: .trailing)
+
+                    if hasLotterySales {
+                        Text(stat.lotterySales > 0 ? formatCurrency(stat.lotterySales) : "-")
+                            .font(.caption)
+                            .foregroundColor(.purple)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
                     
                     if hasFuelSales {
                         Text(stat.fuelGallons > 0 ? String(format: "%.2f", stat.fuelGallons) : "-")
@@ -387,6 +417,14 @@ struct DailyStatsTable: View {
                     .fontWeight(.bold)
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity, alignment: .trailing)
+
+                if hasLotterySales {
+                    Text(totals.lottery > 0 ? formatCurrency(totals.lottery) : "-")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(.purple)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
                 
                 if hasFuelSales {
                     Text(totals.fuelGallons > 0 ? String(format: "%.2f", totals.fuelGallons) : "-")

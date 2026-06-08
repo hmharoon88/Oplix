@@ -85,6 +85,46 @@ enum BooksAggregator {
         )
     }
 
+    struct MonthToDateSlice {
+        let sales: Double
+        let expenses: Double
+        let fuelGallons: Double
+        let fuelDollars: Double
+        let lotteryCash: Double
+    }
+
+    /// Sums Daily books daily rows from the start of the month through `endDate` (inclusive).
+    static func monthToDateSlice(
+        from aggregate: BooksMonthAggregate,
+        through endDate: Date,
+        calendar: Calendar = .current
+    ) -> MonthToDateSlice {
+        let endDay = calendar.startOfDay(for: endDate)
+        var sales = 0.0
+        var expenses = 0.0
+        var fuelGallons = 0.0
+        var fuelDollars = 0.0
+        var lotteryCash = 0.0
+
+        for point in aggregate.dailySeries {
+            let day = calendar.startOfDay(for: point.date)
+            guard day <= endDay else { continue }
+            sales += point.sales
+            expenses += point.expenses
+            fuelGallons += point.fuelGallons
+            fuelDollars += point.fuelDollars
+            lotteryCash += point.lotteryCash
+        }
+
+        return MonthToDateSlice(
+            sales: sales,
+            expenses: expenses,
+            fuelGallons: fuelGallons,
+            fuelDollars: fuelDollars,
+            lotteryCash: lotteryCash
+        )
+    }
+
     private static func registerDayTotal(_ day: BooksDayDoc) -> (card: Double, cash: Double, overShort: Double) {
         let r1 = registerBlockTotal(day.register1)
         let r2 = registerBlockTotal(day.register2)

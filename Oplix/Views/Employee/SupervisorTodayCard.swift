@@ -70,7 +70,7 @@ enum SupervisorTodaySnapshotBuilder {
             // Revenue from this shift
             if !shift.registers.isEmpty {
                 for r in shift.registers {
-                    snap.revenue += (r.cashSale ?? 0) + (r.creditCard ?? 0) + (r.fuelSaleDollars ?? 0)
+                    snap.revenue += (r.cashSale ?? 0) + (r.creditCard ?? 0)
                 }
             } else {
                 snap.revenue += (shift.cashSale ?? 0) + (shift.creditCard ?? 0)

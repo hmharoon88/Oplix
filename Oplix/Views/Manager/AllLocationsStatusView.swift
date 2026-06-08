@@ -296,11 +296,11 @@ final class AllLocationsStatusViewModel: ObservableObject {
             guard shift.hasRegisterData,
                   let dateRef = shift.registerClosedAt ?? shift.clockOutTime else { continue }
 
-            // Sum merchandise + fuel from registers (lottery added separately below).
+            // Merchandise only — fuel is tracked separately on register rows.
             var shiftRev: Double = 0
             if !shift.registers.isEmpty {
                 for r in shift.registers {
-                    shiftRev += (r.cashSale ?? 0) + (r.creditCard ?? 0) + (r.fuelSaleDollars ?? 0)
+                    shiftRev += (r.cashSale ?? 0) + (r.creditCard ?? 0)
                 }
             } else {
                 shiftRev += (shift.cashSale ?? 0) + (shift.creditCard ?? 0)

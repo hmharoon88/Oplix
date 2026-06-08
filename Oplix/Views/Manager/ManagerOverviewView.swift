@@ -310,12 +310,6 @@ struct ManagerOverviewView: View {
             )
             .padding(.horizontal)
             
-        case .today:
-            TodayCard(
-                snapshot: viewModel.todaySnapshot,
-                isLoading: viewModel.isLoading
-            )
-            
         case .thisWeek:
             ThisWeekCard(
                 pulse: alertsViewModel.weeklyPulse,
@@ -491,7 +485,7 @@ struct LocationStatsCard: View {
                             .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(.black)
-                        Text("Total revenue this month")
+                        Text("Total sales this month")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -512,9 +506,8 @@ struct LocationStatsCard: View {
                 Divider().padding(.horizontal)
                 
                 VStack(spacing: 8) {
-                    // Revenue breakdown — disjoint pieces of total revenue
-                    // (merch + fuel + lottery). Each row now contributes
-                    // independently with no overlap.
+                    // Headline total is merchandise/register only; fuel and
+                    // lottery are tracked on their own rows below.
                     StatRow(
                         icon: "bag.fill",
                         label: "Merchandise (cash + credit)",

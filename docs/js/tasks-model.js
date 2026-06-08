@@ -217,13 +217,18 @@
 
     function applyReview(task, { employeeId, completionTimestamp, approved, note, reviewerId }) {
         const updated = normalizeTask({ ...task }, task.locationId);
-        const stamp = (c) => ({
-            ...c,
-            isApproved: approved,
-            reviewedBy: reviewerId,
-            reviewedAt: new Date().toISOString(),
-            disapprovalNote: approved ? null : note || null,
-        });
+        const stamp = (c) => {
+            const out = {
+                ...c,
+                isApproved: approved,
+                reviewedBy: reviewerId,
+                // Firestore Timestamp — ISO strings break iOS Codable decoding.
+                reviewedAt: firebase.firestore.Timestamp.now(),
+            };
+            if (approved) delete out.disapprovalNote;
+            else if (note) out.disapprovalNote = note;
+            return out;
+        };
 
         if (completionTimestamp) {
             const targetTs = TP().toDate(completionTimestamp)?.getTime();
