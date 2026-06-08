@@ -203,23 +203,70 @@
             </div>`;
     }
 
+    function renderMonthlyRow(r) {
+        if (r.section) return `<tr class="rpt-section-row"><td colspan="2"></td></tr>`;
+        const val =
+            r.fmt === "number" ? formatValue(r.value, "number") : money(r.value);
+        const labelCls = r.subRow ? "rpt-sub-row-label" : "";
+        return `<tr><td class="${labelCls}">${escapeHtml(r.label)}</td><td class="home-cc-num">${val}</td></tr>`;
+    }
+
+    function renderExpenseDetailTable(expenseDetail, totalExpenses) {
+        const rows = expenseDetail || [];
+        if (!rows.length) {
+            return `<p class="books-hint">No expense lines this month. Enter expenses on <strong>Daily books</strong> or monthly utilities / payroll.</p>`;
+        }
+        const lineTotal = rows.reduce((s, r) => s + RM().num(r.amount), 0);
+        return `
+            <div class="home-card home-cc-table-wrap an-drill-table-scroll">
+                <table class="home-cc-table rpt-table">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Day</th>
+                            <th>Description</th>
+                            <th class="home-cc-num">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows
+                            .map(
+                                (r) => `
+                        <tr>
+                            <td>${escapeHtml(r.category)}</td>
+                            <td>${escapeHtml(r.dayId ? formatDayId(r.dayId) : "—")}</td>
+                            <td>${escapeHtml(r.description)}</td>
+                            <td class="home-cc-num">${money(r.amount)}</td>
+                        </tr>`
+                            )
+                            .join("")}
+                        <tr class="an-total-row">
+                            <td colspan="3"><strong>Line items total</strong></td>
+                            <td class="home-cc-num"><strong>${money(lineTotal)}</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            ${
+                totalExpenses != null
+                    ? `<p class="books-hint">Total expenses (${money(totalExpenses)}) includes utilities, payroll, sales tax, and accountant fees in the monthly breakdown above.</p>`
+                    : ""
+            }`;
+    }
+
     function renderMonthlyBooksBody(report) {
         return `
             <table class="home-cc-table rpt-table">
                 <thead><tr><th>Line item</th><th class="home-cc-num">Amount</th></tr></thead>
                 <tbody>
-                    ${report.rows
-                        .map((r) => {
-                            if (r.section) return `<tr class="rpt-section-row"><td colspan="2"></td></tr>`;
-                            const val =
-                                r.fmt === "number"
-                                    ? formatValue(r.value, "number")
-                                    : money(r.value);
-                            return `<tr><td>${escapeHtml(r.label)}</td><td class="home-cc-num">${val}</td></tr>`;
-                        })
-                        .join("")}
+                    ${report.rows.map((r) => renderMonthlyRow(r)).join("")}
                 </tbody>
-            </table>`;
+            </table>
+            ${
+                report.expenseDetail?.length
+                    ? `<h4 class="rpt-detail-subtitle">Expense detail</h4>${renderExpenseDetailTable(report.expenseDetail, report.totalExpenses)}`
+                    : ""
+            }`;
     }
 
     function renderAllLocationsBody(report) {
@@ -270,21 +317,15 @@
                 const salesHeader = hasGas ? "Revenue" : "Sales";
                 const monthlyTable = `
                     <table class="home-cc-table rpt-table rpt-detail-monthly">
+                        <thead><tr><th>Line item</th><th class="home-cc-num">Amount</th></tr></thead>
                         <tbody>
-                            ${section.monthlyRows
-                                .map((r) => {
-                                    if (r.section) {
-                                        return `<tr class="rpt-section-row"><td colspan="2"></td></tr>`;
-                                    }
-                                    const val =
-                                        r.fmt === "number"
-                                            ? formatValue(r.value, "number")
-                                            : money(r.value);
-                                    return `<tr><td>${escapeHtml(r.label)}</td><td class="home-cc-num">${val}</td></tr>`;
-                                })
-                                .join("")}
+                            ${section.monthlyRows.map((r) => renderMonthlyRow(r)).join("")}
                         </tbody>
                     </table>`;
+
+                const expenseBlock = `
+                    <h4 class="rpt-detail-subtitle">Expense detail</h4>
+                    ${renderExpenseDetailTable(section.expenseDetail, section.totalExpenses)}`;
 
                 const dailyTotals = section.dailyTotals;
                 const daysWithData = dailyTotals.daysWithData;
@@ -340,7 +381,8 @@
                                     .join("")}
                             </tbody>
                         </table>
-                    </div>`
+                    </div>
+                    <p class="books-hint an-daily-footnote">Daily columns are cash, checks, and other from the Daily sheet only. Utilities (electric, water, etc.), payroll, sales tax, and accountant are in the monthly breakdown and expense detail above — not repeated per day.</p>`
                     : `<p class="books-hint">No daily entries this month. Enter data on <strong>Daily books → Daily sheet</strong>.</p>`;
 
                 return `
@@ -348,6 +390,7 @@
                         <h3 class="rpt-location-title">${escapeHtml(section.locationName)}</h3>
                         <h4 class="rpt-detail-subtitle">Monthly breakdown</h4>
                         ${monthlyTable}
+                        ${expenseBlock}
                         <h4 class="rpt-detail-subtitle">Daily sales &amp; expenses</h4>
                         ${dailyBlock}
                     </section>`;

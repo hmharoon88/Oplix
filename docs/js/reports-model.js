@@ -176,7 +176,8 @@
     function buildMonthlyBooksReport(agg, meta) {
         const M = window.OplixBooksModel;
         const rows = [];
-        const add = (label, value, fmt) => rows.push({ label, value, fmt });
+        const add = (label, value, fmt, subRow) =>
+            rows.push({ label, value, fmt, subRow: !!subRow });
 
         if (agg.hasGasStation) {
             add("Total sales (merch)", agg.sales);
@@ -201,7 +202,17 @@
         add("Cash expense", agg.cashExpense);
         add("Checks / ACH", agg.checksAch);
         add("Other expense", agg.otherExpense);
-        add("Utilities", agg.utilitiesTotal);
+
+        const utilRows = (
+            agg.utilitiesBreakdown || M.utilitiesBreakdownFrom(agg.utilities || {}, [])
+        ).filter((u) => num(u.amount) !== 0);
+        if (utilRows.length) {
+            utilRows.forEach((u) => add(u.label, u.amount, null, true));
+            add("Utilities total", agg.utilitiesTotal);
+        } else {
+            add("Utilities", agg.utilitiesTotal);
+        }
+
         add("Payroll", agg.payrollTotal);
         add("Sales tax", agg.salesTax);
         add("Accountant", agg.accountant);
@@ -221,9 +232,22 @@
                 { label: "Net", value: agg.net },
             ],
             rows,
-            csvRows: rows
-                .filter((r) => !r.section)
-                .map((r) => [r.label, r.fmt === "number" ? num(r.value) : num(r.value)]),
+            expenseDetail: agg.expenseDetail || [],
+            totalExpenses: agg.expenses,
+            csvRows: [
+                ...rows
+                    .filter((r) => !r.section)
+                    .map((r) => [r.label, r.fmt === "number" ? num(r.value) : num(r.value)]),
+                [],
+                ["Expense detail"],
+                ["Category", "Day", "Description", "Amount"],
+                ...(agg.expenseDetail || []).map((line) => [
+                    line.category,
+                    line.dayId || "",
+                    line.description,
+                    num(line.amount),
+                ]),
+            ],
         };
     }
 
@@ -302,21 +326,20 @@
                 hasGas: agg.hasGasStation,
                 monthlyRows: monthly.rows,
                 monthlySummary: monthly.summary,
+                expenseDetail: agg.expenseDetail || [],
+                totalExpenses: agg.expenses,
+                totalNet: agg.net,
                 dailyRows,
                 dailyTotals,
             };
         });
 
         const totals = locationSections.reduce(
-            (t, s) => {
-                const sales = s.hasGas ? s.dailyTotals.totalRevenue : s.dailyTotals.sales;
-                return {
-                    sales: t.sales + sales,
-                    expenses: t.expenses + s.dailyTotals.expenses,
-                    net: t.net + s.dailyTotals.net,
-                };
-            },
-            { sales: 0, expenses: 0, net: 0 }
+            (t, s) => ({
+                expenses: t.expenses + s.totalExpenses,
+                net: t.net + s.totalNet,
+            }),
+            { expenses: 0, net: 0 }
         );
 
         const csvRows = [["Monthly breakdown"]];
@@ -329,6 +352,20 @@
                 });
             csvRows.push([]);
         });
+        csvRows.push(["Expense detail"]);
+        csvRows.push(["Facility", "Category", "Day", "Description", "Amount"]);
+        locationSections.forEach((s) => {
+            s.expenseDetail.forEach((line) => {
+                csvRows.push([
+                    s.locationName,
+                    line.category,
+                    line.dayId || "",
+                    line.description,
+                    num(line.amount),
+                ]);
+            });
+        });
+        csvRows.push([]);
         csvRows.push(["Daily sales & expenses"]);
         const anyGas = locationSections.some((s) => s.hasGas);
         if (anyGas) {

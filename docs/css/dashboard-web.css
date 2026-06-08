@@ -2933,6 +2933,11 @@
     margin-bottom: 10px;
 }
 
+.rpt-sub-row-label {
+    padding-left: 1.25rem;
+    color: #475569;
+}
+
 @media print {
     .rpt-location-section {
         break-inside: avoid-page;
