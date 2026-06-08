@@ -690,7 +690,8 @@
 }
 
 .dashboard-panel--wide {
-    max-width: 960px;
+    max-width: none;
+    width: 100%;
 }
 
 .books-intro {
@@ -2825,6 +2826,8 @@
     display: flex;
     flex-direction: column;
     gap: 20px;
+    width: 100%;
+    max-width: none;
 }
 
 .rpt-type-desc {
@@ -2847,6 +2850,9 @@
 
 .rpt-preview {
     padding: 20px 22px;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
 }
 
 .rpt-preview-head {
@@ -2944,11 +2950,14 @@
 
 .rpt-compare-scroll {
     overflow-x: auto;
-    max-width: 100%;
+    width: 100%;
+    max-width: none;
 }
 
 .rpt-compare-table {
-    min-width: 640px;
+    width: 100%;
+    table-layout: fixed;
+    font-size: 0.8125rem;
 }
 
 .rpt-compare-sticky {
@@ -2956,18 +2965,26 @@
     left: 0;
     z-index: 1;
     background: #fff;
-    min-width: 10rem;
-    max-width: 14rem;
+    width: 12%;
+    min-width: 7.5rem;
+    max-width: 11rem;
     box-shadow: 4px 0 8px -4px rgba(15, 23, 42, 0.08);
 }
 
 .rpt-compare-loc {
-    min-width: 6.5rem;
-    white-space: nowrap;
+    min-width: 0;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.25;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
 }
 
 .rpt-compare-total-col {
     background: #f8fafc;
+    width: 8%;
+    min-width: 4.5rem;
 }
 
 .rpt-compare-group-row td {
@@ -2993,7 +3010,8 @@
 }
 
 .rpt-table {
-    min-width: 480px;
+    min-width: 0;
+    width: 100%;
 }
 
 .rpt-section-row td {

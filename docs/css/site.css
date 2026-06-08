@@ -836,6 +836,11 @@ a {
     max-width: 900px;
 }
 
+.dashboard-panel--wide {
+    max-width: none;
+    width: 100%;
+}
+
 .dashboard-panel--home {
     max-width: 1120px;
 }
