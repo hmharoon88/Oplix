@@ -50,6 +50,17 @@
         return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
     }
 
+    function formatDayId(dayId) {
+        if (!dayId) return "—";
+        const parts = dayId.split("-").map(Number);
+        if (parts.length < 3) return dayId;
+        return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+        });
+    }
+
     function monthOptions(selected) {
         const opts = [];
         const now = new Date();
@@ -248,6 +259,102 @@
             </table>`;
     }
 
+    function renderAllLocationsDetailBody(report) {
+        if (!report.locationSections.length) {
+            return `<p class="data-list-empty">No facilities to report.</p>`;
+        }
+
+        return report.locationSections
+            .map((section) => {
+                const hasGas = section.hasGas;
+                const salesHeader = hasGas ? "Revenue" : "Sales";
+                const monthlyTable = `
+                    <table class="home-cc-table rpt-table rpt-detail-monthly">
+                        <tbody>
+                            ${section.monthlyRows
+                                .map((r) => {
+                                    if (r.section) {
+                                        return `<tr class="rpt-section-row"><td colspan="2"></td></tr>`;
+                                    }
+                                    const val =
+                                        r.fmt === "number"
+                                            ? formatValue(r.value, "number")
+                                            : money(r.value);
+                                    return `<tr><td>${escapeHtml(r.label)}</td><td class="home-cc-num">${val}</td></tr>`;
+                                })
+                                .join("")}
+                        </tbody>
+                    </table>`;
+
+                const dailyTotals = section.dailyTotals;
+                const daysWithData = dailyTotals.daysWithData;
+                const dailyBlock = daysWithData
+                    ? `
+                    <div class="books-cash-recon-totals an-daily-month-totals rpt-detail-daily-totals">
+                        <span><em>${escapeHtml(salesHeader)}</em> <strong>${money(hasGas ? dailyTotals.totalRevenue : dailyTotals.sales)}</strong></span>
+                        <span><em>Expenses</em> <strong>${money(dailyTotals.expenses)}</strong></span>
+                        <span><em>Net</em> <strong class="${dailyTotals.net >= 0 ? "pos" : "neg"}">${money(dailyTotals.net)}</strong></span>
+                    </div>
+                    <div class="home-card home-cc-table-wrap an-daily-table-wrap">
+                        <table class="home-cc-table an-daily-table">
+                            <thead>
+                                <tr>
+                                    <th class="an-daily-day-col">Day / date</th>
+                                    ${
+                                        hasGas
+                                            ? `<th class="home-cc-num">Merch</th>
+                                               <th class="home-cc-num">Fuel ($)</th>
+                                               <th class="home-cc-num">Pump credit</th>`
+                                            : ""
+                                    }
+                                    <th class="home-cc-num">${escapeHtml(salesHeader)}</th>
+                                    <th class="home-cc-num">Cash exp.</th>
+                                    <th class="home-cc-num">Checks</th>
+                                    <th class="home-cc-num">Other</th>
+                                    <th class="home-cc-num">Total exp.</th>
+                                    <th class="home-cc-num">Net</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${section.dailyRows
+                                    .map((row) => {
+                                        const emptyCls = row.hasData ? "" : " an-daily-row--empty";
+                                        const cell = (v) => (row.hasData ? money(v) : "—");
+                                        const extraGas = hasGas
+                                            ? `<td class="home-cc-num">${cell(row.merchSale)}</td>
+                                               <td class="home-cc-num">${cell(row.fuelDollars)}</td>
+                                               <td class="home-cc-num">${cell(row.creditCard)}</td>`
+                                            : "";
+                                        return `
+                                        <tr class="an-daily-row${emptyCls}">
+                                            <td class="an-daily-day-col">${escapeHtml(formatDayId(row.dayId))}</td>
+                                            ${extraGas}
+                                            <td class="home-cc-num">${cell(hasGas ? row.totalRevenue : row.sales)}</td>
+                                            <td class="home-cc-num">${cell(row.cashExpense)}</td>
+                                            <td class="home-cc-num">${cell(row.checksAch)}</td>
+                                            <td class="home-cc-num">${cell(row.otherExpense)}</td>
+                                            <td class="home-cc-num">${cell(row.expenses)}</td>
+                                            <td class="home-cc-num an-daily-net${row.net >= 0 ? " pos" : " neg"}">${cell(row.net)}</td>
+                                        </tr>`;
+                                    })
+                                    .join("")}
+                            </tbody>
+                        </table>
+                    </div>`
+                    : `<p class="books-hint">No daily entries this month. Enter data on <strong>Daily books → Daily sheet</strong>.</p>`;
+
+                return `
+                    <section class="rpt-location-section">
+                        <h3 class="rpt-location-title">${escapeHtml(section.locationName)}</h3>
+                        <h4 class="rpt-detail-subtitle">Monthly breakdown</h4>
+                        ${monthlyTable}
+                        <h4 class="rpt-detail-subtitle">Daily sales &amp; expenses</h4>
+                        ${dailyBlock}
+                    </section>`;
+            })
+            .join("");
+    }
+
     function renderComplianceBody(report) {
         return `
             <table class="home-cc-table rpt-table">
@@ -307,6 +414,8 @@
                 return renderMonthlyBooksBody(report);
             case "all_locations_books":
                 return renderAllLocationsBody(report);
+            case "all_locations_detail":
+                return renderAllLocationsDetailBody(report);
             case "compliance":
                 return renderComplianceBody(report);
             case "lottery":
@@ -417,6 +526,16 @@
             } else if (state.reportType === "all_locations_books") {
                 const packs = await RS().loadAllLocationsBooks(userId, locations, state.monthId);
                 report = RM().buildAllLocationsBooksReport(packs, {
+                    monthLabel: monthLabel(state.monthId),
+                    monthId: state.monthId,
+                });
+            } else if (state.reportType === "all_locations_detail") {
+                const packs = await RS().loadAllLocationsBooksDetail(
+                    userId,
+                    locations,
+                    state.monthId
+                );
+                report = RM().buildAllLocationsDetailReport(packs, {
                     monthLabel: monthLabel(state.monthId),
                     monthId: state.monthId,
                 });

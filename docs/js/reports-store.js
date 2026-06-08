@@ -39,6 +39,22 @@
         return packs;
     }
 
+    async function loadAllLocationsBooksDetail(userId, locations, monthId) {
+        const packs = [];
+        for (const loc of locations) {
+            const hasGas = loc.facilityType === "c_store_gas";
+            const { month, daysById } = await Books().loadMonth(userId, loc.id, monthId);
+            packs.push({
+                locationId: loc.id,
+                locationName: loc.name || "Facility",
+                hasGasStation: hasGas,
+                aggregate: M().aggregateMonth(month, daysById, { hasGasStation: hasGas }),
+                daysById,
+            });
+        }
+        return packs;
+    }
+
     async function loadCompliance(userId, locationId) {
         if (!Compliance()) return [];
         return Compliance().list(userId, locationId);
@@ -67,6 +83,7 @@
     window.OplixReportsStore = {
         loadBooksAggregate,
         loadAllLocationsBooks,
+        loadAllLocationsBooksDetail,
         loadCompliance,
         loadComplianceAll,
         loadShiftReportData,

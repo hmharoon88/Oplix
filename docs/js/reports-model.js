@@ -20,6 +20,13 @@
             needsLocation: false,
         },
         {
+            id: "all_locations_detail",
+            label: "All locations — detail",
+            desc: "Monthly breakdown and day-by-day sales & expenses for every facility.",
+            needsMonth: true,
+            needsLocation: false,
+        },
+        {
             id: "compliance",
             label: "Licenses & renewals",
             desc: "Registrations with expiry dates and status for one or all facilities.",
@@ -276,6 +283,131 @@
         };
     }
 
+    function buildAllLocationsDetailReport(packs, meta) {
+        const M = window.OplixBooksModel;
+        const locationSections = packs.map((p) => {
+            const agg = p.aggregate;
+            const monthly = buildMonthlyBooksReport(agg, {
+                locationName: p.locationName,
+                monthLabel: meta.monthLabel,
+                monthId: meta.monthId,
+            });
+            const { rows: dailyRows, totals: dailyTotals } = M.dailySalesExpenseRows(
+                meta.monthId,
+                p.daysById,
+                { hasGasStation: agg.hasGasStation }
+            );
+            return {
+                locationName: p.locationName,
+                hasGas: agg.hasGasStation,
+                monthlyRows: monthly.rows,
+                monthlySummary: monthly.summary,
+                dailyRows,
+                dailyTotals,
+            };
+        });
+
+        const totals = locationSections.reduce(
+            (t, s) => {
+                const sales = s.hasGas ? s.dailyTotals.totalRevenue : s.dailyTotals.sales;
+                return {
+                    sales: t.sales + sales,
+                    expenses: t.expenses + s.dailyTotals.expenses,
+                    net: t.net + s.dailyTotals.net,
+                };
+            },
+            { sales: 0, expenses: 0, net: 0 }
+        );
+
+        const csvRows = [["Monthly breakdown"]];
+        locationSections.forEach((s) => {
+            csvRows.push([s.locationName]);
+            s.monthlyRows
+                .filter((r) => !r.section)
+                .forEach((r) => {
+                    csvRows.push(["", r.label, num(r.value)]);
+                });
+            csvRows.push([]);
+        });
+        csvRows.push(["Daily sales & expenses"]);
+        const anyGas = locationSections.some((s) => s.hasGas);
+        if (anyGas) {
+            csvRows.push([
+                "Facility",
+                "Day",
+                "Merch",
+                "Fuel ($)",
+                "Pump credit",
+                "Revenue",
+                "Cash exp.",
+                "Checks",
+                "Other",
+                "Total exp.",
+                "Net",
+            ]);
+            locationSections.forEach((s) => {
+                s.dailyRows.forEach((row) => {
+                    if (!row.hasData) return;
+                    csvRows.push([
+                        s.locationName,
+                        row.dayId,
+                        s.hasGas ? row.merchSale : "",
+                        s.hasGas ? row.fuelDollars : "",
+                        s.hasGas ? row.creditCard : "",
+                        s.hasGas ? row.totalRevenue : row.sales,
+                        row.cashExpense,
+                        row.checksAch,
+                        row.otherExpense,
+                        row.expenses,
+                        row.net,
+                    ]);
+                });
+            });
+        } else {
+            csvRows.push([
+                "Facility",
+                "Day",
+                "Sales",
+                "Cash exp.",
+                "Checks",
+                "Other",
+                "Total exp.",
+                "Net",
+            ]);
+            locationSections.forEach((s) => {
+                s.dailyRows.forEach((row) => {
+                    if (!row.hasData) return;
+                    csvRows.push([
+                        s.locationName,
+                        row.dayId,
+                        row.sales,
+                        row.cashExpense,
+                        row.checksAch,
+                        row.otherExpense,
+                        row.expenses,
+                        row.net,
+                    ]);
+                });
+            });
+        }
+
+        return {
+            type: "all_locations_detail",
+            title: "All locations — detailed books",
+            meta,
+            headline: "All facilities",
+            subhead: meta.monthLabel,
+            summary: [
+                { label: "Locations", value: locationSections.length, format: "number" },
+                { label: "Total expenses", value: totals.expenses },
+                { label: "Total net", value: totals.net },
+            ],
+            locationSections,
+            anyGas,
+            csvRows,
+        };
+    }
+
     function buildComplianceReport(items, meta) {
         const C = window.OplixComplianceModel;
         const sorted = C.sortItems(items.filter((i) => i.active !== false));
@@ -496,6 +628,7 @@
         formatRange,
         buildMonthlyBooksReport,
         buildAllLocationsBooksReport,
+        buildAllLocationsDetailReport,
         buildComplianceReport,
         buildLotteryReport,
         buildPayrollReport,
