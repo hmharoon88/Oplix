@@ -19,6 +19,7 @@
         "facilities",
         "employees",
         "vendors",
+        "compliance",
         "payroll",
         "tasks",
         "data-input",
@@ -86,6 +87,9 @@
             case "vendors":
                 window.OplixVendorsUI?.resetToRoot?.();
                 break;
+            case "compliance":
+                window.OplixComplianceHubUI?.resetToRoot?.();
+                break;
             case "payroll":
                 window.OplixPayrollUI?.resetToRoot?.();
                 break;
@@ -138,6 +142,9 @@
             case "vendors":
                 await runModuleInit("Vendors", () => OplixVendorsUI.init(uid, locs));
                 break;
+            case "compliance":
+                await runModuleInit("Compliance", () => OplixComplianceHubUI.init(uid, locs));
+                break;
             case "employees":
                 await runModuleInit("Employees", () => OplixEmployeesUI.init(uid, locs));
                 break;
@@ -171,6 +178,9 @@
         }
         if (panelId === "vendors" && window.OplixVendorsUI) {
             OplixVendorsUI.onShow();
+        }
+        if (panelId === "compliance" && window.OplixComplianceHubUI) {
+            OplixComplianceHubUI.onShow();
         }
         if (panelId === "employees" && window.OplixEmployeesUI) {
             OplixEmployeesUI.onShow();
@@ -228,6 +238,9 @@
         }
         if (initializedPanels.has("vendors") && window.OplixVendorsUI) {
             OplixVendorsUI.setLocations(locs);
+        }
+        if (initializedPanels.has("compliance") && window.OplixComplianceHubUI) {
+            OplixComplianceHubUI.setLocations(locs);
         }
         if (initializedPanels.has("employees") && window.OplixEmployeesUI) {
             OplixEmployeesUI.setLocations(locs);

@@ -3714,6 +3714,112 @@
     margin-bottom: 20px;
 }
 
+/* Compliance hub (sidebar tab) */
+.comp-hub-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px 16px;
+    margin-bottom: 20px;
+}
+
+.comp-hub-filter {
+    flex: 1;
+    min-width: 180px;
+    max-width: 280px;
+    margin: 0;
+}
+
+.comp-hub-filter-label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--dash-muted);
+    margin-bottom: 6px;
+}
+
+.comp-hub-summary {
+    margin-bottom: 16px;
+}
+
+.comp-hub-empty-hint {
+    margin-bottom: 16px;
+}
+
+.comp-hub-group {
+    margin-bottom: 32px;
+}
+
+.comp-hub-group-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px 16px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--dash-border);
+}
+
+.comp-hub-group-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--dash-text);
+}
+
+.comp-hub-group-meta {
+    margin: 4px 0 0;
+    font-size: 0.8125rem;
+    color: var(--dash-muted);
+}
+
+.comp-hub-group-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.comp-hub-attention {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #b45309;
+    background: rgba(180, 83, 9, 0.1);
+    padding: 4px 10px;
+    border-radius: 999px;
+}
+
+.comp-hub-ok {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #15803d;
+}
+
+.comp-hub-loc-cell strong {
+    font-weight: 600;
+    color: var(--dash-text);
+}
+
+.comp-hub-loc-empty {
+    margin: 0;
+    padding: 12px 0;
+    font-size: 0.875rem;
+}
+
+.comp-hub-table {
+    font-size: 0.875rem;
+}
+
+@media (max-width: 900px) {
+    .comp-hub-table {
+        display: block;
+        overflow-x: auto;
+    }
+}
+
 /* Employees hub (sidebar tab) */
 .emp-hub-row {
     display: flex;

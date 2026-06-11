@@ -77,6 +77,25 @@
         return snap.docs.map((d) => M().normalizeItem({ id: d.id, ...d.data() }));
     }
 
+    /** Load compliance items for every facility (parallel reads). */
+    async function listAll(userId, locations) {
+        const locs = locations || [];
+        if (!locs.length) return [];
+        const rows = await Promise.all(
+            locs.map(async (loc) => {
+                const items = await list(userId, loc.id);
+                return items
+                    .filter((i) => i.active !== false)
+                    .map((item) => ({
+                        ...item,
+                        locationId: loc.id,
+                        locationName: loc.name || "Facility",
+                    }));
+            })
+        );
+        return rows.flat();
+    }
+
     async function save(userId, locationId, id, data) {
         const payload = {
             ...data,
@@ -100,6 +119,7 @@
 
     window.OplixComplianceStore = {
         list,
+        listAll,
         save,
         remove,
         newId,

@@ -29,6 +29,7 @@
                 <button type="button" class="sidebar-btn" data-panel="facilities">Facilities</button>
                 <button type="button" class="sidebar-btn" data-panel="employees">Employees</button>
                 <button type="button" class="sidebar-btn" data-panel="vendors">Vendors</button>
+                <button type="button" class="sidebar-btn" data-panel="compliance">Compliance</button>
                 <button type="button" class="sidebar-btn" data-panel="payroll">Payroll</button>
                 <button type="button" class="sidebar-btn" data-panel="tasks">Tasks</button>
                 <button type="button" class="sidebar-btn" data-panel="data-input" title="Daily books">Daily books</button>
@@ -79,6 +80,12 @@
                 <h1 class="panel-title">Vendors</h1>
                 <p class="panel-lead books-intro">Supplier contacts across all facilities — same list as inside each facility.</p>
                 <div id="vendors-root"></div>
+            </section>
+
+            <section class="dashboard-panel dashboard-panel--wide" id="panel-compliance" data-panel="compliance" hidden>
+                <h1 class="panel-title">Compliance</h1>
+                <p class="panel-lead books-intro">Licenses, certifications, and renewals across all facilities — expiry dates and renewal status in one place.</p>
+                <div id="compliance-root"></div>
             </section>
 
             <section class="dashboard-panel dashboard-panel--wide" id="panel-payroll" data-panel="payroll" hidden>
@@ -141,6 +148,7 @@
     <script src="../js/compliance-model.js"></script>
     <script src="../js/compliance-store.js"></script>
     <script src="../js/compliance-ui.js"></script>
+    <script src="../js/compliance-hub-ui.js?v=20260524c"></script>
     <script src="../js/documents-store.js"></script>
     <script src="../js/documents-ui.js"></script>
     <script src="../js/payables-model.js"></script>
