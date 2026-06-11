@@ -368,7 +368,7 @@
 
         const salesHeader = hasGas ? "Revenue" : "Sales";
         const salesHint = hasGas
-            ? "Revenue = merch + pump credit + fuel + pulltab for each day."
+            ? "Merch, pump credit, and fuel ($) are separate columns. Net uses merch + pulltab minus daily expenses — pump credit and fuel are not included in net."
             : "Sales = register card + cash for each day.";
 
         const tableRows = rows
@@ -432,7 +432,7 @@
                         <tfoot>
                             <tr class="an-total-row">
                                 <td><strong>Month (days entered)</strong></td>
-                                ${hasGas ? `<td class="home-cc-num">—</td><td class="home-cc-num">${money(totals.fuelDollars)}</td><td class="home-cc-num">—</td>` : ""}
+                                ${hasGas ? `<td class="home-cc-num"><strong>${money(totals.merchSale)}</strong></td><td class="home-cc-num"><strong>${money(totals.fuelDollars)}</strong></td><td class="home-cc-num"><strong>${money(totals.creditCard)}</strong></td>` : ""}
                                 <td class="home-cc-num"><strong>${money(hasGas ? totals.totalRevenue : totals.sales)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(totals.cashExpense)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(totals.checksAch)}</strong></td>
@@ -443,7 +443,11 @@
                         </tfoot>
                     </table>
                 </div>
-                <p class="books-hint an-daily-footnote">Daily expenses are from the Daily sheet only. Monthly utilities, payroll, sales tax, and accountant fees are included in the month totals above, not in this table.</p>
+                <p class="books-hint an-daily-footnote">Daily expenses are from the Daily sheet only. Monthly utilities, payroll, sales tax, and accountant fees are included in the month totals above, not in this table.${
+                    hasGas
+                        ? " For gas stations, <strong>Net</strong> uses merch and pulltab only — pump credit and fuel ($) are not counted toward net."
+                        : ""
+                }</p>
             </section>`;
     }
 

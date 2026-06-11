@@ -608,6 +608,16 @@
         return { label: "Variance", tone: "bad" };
     }
 
+    /** Gas station total revenue (all streams) — for display only. */
+    function gasTotalRevenue(merchSale, creditCard, fuelDollars, pulltabCash) {
+        return num(merchSale) + num(creditCard) + num(fuelDollars) + num(pulltabCash);
+    }
+
+    /** Gas station revenue counted toward net — merch + pulltab only; pump credit and fuel excluded. */
+    function gasRevenueForNet(merchSale, pulltabCash) {
+        return num(merchSale) + num(pulltabCash);
+    }
+
     /** One calendar day's sales and expenses from Daily books. */
     function dailySalesExpenseRow(dayId, rawDay, hasGasStation) {
         const empty = {
@@ -642,12 +652,15 @@
 
         let sales;
         let totalRevenue;
+        let netRevenue;
         if (hasGasStation) {
             sales = dayMerch;
-            totalRevenue = dayMerch + dayCredit + fuel.dollars + pull.cash;
+            totalRevenue = gasTotalRevenue(dayMerch, dayCredit, fuel.dollars, pull.cash);
+            netRevenue = gasRevenueForNet(dayMerch, pull.cash);
         } else {
             sales = reg.card + reg.cash;
             totalRevenue = sales;
+            netRevenue = sales;
         }
 
         const hasData =
@@ -660,8 +673,9 @@
             dayId,
             sales,
             totalRevenue,
+            netRevenue,
             expenses,
-            net: totalRevenue - expenses,
+            net: netRevenue - expenses,
             cashExpense: dayCash,
             checksAch: dayChecks,
             otherExpense: dayOther,
@@ -699,6 +713,8 @@
                 acc.checksAch += row.checksAch;
                 acc.otherExpense += row.otherExpense;
                 acc.fuelDollars += row.fuelDollars;
+                acc.merchSale += row.merchSale;
+                acc.creditCard += row.creditCard;
                 return acc;
             },
             {
@@ -711,6 +727,8 @@
                 checksAch: 0,
                 otherExpense: 0,
                 fuelDollars: 0,
+                merchSale: 0,
+                creditCard: 0,
             }
         );
 
@@ -792,7 +810,10 @@
 
         const sales = hasGasStation ? merchSale : registerCard + registerCash;
         const totalRevenue = hasGasStation
-            ? merchSale + creditCard + fuelDollars + pulltabCash
+            ? gasTotalRevenue(merchSale, creditCard, fuelDollars, pulltabCash)
+            : sales;
+        const netRevenue = hasGasStation
+            ? gasRevenueForNet(merchSale, pulltabCash)
             : sales;
         const expenses =
             cashExpense +
@@ -833,8 +854,9 @@
             salesTax: num(month.salesTax),
             accountant: num(month.accountant),
             expenses,
-            net: totalRevenue + receivablesTotal - expenses,
+            net: netRevenue + receivablesTotal - expenses,
             totalRevenue,
+            netRevenue,
             totalOverShort: registerOverShort + lotteryOverShort + pulltabOverShort,
             dailySeries,
             dayCount: days.length,

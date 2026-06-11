@@ -170,7 +170,7 @@
 
     function cardCashHint(agg) {
         if (agg && agg.hasGasStation) {
-            return "Total sales is merch only. Credit card tile uses register card (detail sheet). Pump credit and fuel are separate.";
+            return "Merch sale, pump credit card, and fuel ($) are tracked separately — not combined into each other.";
         }
         return "Total sales from register card and cash (both registers, both shifts). Lottery and pulltab are tracked separately.";
     }

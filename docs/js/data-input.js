@@ -946,7 +946,7 @@
     function renderDailyMerchEntry() {
         return `
             <h3 class="books-subtitle">Daily sales</h3>
-            <p class="books-hint"><strong>Total sales</strong> uses merch only. Register card (detail sheet) drives the credit card tile; pump credit and fuel are separate.</p>
+            <p class="books-hint"><strong>Merch sale</strong>, <strong>pump credit card</strong>, and <strong>fuel ($)</strong> are three separate fields — never combined into each other.</p>
             <label class="books-label">Merch sale ($)
                 <input ${amountInputAttrs("merch_sale", state.day.merchSale)}>
                 <span class="books-field-hint">In-store merch total for the day</span>
@@ -956,16 +956,16 @@
     function renderDailyGasSales() {
         return `
             ${renderDailyMerchEntry()}
-            <label class="books-label">Credit card ($)
+            <label class="books-label">Pump credit card ($)
                 <input ${amountInputAttrs("credit_card", state.day.creditCard)}>
-                <span class="books-field-hint">Pump / outdoor card sales — separate from merch and register card</span>
+                <span class="books-field-hint">Outdoor / pump card sales only — separate from merch sale and fuel ($)</span>
             </label>`;
     }
 
     function renderDailyDetailSheet(reg, fuel) {
         const totals = `
             <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash · O/S ${money(reg.overShort)}</p>
-            <p class="books-hint">Shift registers are for reconciliation — register card appears on the credit card tile; pump credit is entered above.</p>`;
+            <p class="books-hint">Register card/cash on the detail sheet is for shift reconciliation only — not added to merch, pump credit, or fuel.</p>`;
 
         return `
             <details class="books-detail-sheet" open>
