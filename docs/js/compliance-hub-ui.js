@@ -1,5 +1,5 @@
 /**
- * Sidebar Compliance tab — licenses, certs & renewals across all facilities.
+ * Sidebar Compliance tab — matrix dashboard: facilities across the top, records down the left.
  */
 (function () {
     const M = () => window.OplixComplianceModel;
@@ -8,7 +8,6 @@
     let userId = null;
     let locations = [];
     let items = [];
-    let filterLocationId = "";
     let filterStatus = "all";
     let loading = false;
 
@@ -23,7 +22,7 @@
     }
 
     function formatDate(iso) {
-        if (!iso) return "—";
+        if (!iso) return "";
         const d = M().parseISODate(iso);
         if (!d) return iso;
         return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -53,26 +52,47 @@
         return true;
     }
 
-    function filteredItems() {
-        let list = items.filter(matchesStatusFilter);
-        if (filterLocationId) {
-            list = list.filter((i) => i.locationId === filterLocationId);
-        }
-        return list.sort((a, b) => {
-            const ra = statusRank(a);
-            const rb = statusRank(b);
-            if (ra !== rb) return ra - rb;
-            const loc = (a.locationName || "").localeCompare(b.locationName || "");
-            if (loc !== 0) return loc;
-            const da = M().daysUntilExpiry(a);
-            const db = M().daysUntilExpiry(b);
-            if (da != null && db != null) return da - db;
-            if (da != null) return -1;
-            if (db != null) return 1;
-            return (a.title || M().categoryLabel(a.category)).localeCompare(
-                b.title || M().categoryLabel(b.category)
-            );
+    function rowKey(item) {
+        const title = (item.title || M().categoryLabel(item.category)).trim().toLowerCase();
+        return `${item.recordType}|${item.category}|${title}`;
+    }
+
+    function buildMatrixRows(sourceItems) {
+        const rows = new Map();
+        sourceItems.forEach((item) => {
+            const key = rowKey(item);
+            if (!rows.has(key)) {
+                rows.set(key, {
+                    key,
+                    recordType: item.recordType,
+                    category: item.category,
+                    title: item.title || M().categoryLabel(item.category),
+                    byLoc: {},
+                });
+            }
+            const row = rows.get(key);
+            const existing = row.byLoc[item.locationId];
+            if (!existing || statusRank(item) < statusRank(existing)) {
+                row.byLoc[item.locationId] = item;
+            }
         });
+
+        return [...rows.values()].sort((a, b) => {
+            const typeCmp = M().recordTypeLabel(a.recordType).localeCompare(
+                M().recordTypeLabel(b.recordType)
+            );
+            if (typeCmp !== 0) return typeCmp;
+            const catCmp = M().categoryLabel(a.category).localeCompare(M().categoryLabel(b.category));
+            if (catCmp !== 0) return catCmp;
+            return a.title.localeCompare(b.title);
+        });
+    }
+
+    function visibleRows(allRows) {
+        if (filterStatus === "all") return allRows;
+        return allRows.filter((row) =>
+            Object.values(row.byLoc).some((item) => matchesStatusFilter(item))
+        );
     }
 
     async function loadItems() {
@@ -85,8 +105,11 @@
 
     function renderGlobalSummary(list) {
         const c = M().summaryCounts(list);
+        if (!c.total && !locations.length) {
+            return `<p class="books-hint comp-hub-empty-hint">Add a facility first, then track licenses under each location's Compliance section.</p>`;
+        }
         if (!c.total) {
-            return `<p class="books-hint comp-hub-empty-hint">No licenses or registrations tracked yet. Add records inside each facility under <strong>Compliance</strong>, or open a facility below.</p>`;
+            return `<p class="books-hint comp-hub-empty-hint">No licenses tracked yet — use <strong>Add records</strong> on a facility column to get started.</p>`;
         }
         return `
             <div class="comp-summary comp-hub-summary" role="status">
@@ -98,148 +121,164 @@
             </div>`;
     }
 
-    function renderTableRow(item, showLocation) {
-        const title = item.title || M().categoryLabel(item.category);
-        const disp = M().displayStatus(item);
-        const hint = M().expiryHint(item);
-        const rowClass =
-            disp.id === "expired"
-                ? "comp-table-row--expired"
-                : disp.id === "expiring_soon"
-                  ? "comp-table-row--expiring"
-                  : "";
-        const renewed = item.lastRenewedDate ? formatDate(item.lastRenewedDate) : "—";
-        const renewalDue = item.renewalDueDate ? formatDate(item.renewalDueDate) : "—";
-
-        return `
-            <tr class="comp-table-row${rowClass ? ` ${rowClass}` : ""}" data-comp-hub-loc="${escapeHtml(item.locationId)}">
-                ${
-                    showLocation
-                        ? `<td class="comp-hub-loc-cell"><strong>${escapeHtml(item.locationName)}</strong></td>`
-                        : ""
-                }
-                <td>${escapeHtml(M().recordTypeLabel(item.recordType))}</td>
-                <td>
-                    <strong class="comp-table-title">${escapeHtml(title)}</strong>
-                    <span class="comp-table-meta">${escapeHtml(M().categoryLabel(item.category))}</span>
-                </td>
-                <td class="comp-table-mono">${item.identifier ? escapeHtml(item.identifier) : "—"}</td>
-                <td class="comp-table-date">${renewed}</td>
-                <td class="comp-table-date">
-                    ${item.expiryDate ? `<span>${escapeHtml(formatDate(item.expiryDate))}</span>` : "—"}
-                    ${hint ? `<span class="comp-expiry-hint">${escapeHtml(hint)}</span>` : ""}
-                </td>
-                <td class="comp-table-date">${renewalDue}</td>
-                <td>
-                    <span class="comp-status-pill ${disp.className}">${escapeHtml(disp.label)}</span>
-                </td>
-                <td class="comp-table-actions">
-                    <button type="button" class="btn btn-nav-outline comp-hub-open" data-comp-open="${escapeHtml(item.locationId)}" title="Manage at facility">Open</button>
-                </td>
-            </tr>`;
+    function facilityColumnStats(locId) {
+        const locItems = items.filter((i) => i.locationId === locId);
+        const c = M().summaryCounts(locItems);
+        const attention = M().needsAttentionCount(locItems);
+        return { ...c, attention };
     }
 
-    function renderTable(list, showLocation) {
-        if (!list.length) return "";
+    function renderFacilityCards() {
+        if (!locations.length) return "";
         return `
-            <div class="comp-table-wrap home-card">
-                <table class="home-cc-table comp-table comp-hub-table">
-                    <thead>
-                        <tr>
-                            ${showLocation ? "<th>Facility</th>" : ""}
-                            <th>Type</th>
-                            <th>Name</th>
-                            <th>License #</th>
-                            <th>Last renewed</th>
-                            <th>Expires</th>
-                            <th>Renewal due</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>${list.map((item) => renderTableRow(item, showLocation)).join("")}</tbody>
-                </table>
+            <div class="comp-matrix-fac-cards" role="list">
+                ${locations
+                    .map((loc) => {
+                        const stats = facilityColumnStats(loc.id);
+                        const parts = [
+                            stats.total ? `${stats.total} record${stats.total === 1 ? "" : "s"}` : "No records",
+                            stats.expired ? `${stats.expired} expired` : "",
+                            stats.expiring ? `${stats.expiring} expiring` : "",
+                        ].filter(Boolean);
+                        return `
+                    <button type="button" class="comp-matrix-fac-card${stats.attention ? " comp-matrix-fac-card--warn" : ""}" data-comp-open="${escapeHtml(loc.id)}" role="listitem">
+                        <span class="comp-matrix-fac-card-name">${escapeHtml(loc.name || "Facility")}</span>
+                        <span class="comp-matrix-fac-card-meta">${escapeHtml(parts.join(" · "))}</span>
+                        ${
+                            stats.attention
+                                ? `<span class="comp-matrix-fac-card-badge">${stats.attention} need attention</span>`
+                                : stats.total
+                                  ? `<span class="comp-matrix-fac-card-badge comp-matrix-fac-card-badge--ok">Up to date</span>`
+                                  : ""
+                        }
+                    </button>`;
+                    })
+                    .join("")}
             </div>`;
     }
 
-    function renderLocationGroup(locId, groupItems) {
-        const locItems = M().sortItems(groupItems);
-        const attention = M().needsAttentionCount(locItems);
-        const c = M().summaryCounts(locItems);
-        const badges = [
-            c.total ? `${c.total} record${c.total === 1 ? "" : "s"}` : "",
-            c.expired ? `${c.expired} expired` : "",
-            c.expiring ? `${c.expiring} expiring` : "",
-            c.pending ? `${c.pending} renewal` : "",
-        ]
-            .filter(Boolean)
-            .join(" · ");
+    function renderMatrixCell(item, locId) {
+        if (!item) {
+            return `
+                <td class="comp-matrix-cell comp-matrix-cell--empty">
+                    <span class="comp-matrix-empty">—</span>
+                    <button type="button" class="comp-matrix-add" data-comp-open="${escapeHtml(locId)}" title="Add at this facility">+</button>
+                </td>`;
+        }
 
-        const tableBlock =
-            locItems.length > 0
-                ? renderTable(locItems, false)
-                : `<p class="data-list-empty comp-hub-loc-empty">No licenses or registrations tracked for this facility yet.</p>`;
+        if (filterStatus !== "all" && !matchesStatusFilter(item)) {
+            return `
+                <td class="comp-matrix-cell comp-matrix-cell--filtered">
+                    <span class="comp-matrix-empty">—</span>
+                </td>`;
+        }
+
+        const disp = M().displayStatus(item);
+        const hint = M().expiryHint(item);
+        const cellClass =
+            disp.id === "expired"
+                ? "comp-matrix-cell--expired"
+                : disp.id === "expiring_soon"
+                  ? "comp-matrix-cell--expiring"
+                  : disp.id === "pending_renewal"
+                    ? "comp-matrix-cell--pending"
+                    : "";
 
         return `
-            <section class="comp-hub-group" data-comp-hub-group="${escapeHtml(locId)}">
-                <header class="comp-hub-group-head">
-                    <div>
-                        <h2 class="comp-hub-group-title">${escapeHtml(locationName(locId))}</h2>
-                        ${badges ? `<p class="comp-hub-group-meta">${escapeHtml(badges)}</p>` : `<p class="comp-hub-group-meta">No records yet</p>`}
-                    </div>
-                    <div class="comp-hub-group-actions">
-                        ${
-                            locItems.length
-                                ? attention
-                                    ? `<span class="comp-hub-attention">${attention} need${attention === 1 ? "s" : ""} attention</span>`
-                                    : `<span class="comp-hub-ok">Up to date</span>`
-                                : ""
-                        }
-                        <button type="button" class="btn btn-nav-outline comp-hub-open" data-comp-open="${escapeHtml(locId)}">${locItems.length ? "Manage" : "Add records"}</button>
-                    </div>
-                </header>
-                ${tableBlock}
-            </section>`;
+            <td class="comp-matrix-cell ${cellClass}">
+                <button type="button" class="comp-matrix-cell-btn" data-comp-open="${escapeHtml(locId)}" title="Open ${escapeHtml(locationName(locId))} compliance">
+                    <span class="comp-status-pill ${disp.className}">${escapeHtml(disp.label)}</span>
+                    ${
+                        item.expiryDate
+                            ? `<span class="comp-matrix-exp">Expires ${escapeHtml(formatDate(item.expiryDate))}</span>`
+                            : ""
+                    }
+                    ${hint ? `<span class="comp-expiry-hint">${escapeHtml(hint)}</span>` : ""}
+                    ${
+                        item.lastRenewedDate
+                            ? `<span class="comp-matrix-renewed">Renewed ${escapeHtml(formatDate(item.lastRenewedDate))}</span>`
+                            : ""
+                    }
+                    ${
+                        item.renewalDueDate
+                            ? `<span class="comp-matrix-due">Renew by ${escapeHtml(formatDate(item.renewalDueDate))}</span>`
+                            : ""
+                    }
+                    ${item.identifier ? `<span class="comp-matrix-id">#${escapeHtml(item.identifier)}</span>` : ""}
+                </button>
+            </td>`;
     }
 
-    function renderGrouped(list) {
-        const byLoc = {};
-        list.forEach((item) => {
-            if (!byLoc[item.locationId]) byLoc[item.locationId] = [];
-            byLoc[item.locationId].push(item);
-        });
-
-        const orderedLocIds = filterLocationId
-            ? [filterLocationId]
-            : locations.map((l) => l.id);
-
-        if (!orderedLocIds.length) {
+    function renderMatrix() {
+        if (!locations.length) {
             return `<p class="data-list-empty">Add a facility first to track compliance.</p>`;
         }
 
-        const sections = orderedLocIds.map((locId) =>
-            renderLocationGroup(locId, byLoc[locId] || [])
-        );
+        const allRows = buildMatrixRows(items);
+        const rows = visibleRows(allRows);
 
-        if (filterStatus !== "all" && !list.length) {
-            return `<p class="data-list-empty">No records match your filters.</p>`;
+        if (!rows.length) {
+            return `
+                ${renderFacilityCards()}
+                <p class="data-list-empty">No records match your filters.</p>`;
         }
 
-        return sections.join("");
+        const colCount = locations.length;
+        const colWidth = colCount ? `${Math.max(12, Math.floor(88 / colCount))}%` : "auto";
+
+        const headerCells = locations
+            .map((loc) => {
+                const stats = facilityColumnStats(loc.id);
+                return `
+                <th class="comp-matrix-loc" style="width:${colWidth}">
+                    <button type="button" class="comp-matrix-loc-btn" data-comp-open="${escapeHtml(loc.id)}">
+                        <span class="comp-matrix-loc-name">${escapeHtml(loc.name || "Facility")}</span>
+                        <span class="comp-matrix-loc-meta">
+                            ${stats.total ? `${stats.total} record${stats.total === 1 ? "" : "s"}` : "No records"}
+                            ${stats.attention ? ` · ${stats.attention} alert${stats.attention === 1 ? "" : "s"}` : ""}
+                        </span>
+                    </button>
+                </th>`;
+            })
+            .join("");
+
+        const bodyRows = rows
+            .map((row) => {
+                const cells = locations
+                    .map((loc) => renderMatrixCell(row.byLoc[loc.id], loc.id))
+                    .join("");
+                return `
+                <tr class="comp-matrix-row">
+                    <th class="comp-matrix-row-label" scope="row">
+                        <span class="comp-matrix-row-type">${escapeHtml(M().recordTypeLabel(row.recordType))}</span>
+                        <strong class="comp-matrix-row-title">${escapeHtml(row.title)}</strong>
+                        <span class="comp-matrix-row-cat">${escapeHtml(M().categoryLabel(row.category))}</span>
+                    </th>
+                    ${cells}
+                </tr>`;
+            })
+            .join("");
+
+        return `
+            ${renderFacilityCards()}
+            <div class="comp-matrix-scroll home-card">
+                <table class="comp-matrix-table">
+                    <thead>
+                        <tr>
+                            <th class="comp-matrix-corner" scope="col">
+                                <span class="comp-matrix-corner-label">License / cert</span>
+                            </th>
+                            ${headerCells}
+                        </tr>
+                    </thead>
+                    <tbody>${bodyRows}</tbody>
+                </table>
+            </div>`;
     }
 
     function renderPanel() {
         const root = $("compliance-root");
         if (!root) return;
-
-        const list = filteredItems();
-        const locOptions = [
-            `<option value="">All facilities</option>`,
-            ...locations.map(
-                (l) =>
-                    `<option value="${escapeHtml(l.id)}"${l.id === filterLocationId ? " selected" : ""}>${escapeHtml(l.name)}</option>`
-            ),
-        ].join("");
 
         const statusOptions = [
             { id: "all", label: "All statuses" },
@@ -255,30 +294,17 @@
             )
             .join("");
 
-        const body =
-            loading
-                ? `<p class="data-list-empty">Loading compliance records…</p>`
-                : filterLocationId
-                  ? list.length
-                      ? renderTable(list, false)
-                      : `<p class="data-list-empty">${
-                            items.some((i) => i.locationId === filterLocationId)
-                                ? "No records match your filters."
-                                : "No licenses or registrations tracked for this facility yet."
-                        }</p>`
-                  : renderGrouped(list)
+        const body = loading
+            ? `<p class="data-list-empty">Loading compliance records…</p>`
+            : renderMatrix();
 
         root.innerHTML = `
-            <div class="comp-hub" data-comp-hub>
-                <p class="books-hint">Licenses, certifications, permits, and insurance across every facility — same data as <strong>Facilities → Compliance</strong>. Expiry dates within ${M().EXPIRING_SOON_DAYS} days are flagged as expiring soon.</p>
-                ${renderGlobalSummary(filterLocationId ? list : items)}
+            <div class="comp-hub comp-hub--matrix" data-comp-hub>
+                <p class="books-hint">Matrix view — each row is a license or certification; each column is a facility. Click any cell to manage records at that location.</p>
+                ${renderGlobalSummary(items)}
                 <div class="comp-hub-toolbar">
                     <label class="books-label comp-hub-filter">
-                        <span class="comp-hub-filter-label">Facility</span>
-                        <select class="books-select" id="comp-hub-filter-loc">${locOptions}</select>
-                    </label>
-                    <label class="books-label comp-hub-filter">
-                        <span class="comp-hub-filter-label">Status</span>
+                        <span class="comp-hub-filter-label">Show</span>
                         <select class="books-select" id="comp-hub-filter-status">${statusOptions}</select>
                     </label>
                 </div>
@@ -322,11 +348,6 @@
         });
 
         root.addEventListener("change", (e) => {
-            if (e.target.id === "comp-hub-filter-loc") {
-                filterLocationId = e.target.value;
-                renderPanel();
-                return;
-            }
             if (e.target.id === "comp-hub-filter-status") {
                 filterStatus = e.target.value;
                 renderPanel();
@@ -337,7 +358,6 @@
     async function init(uid, locs) {
         userId = uid;
         locations = locs || [];
-        filterLocationId = "";
         filterStatus = "all";
         const hubRoot = $("compliance-root");
         if (hubRoot) hubRoot.dataset.compHubBound = "";
@@ -351,7 +371,6 @@
     }
 
     function resetToRoot() {
-        filterLocationId = "";
         filterStatus = "all";
         renderPanel();
     }
