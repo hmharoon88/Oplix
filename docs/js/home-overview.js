@@ -1547,7 +1547,6 @@
             orgTodos: renderOrgTodos(data.orgTodos),
             actionCenter: renderNeedsAttention(filteredAlerts, userId),
             thisWeek: renderThisWeek(data.weeklyPulse),
-            today: renderToday(data.todaySnapshot),
             lotteryToday: renderLotteryTable(data.lotteryToday),
             monthToDate: renderMonthToDateTable(data.locationStats),
             shortcuts: renderQuickActions(),
@@ -1555,7 +1554,7 @@
 
         const order = Layout
             ? Layout.visibleSectionsInOrder(prefs)
-            : ["orgTodos", "actionCenter", "today", "lotteryToday", "thisWeek", "shortcuts", "monthToDate"];
+            : ["actionCenter", "orgTodos", "lotteryToday", "thisWeek", "shortcuts", "monthToDate"];
 
         const blocks = order.map((id) => sections[id]).filter(Boolean).join("");
 

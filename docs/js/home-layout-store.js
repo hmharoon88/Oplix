@@ -3,9 +3,8 @@
  */
 (function () {
     const DEFAULT_ORDER = [
-        "orgTodos",
         "actionCenter",
-        "today",
+        "orgTodos",
         "lotteryToday",
         "thisWeek",
         "shortcuts",
@@ -22,11 +21,6 @@
             id: "actionCenter",
             title: "Needs Attention",
             subtitle: "Cash variances, overdue items, missing data",
-        },
-        today: {
-            id: "today",
-            title: "Today",
-            subtitle: "Revenue, clocked-in employees, task completion",
         },
         lotteryToday: {
             id: "lotteryToday",
@@ -106,6 +100,26 @@
         return { order: [...DEFAULT_ORDER], hidden: [], hiddenAlertCategories: [] };
     }
 
+    function spliceMissing(order) {
+        const result = order.filter((id) => SECTIONS[id]);
+        DEFAULT_ORDER.forEach((id) => {
+            if (!result.includes(id)) result.push(id);
+        });
+        return result;
+    }
+
+    function normalizeHomeOrder(order) {
+        let result = (order || []).filter((id) => SECTIONS[id] && id !== "today");
+        const acIdx = result.indexOf("actionCenter");
+        const otIdx = result.indexOf("orgTodos");
+        if (otIdx >= 0) {
+            result.splice(otIdx, 1);
+            const insertAt = acIdx >= 0 ? acIdx + 1 : 0;
+            result.splice(insertAt, 0, "orgTodos");
+        }
+        return spliceMissing(result);
+    }
+
     function load(userId) {
         if (!userId) return defaultPrefs();
         try {
@@ -118,8 +132,8 @@
                 ? parsed.hiddenAlertCategories
                 : [];
             return {
-                order: spliceMissing(order),
-                hidden,
+                order: normalizeHomeOrder(order),
+                hidden: hidden.filter((id) => id !== "today"),
                 hiddenAlertCategories,
             };
         } catch {
@@ -129,14 +143,6 @@
 
     function save(userId, prefs) {
         localStorage.setItem(storageKey(userId), JSON.stringify(prefs));
-    }
-
-    function spliceMissing(order) {
-        const result = order.filter((id) => SECTIONS[id]);
-        DEFAULT_ORDER.forEach((id) => {
-            if (!result.includes(id)) result.push(id);
-        });
-        return result;
     }
 
     function visibleSectionsInOrder(prefs) {
