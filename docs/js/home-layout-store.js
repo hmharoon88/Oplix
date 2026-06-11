@@ -5,10 +5,10 @@
     const DEFAULT_ORDER = [
         "actionCenter",
         "orgTodos",
-        "lotteryToday",
         "thisWeek",
         "shortcuts",
         "monthToDate",
+        "lotteryToday",
     ];
 
     const SECTIONS = {
@@ -128,6 +128,11 @@
         }
         const insertAt = acIdx >= 0 ? acIdx + 1 : 0;
         result.splice(insertAt, 0, "orgTodos");
+        const lotIdx = result.indexOf("lotteryToday");
+        if (lotIdx >= 0) {
+            result.splice(lotIdx, 1);
+            result.push("lotteryToday");
+        }
         return result;
     }
 

@@ -1554,7 +1554,7 @@
 
         const order = Layout
             ? Layout.visibleSectionsInOrder(prefs)
-            : ["actionCenter", "orgTodos", "lotteryToday", "thisWeek", "shortcuts", "monthToDate"];
+            : ["actionCenter", "orgTodos", "thisWeek", "shortcuts", "monthToDate", "lotteryToday"];
 
         const blocks = order.map((id) => sections[id]).filter(Boolean).join("");
 
