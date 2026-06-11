@@ -103,21 +103,32 @@
     function spliceMissing(order) {
         const result = order.filter((id) => SECTIONS[id]);
         DEFAULT_ORDER.forEach((id) => {
-            if (!result.includes(id)) result.push(id);
+            if (result.includes(id)) return;
+            const defaultIdx = DEFAULT_ORDER.indexOf(id);
+            let insertAt = result.length;
+            for (let i = 0; i < result.length; i++) {
+                const pos = DEFAULT_ORDER.indexOf(result[i]);
+                if (pos !== -1 && pos > defaultIdx) {
+                    insertAt = i;
+                    break;
+                }
+            }
+            result.splice(insertAt, 0, id);
         });
         return result;
     }
 
     function normalizeHomeOrder(order) {
         let result = (order || []).filter((id) => SECTIONS[id] && id !== "today");
+        result = spliceMissing(result);
         const acIdx = result.indexOf("actionCenter");
         const otIdx = result.indexOf("orgTodos");
         if (otIdx >= 0) {
             result.splice(otIdx, 1);
-            const insertAt = acIdx >= 0 ? acIdx + 1 : 0;
-            result.splice(insertAt, 0, "orgTodos");
         }
-        return spliceMissing(result);
+        const insertAt = acIdx >= 0 ? acIdx + 1 : 0;
+        result.splice(insertAt, 0, "orgTodos");
+        return result;
     }
 
     function load(userId) {
@@ -131,11 +142,20 @@
             const hiddenAlertCategories = Array.isArray(parsed.hiddenAlertCategories)
                 ? parsed.hiddenAlertCategories
                 : [];
-            return {
-                order: normalizeHomeOrder(order),
-                hidden: hidden.filter((id) => id !== "today"),
+            const normalizedHidden = hidden.filter((id) => id !== "today");
+            const normalizedOrder = normalizeHomeOrder(order);
+            const prefs = {
+                order: normalizedOrder,
+                hidden: normalizedHidden,
                 hiddenAlertCategories,
             };
+            if (
+                JSON.stringify(normalizedOrder) !== JSON.stringify(order) ||
+                normalizedHidden.length !== hidden.length
+            ) {
+                save(userId, prefs);
+            }
+            return prefs;
         } catch {
             return defaultPrefs();
         }
@@ -149,14 +169,12 @@
         const hidden = new Set(prefs.hidden || []);
         const seen = new Set();
         const out = [];
-        (prefs.order || DEFAULT_ORDER).forEach((id) => {
+        const canonical = normalizeHomeOrder(prefs.order || DEFAULT_ORDER);
+        canonical.forEach((id) => {
             if (!hidden.has(id) && SECTIONS[id] && !seen.has(id)) {
                 seen.add(id);
                 out.push(id);
             }
-        });
-        DEFAULT_ORDER.forEach((id) => {
-            if (!hidden.has(id) && !seen.has(id)) out.push(id);
         });
         return out;
     }
