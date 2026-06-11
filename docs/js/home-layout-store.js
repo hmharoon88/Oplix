@@ -3,6 +3,7 @@
  */
 (function () {
     const DEFAULT_ORDER = [
+        "orgTodos",
         "actionCenter",
         "today",
         "lotteryToday",
@@ -12,6 +13,11 @@
     ];
 
     const SECTIONS = {
+        orgTodos: {
+            id: "orgTodos",
+            title: "To-Do",
+            subtitle: "Your personal checklist — not tied to a facility or employee",
+        },
         actionCenter: {
             id: "actionCenter",
             title: "Needs Attention",

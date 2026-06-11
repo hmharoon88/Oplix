@@ -466,6 +466,154 @@
     let lastHomeUserId = null;
     let lastBundlesByLocationId = {};
 
+    async function persistOrgTodo(userId, id, patch, existing) {
+        const M = window.OplixOrgTodosModel;
+        const Store = window.OplixOrgTodosStore;
+        if (!M || !Store) return;
+        const base = existing || M.normalizeItem({ id });
+        const payload = {
+            title: patch.title != null ? patch.title : base.title,
+            notes: patch.notes != null ? patch.notes : base.notes,
+            dueDate: patch.dueDate != null ? patch.dueDate : base.dueDate,
+            isCompleted: patch.isCompleted != null ? patch.isCompleted : base.isCompleted,
+            completedAt:
+                patch.completedAt !== undefined ? patch.completedAt : base.completedAt,
+        };
+        if (base.createdAt) payload.createdAt = base.createdAt;
+        await Store.save(userId, id, payload);
+    }
+
+    async function refreshOrgTodosOnHome(userId) {
+        const data = window._oplixHomeData;
+        if (!data || !window.OplixOrgTodosStore) return;
+        try {
+            data.orgTodos = await OplixOrgTodosStore.list(userId);
+            window._oplixHomeData = data;
+            render(data, userId);
+        } catch (err) {
+            console.error("[Oplix] org todos refresh failed:", err);
+        }
+    }
+
+    function openOrgTodoEditForm(container, userId, item) {
+        const M = window.OplixOrgTodosModel;
+        const slot = container.querySelector("[data-todo-form-slot]");
+        if (!slot || !M) return;
+        const v = M.normalizeItem(item);
+        slot.hidden = false;
+        slot.innerHTML = `
+            <form class="home-todo-edit-form" data-todo-edit-form data-todo-id="${escapeHtml(v.id)}">
+                <label class="books-label">Title
+                    <input class="books-input" name="title" required maxlength="200" value="${escapeHtml(v.title)}">
+                </label>
+                <label class="books-label">Due date
+                    <input class="books-input" name="dueDate" type="date" value="${escapeHtml(v.dueDate)}">
+                </label>
+                <label class="books-label">Notes
+                    <textarea class="books-input" name="notes" rows="2" maxlength="500">${escapeHtml(v.notes)}</textarea>
+                </label>
+                <div class="dir-form-actions">
+                    <button type="submit" class="btn">Save</button>
+                    <button type="button" class="btn btn-nav-outline" data-todo-edit-cancel>Cancel</button>
+                </div>
+            </form>`;
+        slot.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    function bindOrgTodos(el, userId, data) {
+        const card = el.querySelector("[data-home-todos]");
+        if (!card || card.dataset.todosBound) return;
+        card.dataset.todosBound = "1";
+
+        const todos = () => data.orgTodos || [];
+
+        card.addEventListener("click", async (e) => {
+            const toggleId = e.target.closest("[data-todo-toggle]")?.dataset.todoToggle;
+            if (toggleId) {
+                const item = todos().find((t) => t.id === toggleId);
+                if (!item) return;
+                const completed = !item.isCompleted;
+                await persistOrgTodo(userId, toggleId, {
+                    isCompleted: completed,
+                    completedAt: completed ? new Date().toISOString() : null,
+                }, item);
+                await refreshOrgTodosOnHome(userId);
+                return;
+            }
+
+            const editId = e.target.closest("[data-todo-edit]")?.dataset.todoEdit;
+            if (editId) {
+                const item = todos().find((t) => t.id === editId);
+                if (item) openOrgTodoEditForm(card, userId, item);
+                return;
+            }
+
+            const deleteId = e.target.closest("[data-todo-delete]")?.dataset.todoDelete;
+            if (deleteId) {
+                if (!confirm("Delete this to-do?")) return;
+                await OplixOrgTodosStore.remove(userId, deleteId);
+                const slot = card.querySelector("[data-todo-form-slot]");
+                if (slot) {
+                    slot.hidden = true;
+                    slot.innerHTML = "";
+                }
+                await refreshOrgTodosOnHome(userId);
+            }
+        });
+
+        card.addEventListener("submit", async (e) => {
+            if (e.target.matches("[data-todo-add-form]")) {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                const title = String(fd.get("title") || "").trim();
+                if (!title) return;
+                const dueDate = String(fd.get("dueDate") || "").trim();
+                const id = OplixOrgTodosStore.newId();
+                await persistOrgTodo(userId, id, {
+                    title,
+                    notes: "",
+                    dueDate,
+                    isCompleted: false,
+                    completedAt: null,
+                });
+                e.target.reset();
+                await refreshOrgTodosOnHome(userId);
+                return;
+            }
+
+            if (e.target.matches("[data-todo-edit-form]")) {
+                e.preventDefault();
+                const id = e.target.dataset.todoId;
+                const item = todos().find((t) => t.id === id);
+                if (!item) return;
+                const fd = new FormData(e.target);
+                const title = String(fd.get("title") || "").trim();
+                if (!title) return;
+                await persistOrgTodo(userId, id, {
+                    title,
+                    notes: String(fd.get("notes") || "").trim(),
+                    dueDate: String(fd.get("dueDate") || "").trim(),
+                }, item);
+                const slot = card.querySelector("[data-todo-form-slot]");
+                if (slot) {
+                    slot.hidden = true;
+                    slot.innerHTML = "";
+                }
+                await refreshOrgTodosOnHome(userId);
+            }
+        });
+
+        card.addEventListener("click", (e) => {
+            if (e.target.matches("[data-todo-edit-cancel]")) {
+                const slot = card.querySelector("[data-todo-form-slot]");
+                if (slot) {
+                    slot.hidden = true;
+                    slot.innerHTML = "";
+                }
+            }
+        });
+    }
+
     function computeWeeklyPulse(location, payables, receivables) {
         const todayStart = startOfDay(new Date());
         const windowEnd = addDays(todayStart, 7);
@@ -880,12 +1028,22 @@
 
         weeklyPulse.net = weeklyPulse.receivablesDue - weeklyPulse.payablesDue;
 
+        let orgTodos = [];
+        if (window.OplixOrgTodosStore) {
+            try {
+                orgTodos = await OplixOrgTodosStore.list(userId);
+            } catch {
+                orgTodos = [];
+            }
+        }
+
         return {
             profile,
             locations,
             employees,
             tasks,
             alerts,
+            orgTodos,
             weeklyPulse,
             lotteryToday,
             locationStats,
@@ -1052,6 +1210,80 @@
                 }`;
         }
         return `<div class="home-cc-block home-card">${header}${body}</div>`;
+    }
+
+    function formatTodoDate(iso) {
+        if (!iso) return "";
+        const d = window.OplixOrgTodosModel?.parseISODate(iso);
+        if (!d) return iso;
+        return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
+
+    function renderOrgTodos(todos) {
+        const M = window.OplixOrgTodosModel;
+        if (!M) return "";
+        const sorted = M.sortItems(todos || []);
+        const open = sorted.filter((t) => !t.isCompleted);
+        const done = sorted.filter((t) => t.isCompleted);
+        const openCount = open.length;
+
+        const renderRow = (item) => {
+            const hint = M.dueHint(item);
+            const overdue = M.isOverdue(item);
+            const dueToday = M.isDueToday(item);
+            const rowClass = item.isCompleted
+                ? "home-todo-row--done"
+                : overdue
+                  ? "home-todo-row--overdue"
+                  : dueToday
+                    ? "home-todo-row--today"
+                    : "";
+            return `
+                <li class="home-todo-row ${rowClass}" data-todo-id="${escapeHtml(item.id)}">
+                    <button type="button" class="home-todo-check" data-todo-toggle="${escapeHtml(item.id)}" aria-label="${item.isCompleted ? "Mark incomplete" : "Mark complete"}">
+                        ${item.isCompleted ? "✓" : ""}
+                    </button>
+                    <button type="button" class="home-todo-main" data-todo-edit="${escapeHtml(item.id)}">
+                        <span class="home-todo-title">${escapeHtml(item.title)}</span>
+                        ${
+                            item.dueDate
+                                ? `<span class="home-todo-due${overdue ? " home-todo-due--overdue" : ""}">${escapeHtml(formatTodoDate(item.dueDate))}${hint ? ` · ${escapeHtml(hint)}` : ""}</span>`
+                                : hint
+                                  ? `<span class="home-todo-due">${escapeHtml(hint)}</span>`
+                                  : ""
+                        }
+                        ${item.notes ? `<span class="home-todo-notes">${escapeHtml(item.notes)}</span>` : ""}
+                    </button>
+                    <button type="button" class="home-todo-delete" data-todo-delete="${escapeHtml(item.id)}" title="Delete">×</button>
+                </li>`;
+        };
+
+        const listHtml =
+            open.length || done.length
+                ? `<ul class="home-todo-list">${open.map(renderRow).join("")}${done.length ? `<li class="home-todo-divider">Completed (${done.length})</li>${done.map(renderRow).join("")}` : ""}</ul>`
+                : `<div class="home-empty-row home-todo-empty">
+                    <span class="home-empty-icon">☐</span>
+                    <div>
+                        <p class="home-empty-title">Nothing on your list</p>
+                        <p class="home-empty-sub">Add items you need to handle — org-wide, not tied to a facility</p>
+                    </div>
+                </div>`;
+
+        return `
+            <div class="home-cc-block home-card home-todo-card" data-home-todos>
+                <div class="home-card-header">
+                    <span class="home-card-header-icon">☐</span>
+                    <h2>To-Do</h2>
+                    ${openCount ? `<span class="home-badge">${openCount}</span>` : ""}
+                </div>
+                ${listHtml}
+                <form class="home-todo-add" data-todo-add-form>
+                    <input class="home-todo-add-input" name="title" type="text" placeholder="Add something to do…" autocomplete="off" maxlength="200">
+                    <input class="home-todo-add-date" name="dueDate" type="date" title="Due date (optional)">
+                    <button type="submit" class="btn home-todo-add-btn">Add</button>
+                </form>
+                <div class="home-todo-form-slot" data-todo-form-slot hidden></div>
+            </div>`;
     }
 
     function renderToday(snapshot) {
@@ -1312,6 +1544,7 @@
             : data.alerts;
 
         const sections = {
+            orgTodos: renderOrgTodos(data.orgTodos),
             actionCenter: renderNeedsAttention(filteredAlerts, userId),
             thisWeek: renderThisWeek(data.weeklyPulse),
             today: renderToday(data.todaySnapshot),
@@ -1322,7 +1555,7 @@
 
         const order = Layout
             ? Layout.visibleSectionsInOrder(prefs)
-            : ["actionCenter", "today", "lotteryToday", "thisWeek", "shortcuts", "monthToDate"];
+            : ["orgTodos", "actionCenter", "today", "lotteryToday", "thisWeek", "shortcuts", "monthToDate"];
 
         const blocks = order.map((id) => sections[id]).filter(Boolean).join("");
 
@@ -1376,6 +1609,8 @@
                 }
             });
         });
+
+        bindOrgTodos(el, userId, data);
     }
 
     window.OplixHomeOverview = {
