@@ -608,6 +608,166 @@
         return { label: "Variance", tone: "bad" };
     }
 
+    function toSubmittedDate(v) {
+        if (!v) return null;
+        if (v instanceof Date) return v;
+        if (typeof v.toDate === "function") return v.toDate();
+        const d = new Date(v);
+        return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    /** Actual cash enclosed from a lottery shift close (Facilities → Lottery). */
+    function lotteryFormCashEnclosed(form) {
+        const s = form?.shiftSummary;
+        if (!s) return 0;
+        const raw = form.formData?.cashInHand;
+        if (raw != null && String(raw).trim() !== "") return num(raw);
+        if (s.overShort != null) return num(s.cashInBagNet) + num(s.overShort);
+        return num(s.cashInBagNet);
+    }
+
+    /** Sum cash enclosed by day (`YYYY-MM-DD`) for forms in a month. */
+    function lotteryFormsCashByDay(forms, monthId) {
+        const prefix = `${monthId}-`;
+        const byDay = {};
+        (forms || []).forEach((form) => {
+            const enclosed = lotteryFormCashEnclosed(form);
+            if (enclosed === 0) return;
+            const d = toSubmittedDate(form.submittedAt);
+            if (!d) return;
+            const dayId = dayIdFromDate(d);
+            if (!dayId.startsWith(prefix)) return;
+            byDay[dayId] = (byDay[dayId] || 0) + enclosed;
+        });
+        return byDay;
+    }
+
+    function lotteryReconSectionFromForms(existingSection, byDay) {
+        const existingByDay = Object.fromEntries(
+            (existingSection?.dailyRows || []).map((r) => [r.dayId, r])
+        );
+        const allDayIds = new Set([...Object.keys(byDay), ...Object.keys(existingByDay)]);
+        if (!allDayIds.size) return existingSection || { dailyRows: [] };
+
+        const dailyRows = [];
+        let daysWithExpected = 0;
+        let daysReconciled = 0;
+        let daysNeedingAttention = 0;
+        let totalExpected = 0;
+        let totalCounted = 0;
+        let totalVariance = 0;
+        let totalExpectedDeposit = 0;
+        let totalDeposit = 0;
+        let totalDepositVariance = 0;
+
+        [...allDayIds].sort().forEach((dayId) => {
+            const formCash = num(byDay[dayId]);
+            const existing = existingByDay[dayId];
+            let section;
+
+            if (formCash > 0) {
+                const booksExpected = num(existing?.expectedTotal);
+                const expectedTotal = booksExpected > 0 ? booksExpected : formCash;
+                const countedTotal = formCash;
+                const variance = countedTotal - expectedTotal;
+                const expectedDeposit = formCash;
+                const deposit = existing?.deposit ?? null;
+                const depositVariance = deposit == null ? 0 : deposit - expectedDeposit;
+                const totalsMatch = Math.abs(variance) < 0.005;
+                const depositMatch = deposit == null || Math.abs(depositVariance) < 0.005;
+                section = {
+                    applicable: true,
+                    expectedTotal,
+                    countedTotal,
+                    variance,
+                    cashExpensesTotal: 0,
+                    expectedDeposit,
+                    deposit,
+                    depositVariance,
+                    depositMatch,
+                    verifiedCount: existing?.verifiedCount || 0,
+                    shiftCount: existing?.shiftCount || 1,
+                    allVerified: existing?.allVerified ?? true,
+                    totalsMatch,
+                    matched: totalsMatch && depositMatch,
+                    fromLotteryForm: true,
+                };
+            } else if (existing) {
+                section = {
+                    applicable: existing.applicable !== false,
+                    expectedTotal: num(existing.expectedTotal),
+                    countedTotal: num(existing.countedTotal),
+                    variance: num(existing.variance),
+                    cashExpensesTotal: num(existing.cashExpensesTotal),
+                    expectedDeposit: num(existing.expectedDeposit),
+                    deposit: existing.deposit ?? null,
+                    depositVariance: num(existing.depositVariance),
+                    depositMatch: existing.depositMatch !== false,
+                    verifiedCount: existing.verifiedCount || 0,
+                    shiftCount: existing.shiftCount || 0,
+                    allVerified: existing.allVerified !== false,
+                    totalsMatch: existing.totalsMatch !== false,
+                    matched: existing.matched === true,
+                };
+            } else {
+                return;
+            }
+
+            const status = cashReconciliationDayStatus(section);
+            if (section.expectedTotal > 0 || section.countedTotal > 0) daysWithExpected += 1;
+            if (section.matched) daysReconciled += 1;
+            else daysNeedingAttention += 1;
+
+            totalExpected += section.expectedTotal;
+            totalCounted += section.countedTotal;
+            totalVariance += section.variance;
+            totalExpectedDeposit += section.expectedDeposit;
+            if (section.deposit != null) {
+                totalDeposit += section.deposit;
+                totalDepositVariance += section.depositVariance;
+            }
+
+            dailyRows.push({ dayId, ...section, status });
+        });
+
+        return {
+            dailyRows,
+            daysWithExpected,
+            daysReconciled,
+            daysNeedingAttention,
+            totalExpected,
+            totalCounted,
+            totalVariance,
+            totalCashExpenses: 0,
+            totalExpectedDeposit,
+            totalDeposit,
+            totalDepositVariance,
+        };
+    }
+
+    /**
+     * Merge lottery shift closes (cash enclosed) into Summary aggregate.
+     * Prefers Facilities → Lottery forms over Daily sheet lottery cash when forms exist.
+     */
+    function enrichAggregateWithLotteryForms(aggregate, forms, monthId) {
+        const byDay = lotteryFormsCashByDay(forms, monthId);
+        const formMonthTotal = Object.values(byDay).reduce((s, v) => s + v, 0);
+        if (formMonthTotal <= 0) return aggregate;
+
+        const cr = aggregate.cashReconciliation || aggregateCashReconciliation({});
+        const lottery = lotteryReconSectionFromForms(cr.lottery, byDay);
+
+        return {
+            ...aggregate,
+            lotteryCash: formMonthTotal,
+            lotteryCashFromForms: true,
+            cashReconciliation: {
+                ...cr,
+                lottery,
+            },
+        };
+    }
+
     /** Gas station total revenue (all streams) — for display only. */
     function gasTotalRevenue(merchSale, creditCard, fuelDollars, pulltabCash) {
         return num(merchSale) + num(creditCard) + num(fuelDollars) + num(pulltabCash);
@@ -1392,6 +1552,9 @@
         cashReconciliationSummary,
         cashReconciliationDayStatus,
         aggregateCashReconciliation,
+        enrichAggregateWithLotteryForms,
+        lotteryFormCashEnclosed,
+        lotteryFormsCashByDay,
         dailySalesExpenseRow,
         dailySalesExpenseRows,
     };

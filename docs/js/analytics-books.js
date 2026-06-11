@@ -63,6 +63,35 @@
         return { facilityTypesById: facilityTypesById() };
     }
 
+    async function fetchLotteryForms(locationId) {
+        if (!userId || !locationId || !window.oplixDb) return [];
+        try {
+            const snap = await window.oplixDb
+                .collection("users")
+                .doc(userId)
+                .collection("locations")
+                .doc(locationId)
+                .collection("lotteryForms")
+                .get();
+            return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        } catch (err) {
+            console.warn("[Oplix] Could not load lottery forms for summary:", err);
+            return [];
+        }
+    }
+
+    function applyLotteryFormsToPack(pack, forms) {
+        if (!pack?.aggregate || !forms?.length) return pack;
+        return {
+            ...pack,
+            aggregate: M().enrichAggregateWithLotteryForms(
+                pack.aggregate,
+                forms,
+                pack.monthId
+            ),
+        };
+    }
+
     function monthLabel(monthId) {
         const d = M().parseMonthId(monthId);
         return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -528,6 +557,9 @@
 
     function renderCashReconciliationSection(agg) {
         const cr = agg?.cashReconciliation;
+        const lotterySubtitle = agg?.lotteryCashFromForms
+            ? "Cash enclosed from lottery shift closes (Facilities → Lottery)."
+            : "Lottery cash per shift from the Daily sheet.";
         const categories = [
             {
                 title: "Register cash",
@@ -536,7 +568,7 @@
             },
             {
                 title: "Lottery cash",
-                subtitle: "Lottery cash per shift from the Daily sheet.",
+                subtitle: lotterySubtitle,
                 data: cr?.lottery,
             },
             {
@@ -692,7 +724,7 @@
         $("an-key-metrics-mount").hidden = !metricsHtml && !historyComplete;
     }
 
-    async function loadHistorySections(keyAtStart, primaryPack) {
+    async function loadHistorySections(keyAtStart, primaryPack, lotteryForms) {
         const otherMonthIds = monthIdsForHistory(state.locationId, state.monthId, 12).filter(
             (id) => id !== state.monthId
         );
@@ -700,11 +732,14 @@
             renderPreviousMonthsMount("");
             renderKeyMetricsMount(
                 Charts()
-                    ? Charts().renderKeyMetricsHistory([primaryPack], {
-                          booksModel: M(),
-                          monthLabel,
-                          locationName: locName(state.locationId),
-                      })
+                    ? Charts().renderKeyMetricsHistory(
+                          [applyLotteryFormsToPack(primaryPack, lotteryForms || [])],
+                          {
+                              booksModel: M(),
+                              monthLabel,
+                              locationName: locName(state.locationId),
+                          }
+                      )
                     : ""
             );
             return;
@@ -730,7 +765,9 @@
             }
 
             if (analysisKey() !== keyAtStart) return;
-            accumulated.push(pack || buildEmptyPack(state.locationId, monthId));
+            accumulated.push(
+                applyLotteryFormsToPack(pack || buildEmptyPack(state.locationId, monthId), lotteryForms)
+            );
             renderHistorySections(accumulated, primaryPack, keyAtStart, i + 1, otherMonthIds.length);
         }
     }
@@ -748,20 +785,25 @@
             renderPreviousMonthsMount("");
             renderKeyMetricsMount("");
 
-            const primaryPacks = await Store().loadMonthsForCompare(
-                userId,
-                [state.locationId],
-                [state.monthId],
-                loadOptions()
-            );
+            const [primaryPacks, lotteryForms] = await Promise.all([
+                Store().loadMonthsForCompare(
+                    userId,
+                    [state.locationId],
+                    [state.monthId],
+                    loadOptions()
+                ),
+                fetchLotteryForms(state.locationId),
+            ]);
             if (analysisKey() !== keyAtStart) return;
 
-            const primaryPack =
-                primaryPacks[0] || buildEmptyPack(state.locationId, state.monthId);
+            const primaryPack = applyLotteryFormsToPack(
+                primaryPacks[0] || buildEmptyPack(state.locationId, state.monthId),
+                lotteryForms
+            );
             renderPrimaryDashboard(primaryPack);
             out.querySelector(".an-load-error")?.remove();
 
-            loadHistorySections(keyAtStart, primaryPack);
+            loadHistorySections(keyAtStart, primaryPack, lotteryForms);
         } catch (err) {
             if (analysisKey() !== keyAtStart) return;
             console.error("[Oplix] Summary load failed:", err);
