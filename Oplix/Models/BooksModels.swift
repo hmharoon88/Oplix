@@ -66,6 +66,68 @@ struct BooksDayDoc: Equatable {
     var cashExpenses: [BooksLineItem]
     var checksAch: [BooksLineItem]
     var otherExpenses: [BooksLineItem]
+
+    static func empty(dayId: String) -> BooksDayDoc {
+        let emptyShift = BooksShiftRegister(cardSale: 0, cashSale: 0, overShort: 0)
+        let emptyUnit = BooksRegisterUnit(shift1: emptyShift, shift2: emptyShift)
+        let emptyGaming = BooksGamingShift(cash: 0, overShort: 0)
+        return BooksDayDoc(
+            dayId: dayId,
+            register1: emptyUnit,
+            register2: emptyUnit,
+            lottery: BooksLotteryUnit(shift1: emptyGaming, shift2: emptyGaming),
+            pulltabs: [],
+            windStations: [],
+            fuelSale: BooksFuelSale(gallons: 0, dollars: 0),
+            merchSale: 0,
+            creditCard: 0,
+            cashExpenses: [],
+            checksAch: [],
+            otherExpenses: []
+        )
+    }
+}
+
+/// Register / shift slot on the daily books sheet (matches web `register1.shift1`, etc.).
+enum BooksRegisterSlot: CaseIterable, Equatable {
+    case register1Shift1
+    case register1Shift2
+    case register2Shift1
+    case register2Shift2
+
+    var displayName: String {
+        switch self {
+        case .register1Shift1: return "Register 1 · Shift 1"
+        case .register1Shift2: return "Register 1 · Shift 2"
+        case .register2Shift1: return "Register 2 · Shift 1"
+        case .register2Shift2: return "Register 2 · Shift 2"
+        }
+    }
+
+    static func slot(at index: Int) -> BooksRegisterSlot? {
+        guard index >= 0, index < allCases.count else { return nil }
+        return allCases[index]
+    }
+}
+
+extension BooksDayDoc {
+    func shiftRegister(for slot: BooksRegisterSlot) -> BooksShiftRegister {
+        switch slot {
+        case .register1Shift1: return register1.shift1
+        case .register1Shift2: return register1.shift2
+        case .register2Shift1: return register2.shift1
+        case .register2Shift2: return register2.shift2
+        }
+    }
+
+    mutating func setShiftRegister(_ value: BooksShiftRegister, for slot: BooksRegisterSlot) {
+        switch slot {
+        case .register1Shift1: register1.shift1 = value
+        case .register1Shift2: register1.shift2 = value
+        case .register2Shift1: register2.shift1 = value
+        case .register2Shift2: register2.shift2 = value
+        }
+    }
 }
 
 struct BooksPayrollWeeks: Equatable {
@@ -285,5 +347,99 @@ enum BooksFirestoreParser {
                 cash: double(row["cash"])
             )
         }
+    }
+}
+
+enum BooksFirestoreEncoder {
+    static func encodeShiftRegister(_ register: BooksShiftRegister) -> [String: Any] {
+        [
+            "cardSale": register.cardSale,
+            "cashSale": register.cashSale,
+            "overShort": register.overShort,
+        ]
+    }
+
+    static func encodeRegisterUnit(_ unit: BooksRegisterUnit) -> [String: Any] {
+        [
+            "shift1": encodeShiftRegister(unit.shift1),
+            "shift2": encodeShiftRegister(unit.shift2),
+        ]
+    }
+
+    static func encodeGamingShift(_ shift: BooksGamingShift) -> [String: Any] {
+        [
+            "cash": shift.cash,
+            "overShort": shift.overShort,
+        ]
+    }
+
+    static func encodeLineItems(_ items: [BooksLineItem]) -> [[String: Any]] {
+        items.map { item in
+            [
+                "id": item.id,
+                "description": item.description,
+                "amount": item.amount,
+            ]
+        }
+    }
+
+    static func encodePulltabs(_ items: [BooksPulltabEntry]) -> [[String: Any]] {
+        items.map { item in
+            [
+                "id": item.id,
+                "ticketNumber": item.ticketNumber,
+                "cash": item.cash,
+                "winner": item.winner,
+                "overShort": item.overShort,
+            ]
+        }
+    }
+
+    static func encodeWindStations(_ items: [BooksWindStationEntry]) -> [[String: Any]] {
+        items.map { item in
+            [
+                "id": item.id,
+                "station": item.station,
+                "cash": item.cash,
+            ]
+        }
+    }
+
+    static func encodeDay(_ day: BooksDayDoc) -> [String: Any] {
+        [
+            "register1": encodeRegisterUnit(day.register1),
+            "register2": encodeRegisterUnit(day.register2),
+            "lottery": [
+                "shift1": encodeGamingShift(day.lottery.shift1),
+                "shift2": encodeGamingShift(day.lottery.shift2),
+            ],
+            "pulltabs": encodePulltabs(day.pulltabs),
+            "windStations": encodeWindStations(day.windStations),
+            "fuelSale": [
+                "gallons": day.fuelSale.gallons,
+                "dollars": day.fuelSale.dollars,
+            ],
+            "merchSale": day.merchSale,
+            "creditCard": day.creditCard,
+            "cashExpenses": encodeLineItems(day.cashExpenses),
+            "checksAch": encodeLineItems(day.checksAch),
+            "otherExpenses": encodeLineItems(day.otherExpenses),
+        ]
+    }
+
+    static func defaultMonthPayload() -> [String: Any] {
+        [
+            "utilities": [:] as [String: Any],
+            "payroll": [
+                "week1": 0,
+                "week2": 0,
+                "week3": 0,
+                "week4": 0,
+            ],
+            "payrollLines": [] as [[String: Any]],
+            "receivables": [] as [[String: Any]],
+            "salesTax": 0,
+            "accountant": 0,
+        ]
     }
 }

@@ -41,6 +41,10 @@ struct EmployeeRegisterDataView: View {
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var isLastRegisterExpanded = false // Track if last register card is expanded
+    @State private var showingBooksOverwrite = false
+    @State private var booksOverwriteMessage = ""
+    @State private var pendingShiftForSave: Shift?
+    @State private var pendingClosedAt: Date?
     
     var body: some View {
         ZStack {
@@ -91,6 +95,20 @@ struct EmployeeRegisterDataView: View {
             }
         } message: {
             Text(errorMessage)
+        }
+        .alert("Overwrite Daily Books?", isPresented: $showingBooksOverwrite) {
+            Button("Keep Existing Daily Books", role: .cancel) {
+                Task {
+                    await completeRegisterSave(mergeToDailyBooks: false, overwriteDailyBooks: false)
+                }
+            }
+            Button("Overwrite", role: .destructive) {
+                Task {
+                    await completeRegisterSave(mergeToDailyBooks: true, overwriteDailyBooks: true)
+                }
+            }
+        } message: {
+            Text(booksOverwriteMessage)
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -303,17 +321,66 @@ struct EmployeeRegisterDataView: View {
         
         // Set register closed timestamp
         updatedShift.registerClosedAt = Date()
-        
-        // Update the existing shift (we already verified it exists and is active)
-        await viewModel.updateShift(updatedShift)
-        
-        // Mark all current registers as saved
+        let closedAt = updatedShift.registerClosedAt ?? Date()
+
+        if let plan = await viewModel.previewBooksMerge(for: updatedShift, closedAt: closedAt),
+           plan.hasConflicts,
+           !plan.slotUpdates.isEmpty || plan.fuelUpdate != nil {
+            pendingShiftForSave = updatedShift
+            pendingClosedAt = closedAt
+            booksOverwriteMessage = BooksRegisterMerger.overwriteAlertMessage(for: plan)
+            showingBooksOverwrite = true
+            return
+        }
+
+        await completeRegisterSave(
+            shift: updatedShift,
+            closedAt: closedAt,
+            mergeToDailyBooks: true,
+            overwriteDailyBooks: false
+        )
+    }
+
+    private func completeRegisterSave(
+        mergeToDailyBooks: Bool,
+        overwriteDailyBooks: Bool
+    ) async {
+        guard let shift = pendingShiftForSave,
+              let closedAt = pendingClosedAt else { return }
+        pendingShiftForSave = nil
+        pendingClosedAt = nil
+        await completeRegisterSave(
+            shift: shift,
+            closedAt: closedAt,
+            mergeToDailyBooks: mergeToDailyBooks,
+            overwriteDailyBooks: overwriteDailyBooks
+        )
+    }
+
+    private func completeRegisterSave(
+        shift: Shift,
+        closedAt: Date,
+        mergeToDailyBooks: Bool,
+        overwriteDailyBooks: Bool
+    ) async {
+        let success = await viewModel.saveRegisterClosing(
+            shift,
+            closedAt: closedAt,
+            mergeToDailyBooks: mergeToDailyBooks,
+            overwriteDailyBooks: overwriteDailyBooks
+        )
+
+        guard success else {
+            await MainActor.run {
+                errorMessage = viewModel.errorMessage ?? "Failed to save register data."
+                showingError = true
+            }
+            return
+        }
+
         savedRegisterIds = Set(registers.map { $0.id })
-        
-        // Small delay to ensure shift is reloaded before dismissing
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-        
-        // Dismiss the view after saving
+
+        try? await Task.sleep(nanoseconds: 500_000_000)
         dismiss()
     }
     

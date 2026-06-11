@@ -2,7 +2,7 @@
 //  BooksService.swift
 //  Oplix
 //
-//  Read-only Firestore access for web Daily books.
+//  Firestore access for web Daily books (read + register merge writes).
 //
 
 import Foundation
@@ -23,6 +23,20 @@ final class BooksService {
             .document(locationId)
             .collection("books")
             .document(monthId)
+    }
+
+    private func dayRef(userId: String, locationId: String, monthId: String, dayId: String) -> DocumentReference {
+        monthRef(userId: userId, locationId: locationId, monthId: monthId)
+            .collection("days")
+            .document(dayId)
+    }
+
+    static func monthId(from date: Date, calendar: Calendar = .current) -> String {
+        BooksDateIds.monthId(from: date, calendar: calendar)
+    }
+
+    static func dayId(from date: Date, calendar: Calendar = .current) -> String {
+        BooksDateIds.dayId(from: date, calendar: calendar)
     }
 
     func listMonthIds(userId: String, locationId: String) async throws -> [String] {
@@ -70,5 +84,28 @@ final class BooksService {
             }
         }
         return payloads
+    }
+
+    func loadDay(userId: String, locationId: String, monthId: String, dayId: String) async throws -> BooksDayDoc? {
+        let snap = try await dayRef(userId: userId, locationId: locationId, monthId: monthId, dayId: dayId).getDocument()
+        guard snap.exists, let data = snap.data() else { return nil }
+        return BooksFirestoreParser.parseDay(dayId: dayId, data: data)
+    }
+
+    func ensureMonthExists(userId: String, locationId: String, monthId: String) async throws {
+        let ref = monthRef(userId: userId, locationId: locationId, monthId: monthId)
+        let snap = try await ref.getDocument()
+        guard !snap.exists else { return }
+        var payload = BooksFirestoreEncoder.defaultMonthPayload()
+        payload["updatedAt"] = FieldValue.serverTimestamp()
+        try await ref.setData(payload, merge: true)
+    }
+
+    func saveDay(userId: String, locationId: String, monthId: String, day: BooksDayDoc) async throws {
+        try await ensureMonthExists(userId: userId, locationId: locationId, monthId: monthId)
+        var payload = BooksFirestoreEncoder.encodeDay(day)
+        payload["updatedAt"] = FieldValue.serverTimestamp()
+        try await dayRef(userId: userId, locationId: locationId, monthId: monthId, dayId: day.dayId)
+            .setData(payload, merge: true)
     }
 }
