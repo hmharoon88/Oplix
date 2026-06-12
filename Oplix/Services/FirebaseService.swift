@@ -1845,6 +1845,69 @@ class FirebaseService: ObservableObject {
             .delete()
     }
 
+    // MARK: - Organization to-dos (manager home — synced with web)
+
+    func observeOrgTodos(userId: String, completion: @escaping ([OrgTodo]) -> Void) {
+        let key = "orgTodos_\(userId)"
+        listeners[key]?.remove()
+        let listener = db.collection("users")
+            .document(userId)
+            .collection("orgTodos")
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    print("⚠️ Org todos observer error: \(error.localizedDescription)")
+                    return
+                }
+                let items = (snapshot?.documents ?? []).compactMap { OrgTodo.from(document: $0) }
+                completion(items)
+            }
+        listeners[key] = listener
+    }
+
+    func removeOrgTodosListener(userId: String) {
+        let key = "orgTodos_\(userId)"
+        listeners[key]?.remove()
+        listeners.removeValue(forKey: key)
+    }
+
+    /// Writes the same field shapes as `docs/js/org-todos-store.js` so web + app stay in sync.
+    func saveOrgTodo(userId: String, todo: OrgTodo, isNew: Bool) async throws {
+        var data: [String: Any] = [
+            "title": todo.title,
+            "notes": todo.notes,
+            "dueDate": todo.dueDate,
+            "isCompleted": todo.isCompleted,
+            "updatedAt": FieldValue.serverTimestamp(),
+        ]
+        if todo.isCompleted, let completedAt = todo.completedAt {
+            data["completedAt"] = Self.orgTodoISO8601.string(from: completedAt)
+        } else {
+            data["completedAt"] = NSNull()
+        }
+        if isNew {
+            data["createdAt"] = FieldValue.serverTimestamp()
+        }
+        try await db.collection("users")
+            .document(userId)
+            .collection("orgTodos")
+            .document(todo.id)
+            .setData(data, merge: true)
+    }
+
+    func deleteOrgTodo(userId: String, todoId: String) async throws {
+        try await db.collection("users")
+            .document(userId)
+            .collection("orgTodos")
+            .document(todoId)
+            .delete()
+    }
+
+    private static let orgTodoISO8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
     // MARK: - Cleanup
     
     func removeAllListeners() {

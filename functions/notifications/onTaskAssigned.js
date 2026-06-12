@@ -24,7 +24,7 @@
  */
 
 const {onDocumentWritten} = require('firebase-functions/v2/firestore');
-const {sendPushToUser} = require('./sendPush');
+const {sendPushToUser, loadOwnerTokenFilters} = require('./sendPush');
 
 /**
  * Build the human-facing title/body for the push. Kept in one place
@@ -73,11 +73,18 @@ exports.onTaskAssigned = onDocumentWritten(
       const {managerId, locationId, taskId} = event.params;
       const {title, body} = buildContent(afterData.description);
 
+      // Never notify the owner account for assignments, and skip any
+      // device token that is also registered on the owner — prevents
+      // "New task assigned" from ringing on the manager's phone when
+      // an employee previously logged in on that device.
+      const ownerFilters = await loadOwnerTokenFilters(managerId);
+      const recipients = added.filter((id) => id !== managerId);
+
       // Fan out one push per newly-added assignee. Sequential rather
       // than parallel so a slow recipient (token cleanup, etc.)
       // doesn't make the others wait — simple await loop is fine at
       // these volumes (typically 1–5 employees).
-      for (const employeeId of added) {
+      for (const employeeId of recipients) {
         try {
           const result = await sendPushToUser({
             userId: employeeId,
@@ -90,6 +97,8 @@ exports.onTaskAssigned = onDocumentWritten(
               locationId,
               managerId,
             },
+            excludeDeviceIds: ownerFilters.deviceIds,
+            excludeTokens: ownerFilters.tokens,
           });
           if (result.skipped) {
             console.log(`📭 Task assigned to ${employeeId} skipped: ${result.skipped}`);

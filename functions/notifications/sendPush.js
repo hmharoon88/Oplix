@@ -130,6 +130,33 @@ async function loadDeviceTokens(userId) {
 }
 
 /**
+ * Device ids + raw FCM tokens registered on an owner/manager account.
+ * Assignment pushes skip these so a shared phone doesn't ring for the
+ * owner when an employee is assigned.
+ */
+async function loadOwnerTokenFilters(ownerUserId) {
+  if (!ownerUserId) {
+    return {deviceIds: new Set(), tokens: new Set()};
+  }
+  const entries = await loadDeviceTokens(ownerUserId);
+  return {
+    deviceIds: new Set(entries.map((e) => e.deviceId)),
+    tokens: new Set(entries.map((e) => e.token)),
+  };
+}
+
+function filterExcludedTokens(tokens, excludeDeviceIds, excludeTokens) {
+  let filtered = tokens;
+  if (excludeDeviceIds && excludeDeviceIds.size > 0) {
+    filtered = filtered.filter((entry) => !excludeDeviceIds.has(entry.deviceId));
+  }
+  if (excludeTokens && excludeTokens.size > 0) {
+    filtered = filtered.filter((entry) => !excludeTokens.has(entry.token));
+  }
+  return filtered;
+}
+
+/**
  * FCM error codes that mean "this token is dead — stop sending to it".
  * https://firebase.google.com/docs/cloud-messaging/send-message#admin
  */
@@ -163,9 +190,19 @@ async function deleteDeadToken(userId, deviceId) {
  * @param {string} args.body            - notification body
  * @param {object} [args.data]          - custom payload merged into FCM `data`
  *                                        (used by the iOS tap handler for routing)
+ * @param {Set<string>} [args.excludeDeviceIds] - skip these device doc ids
+ * @param {Set<string>} [args.excludeTokens]    - skip these raw FCM tokens
  * @returns {Promise<{sent: number, skipped: string|null, dead: number}>}
  */
-async function sendPushToUser({userId, category, title, body, data = {}}) {
+async function sendPushToUser({
+  userId,
+  category,
+  title,
+  body,
+  data = {},
+  excludeDeviceIds,
+  excludeTokens,
+}) {
   if (!userId) {
     return {sent: 0, skipped: 'no_user', dead: 0};
   }
@@ -180,7 +217,11 @@ async function sendPushToUser({userId, category, title, body, data = {}}) {
     return {sent: 0, skipped: blockReason, dead: 0};
   }
 
-  const tokens = await loadDeviceTokens(userId);
+  const tokens = filterExcludedTokens(
+      await loadDeviceTokens(userId),
+      excludeDeviceIds,
+      excludeTokens,
+  );
   if (tokens.length === 0) {
     return {sent: 0, skipped: 'no_tokens', dead: 0};
   }
@@ -245,6 +286,7 @@ async function sendPushToUser({userId, category, title, body, data = {}}) {
 
 module.exports = {
   sendPushToUser,
+  loadOwnerTokenFilters,
   // Exported for unit tests / future helpers
-  __test__: {pushBlockReason, isInsideQuietHours, nowAsMinutes},
+  __test__: {pushBlockReason, isInsideQuietHours, nowAsMinutes, filterExcludedTokens},
 };

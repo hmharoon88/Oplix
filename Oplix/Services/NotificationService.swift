@@ -72,15 +72,32 @@ final class NotificationService: ObservableObject {
         }
     }
 
-    /// Called after the user signs in. Persists any cached FCM
-    /// token onto their user doc so Cloud Functions can target them.
-    /// Safe to call repeatedly — the `lastPersistedUserId` guard
-    /// keeps it idempotent.
+    /// Called after the user signs in. Persists any cached FCM token,
+    /// then fetches a fresh one from Firebase so tokens minted before
+    /// notification permission are replaced.
     func registerCurrentUser() {
-        guard let userId = Auth.auth().currentUser?.uid else { return }
-        guard userId != lastPersistedUserId else { return }
-        if let token = cachedToken {
+        guard Auth.auth().currentUser?.uid != nil else { return }
+        if let token = cachedToken, let userId = Auth.auth().currentUser?.uid {
             persistToken(token, for: userId)
+        }
+        Task { await refreshAndPersistFCMToken() }
+    }
+
+    /// Pull the current FCM token from Firebase and save it for the
+    /// signed-in user. Call after sign-in, after permission grant,
+    /// and when returning to the foreground.
+    func refreshAndPersistFCMToken() async {
+        guard let userId = Auth.auth().currentUser?.uid else { return }
+        await refreshAuthStatus()
+        if authStatus == .authorized {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+        do {
+            let token = try await Messaging.messaging().token()
+            cachedToken = token
+            persistToken(token, for: userId)
+        } catch {
+            print("⚠️ FCM token fetch failed: \(error.localizedDescription)")
         }
     }
 
@@ -117,6 +134,7 @@ final class NotificationService: ObservableObject {
                 // After opt-in, explicitly re-register so APNs hands a token to
                 // FirebaseMessaging (especially important for production builds).
                 UIApplication.shared.registerForRemoteNotifications()
+                await refreshAndPersistFCMToken()
             }
             return granted
         } catch {

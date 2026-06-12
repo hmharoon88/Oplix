@@ -9,11 +9,13 @@ initializeApp();
 // stable names so deployment manifests stay simple.
 const {onTaskAssigned} = require('./notifications/onTaskAssigned');
 const {onTaskReviewed} = require('./notifications/onTaskReviewed');
+const {onTaskCompleted} = require('./notifications/onTaskCompleted');
 const {onEmployeeProfileChanged} = require('./notifications/onEmployeeProfileChanged');
 const {onRoleChanged} = require('./notifications/onRoleChanged');
 
 exports.onTaskAssigned = onTaskAssigned;
 exports.onTaskReviewed = onTaskReviewed;
+exports.onTaskCompleted = onTaskCompleted;
 exports.onEmployeeProfileChanged = onEmployeeProfileChanged;
 exports.onRoleChanged = onRoleChanged;
 

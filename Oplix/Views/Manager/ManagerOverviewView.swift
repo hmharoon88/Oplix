@@ -15,6 +15,7 @@ struct ManagerOverviewView: View {
     // Same store the Settings → Home Layout screen writes to, so changes
     // there are reflected immediately on next render of this view.
     @StateObject private var layoutStore: HomeLayoutStore
+    @StateObject private var orgTodosViewModel: OrgTodosViewModel
     @EnvironmentObject var authViewModel: AuthViewModel
     @Environment(\.dismiss) var dismiss
     @State private var selectedLocation: Location?
@@ -36,6 +37,7 @@ struct ManagerOverviewView: View {
         // Shared per-user instance so toggles in Settings → Home Layout
         // re-render the manager Home immediately (same ObservableObject).
         _layoutStore = StateObject(wrappedValue: HomeLayoutStore.shared(userId: userId))
+        _orgTodosViewModel = StateObject(wrappedValue: OrgTodosViewModel(userId: userId))
     }
     
     // Time-of-day greeting. Uses the user's local clock so 11pm shows
@@ -309,6 +311,10 @@ struct ManagerOverviewView: View {
                 }
             )
             .padding(.horizontal)
+
+        case .orgTodos:
+            OrgTodosCard(viewModel: orgTodosViewModel)
+                .padding(.horizontal)
             
         case .thisWeek:
             ThisWeekCard(

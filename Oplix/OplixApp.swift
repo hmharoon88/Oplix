@@ -123,6 +123,7 @@ struct OplixApp: App {
 
 struct RootView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var notificationService = NotificationService.shared
     @State private var showingNotificationPreprompt = false
 
@@ -155,13 +156,19 @@ struct RootView: View {
             if authViewModel.isAuthenticated {
                 notificationService.registerCurrentUser()
                 await notificationService.refreshAuthStatus()
-                if notificationService.authStatus == .notDetermined,
-                   !UserDefaults.standard.bool(forKey: NotificationPermissionView.didShowPrepromptKey) {
+                if notificationService.authStatus == .authorized {
+                    await notificationService.refreshAndPersistFCMToken()
+                } else if notificationService.authStatus == .notDetermined,
+                          !UserDefaults.standard.bool(forKey: NotificationPermissionView.didShowPrepromptKey) {
                     showingNotificationPreprompt = true
                 }
             } else {
                 await notificationService.unregisterCurrentDevice()
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, authViewModel.isAuthenticated else { return }
+            Task { await notificationService.refreshAndPersistFCMToken() }
         }
         .sheet(isPresented: $showingNotificationPreprompt) {
             NotificationPermissionView()

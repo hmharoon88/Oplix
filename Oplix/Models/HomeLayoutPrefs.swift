@@ -25,6 +25,7 @@ import Combine
 //   3. Render it in ManagerOverviewView's `section(for:)` switch.
 enum HomeSection: String, CaseIterable, Identifiable, Codable {
     case actionCenter
+    case orgTodos
     case thisWeek
     case lotteryToday
     case shortcuts
@@ -35,6 +36,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .actionCenter: return "Needs Attention"
+        case .orgTodos:     return "To-Do"
         case .thisWeek:     return "This Week"
         case .lotteryToday: return "Lottery Today"
         case .shortcuts:    return "Shortcuts"
@@ -45,6 +47,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable {
     var subtitle: String {
         switch self {
         case .actionCenter: return "Cash variances, overdue items, missing data"
+        case .orgTodos:     return "Your personal checklist — not tied to a facility"
         case .thisWeek:     return "Receivables and payables due in next 7 days"
         case .lotteryToday: return "Per-location lottery over/short for today"
         case .shortcuts:    return "Quick actions: shifts, payroll, status, broadcast"
@@ -55,6 +58,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable {
     var icon: String {
         switch self {
         case .actionCenter: return "exclamationmark.triangle.fill"
+        case .orgTodos:     return "checklist"
         case .thisWeek:     return "calendar.badge.clock"
         case .lotteryToday: return "ticket.fill"
         case .shortcuts:    return "bolt.fill"
@@ -65,6 +69,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable {
     var tint: String {
         switch self {
         case .actionCenter: return "orange"
+        case .orgTodos:     return "teal"
         case .thisWeek:     return "purple"
         case .lotteryToday: return "yellow"
         case .shortcuts:    return "green"
@@ -129,6 +134,7 @@ struct HomeLayoutPrefs: Codable, Equatable {
     
     static let defaultOrder: [HomeSection] = [
         .actionCenter,
+        .orgTodos,
         .lotteryToday,
         .thisWeek,
         .shortcuts,

@@ -139,18 +139,22 @@ class AuthViewModel: ObservableObject {
     }
     
     func signOut() {
-        do {
-            // Stop all listeners before signing out
-            firebaseService.removeAllListeners()
-            try firebaseService.signOut()
-            currentUser = nil
-            isAuthenticated = false
-            errorMessage = nil
-            isLoading = false
-            hasLoadedCurrentUser = false // Reset flag on logout
-            isLoadCurrentUserInProgress = false
-        } catch {
-            errorMessage = "Sign out failed: \(error.localizedDescription)"
+        Task {
+            // Remove this device's token before auth clears so the next
+            // account on a shared phone doesn't inherit stale targets.
+            await NotificationService.shared.unregisterCurrentDevice()
+            do {
+                firebaseService.removeAllListeners()
+                try firebaseService.signOut()
+                currentUser = nil
+                isAuthenticated = false
+                errorMessage = nil
+                isLoading = false
+                hasLoadedCurrentUser = false
+                isLoadCurrentUserInProgress = false
+            } catch {
+                errorMessage = "Sign out failed: \(error.localizedDescription)"
+            }
         }
     }
     

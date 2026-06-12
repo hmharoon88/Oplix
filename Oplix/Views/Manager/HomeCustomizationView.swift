@@ -211,6 +211,7 @@ struct HomeCustomizationView: View {
         case "green":  return .green
         case "indigo": return .indigo
         case "yellow": return .yellow
+        case "teal":   return .teal
         default:       return Theme.cloudBlue
         }
     }
