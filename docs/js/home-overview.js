@@ -181,6 +181,38 @@
         return total;
     }
 
+    /** Daily sheet expenses only (matches Books summary daily rows, not shift register). */
+    function monthToDateExpensesFromBooks(daysById, now) {
+        const M = window.OplixBooksModel;
+        if (!M) return 0;
+        const prefix = monthBooksPrefix(now);
+        const todayDay = M.dayIdFromDate(now);
+        let total = 0;
+        Object.entries(daysById || {}).forEach(([dayId, day]) => {
+            if (!dayId.startsWith(prefix) || dayId > todayDay) return;
+            const normalized = M.normalizeDayDoc(day);
+            total +=
+                M.sumLines(normalized.cashExpenses, "amount") +
+                M.sumLines(normalized.checksAch, "amount") +
+                M.sumLines(normalized.otherExpenses, "amount");
+        });
+        return total;
+    }
+
+    function sumRegisterCashExpenses(register) {
+        if (!register) return 0;
+        if (register.cashExpenseAmounts?.length) {
+            return register.cashExpenseAmounts.reduce(
+                (sum, v) => sum + (parseFloat(v) || 0),
+                0
+            );
+        }
+        if (register.cashExpense != null) {
+            return parseFloat(register.cashExpense) || 0;
+        }
+        return 0;
+    }
+
     function storeSalesForDayId(location, dayId, daysById, shifts) {
         const booksDay = daysById?.[dayId];
         if (booksDay) {
@@ -755,17 +787,18 @@
         });
 
         monthShifts.forEach((shift) => {
+            if (useBooks && M) return;
             (shift.expenses || []).forEach((e) => {
-                monthToDateExpenses += e.amount || 0;
+                monthToDateExpenses += parseFloat(e.amount) || 0;
             });
             (shift.registers || []).forEach((r) => {
-                if (r.cashExpenseAmounts) {
-                    monthToDateExpenses += r.cashExpenseAmounts.reduce((a, b) => a + b, 0);
-                } else if (r.cashExpense != null) {
-                    monthToDateExpenses += r.cashExpense;
-                }
+                monthToDateExpenses += sumRegisterCashExpenses(r);
             });
         });
+
+        if (useBooks && M) {
+            monthToDateExpenses = monthToDateExpensesFromBooks(daysById, asOfDate);
+        }
 
         return {
             monthToDateSales: monthToDateStoreSales,
@@ -1501,7 +1534,7 @@
         return `
             <div class="home-cc-block home-cc-full">
                 <h2 class="home-cc-heading">Month to date</h2>
-                <p class="books-hint home-mtd-hint">Compared to the same days last month. Store sales — merch for gas; register card + cash for C Store.</p>
+                <p class="books-hint home-mtd-hint">Compared to the same days last month. Store sales — merch for gas; register card + cash for C Store. Expenses — Daily books daily sheet when entered there; otherwise shift register payouts.</p>
                 <div class="home-card home-cc-table-wrap">
                     <table class="home-cc-table home-cc-table--mtd">
                         <thead>
