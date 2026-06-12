@@ -57,6 +57,14 @@ fileprivate func managerOverviewFetchLocationBundle(userId: String, locationId: 
     }
 }
 
+fileprivate func managerOverviewHasMonthBooksDays(books: BooksMonthPayload, through endDate: Date, calendar: Calendar) -> Bool {
+    let todayDayId = BooksDateIds.dayId(from: endDate, calendar: calendar)
+    let prefix = books.monthId + "-"
+    return books.daysById.keys.contains { dayId in
+        dayId.hasPrefix(prefix) && dayId <= todayDayId
+    }
+}
+
 struct LocationStats: Identifiable {
     let id: String
     let locationName: String
@@ -313,7 +321,7 @@ class ManagerOverviewViewModel: ObservableObject {
                     }
                 }
                 
-                // Calculate month-to-date payroll and expenses
+                // Calculate month-to-date payroll from shifts
                 var monthToDatePayroll: Double = 0.0
                 var monthToDateExpenses: Double = 0.0
                 let monthToDateShifts = shifts.filter { shift in
@@ -352,29 +360,31 @@ class ManagerOverviewViewModel: ObservableObject {
                     let totalHours = employeeShifts.compactMap { $0.hoursWorked }.reduce(0, +)
                     monthToDatePayroll += totalHours * hourlyRate
                 }
-                
-                // Calculate month-to-date expenses from shifts
-                for shift in monthToDateShifts {
-                    // Add non-cash expenses
-                    for expense in shift.expenses {
-                        monthToDateExpenses += expense.amount
-                    }
-                    
-                    // Add cash expenses from registers
-                    if !shift.registers.isEmpty {
-                        for register in shift.registers {
-                            if let amounts = register.cashExpenseAmounts {
-                                monthToDateExpenses += amounts.reduce(0, +)
-                            } else if let amount = register.cashExpense {
-                                // Legacy single cash expense
-                                monthToDateExpenses += amount
+
+                let useBooksForMtd = bundle.booksCurrentMonth.map {
+                    managerOverviewHasMonthBooksDays(books: $0, through: now, calendar: calendar)
+                } ?? false
+
+                if !useBooksForMtd {
+                    // Shift register payouts — only when Daily books has no entries this month.
+                    for shift in monthToDateShifts {
+                        for expense in shift.expenses {
+                            monthToDateExpenses += expense.amount
+                        }
+                        if !shift.registers.isEmpty {
+                            for register in shift.registers {
+                                if let amounts = register.cashExpenseAmounts {
+                                    monthToDateExpenses += amounts.reduce(0, +)
+                                } else if let amount = register.cashExpense {
+                                    monthToDateExpenses += amount
+                                }
                             }
                         }
                     }
                 }
 
-                // Daily Books (web dashboard) — align Home MTD with Monthly History "Sales".
-                if let books = bundle.booksCurrentMonth {
+                // Daily Books (web) — align Home MTD with Monthly History when books exist.
+                if let books = bundle.booksCurrentMonth, useBooksForMtd {
                     let aggregate = BooksAggregator.aggregateMonth(
                         monthId: books.monthId,
                         month: books.month,
@@ -393,9 +403,7 @@ class ManagerOverviewViewModel: ObservableObject {
                         monthToDateFuelDollars = booksMTD.fuelDollars
                         monthToDateFuelGallons = booksMTD.fuelGallons
                     }
-                    if booksMTD.expenses > monthToDateExpenses {
-                        monthToDateExpenses = booksMTD.expenses
-                    }
+                    monthToDateExpenses = booksMTD.expenses
                 }
 
                 stats.append(LocationStats(
