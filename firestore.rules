@@ -1,14 +1,105 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Simple: no Firebase Auth session → no access.
-    // Stops outsiders (web, scripts, random apps) without a logged-in user.
-    //
-    // Note: anyone who can sign into *your* Firebase project (e.g. creates an
-    // account) is still "authenticated" here. Tighter rules = per-path checks
-    // (e.g. only data under that user's uid). Add that when you want it.
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    // Designed so normal iOS + web usage keeps working:
+    //   • Managers → full access under users/{theirAuthUid}/…
+    //   • Employees / supervisors → access their manager's tree via managerUserId
+    //   • Signed-out / wrong-tenant users → denied (blocks scraping & random signups)
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function userExists(uid) {
+      return exists(userPath(uid));
+    }
+
+    function userData(uid) {
+      return get(userPath(uid)).data;
+    }
+
+    function isManagerAccount(uid) {
+      return userExists(uid) && userData(uid).role == 'manager';
+    }
+
+    function isStaffAccount(uid) {
+      return userExists(uid) && userData(uid).role in ['employee', 'supervisor'];
+    }
+
+    function staffManagerId(uid) {
+      return userData(uid).get('managerUserId', '');
+    }
+
+    // Manager owns this tenant root, or staff belongs to this manager.
+    function canAccessManagerTree(managerId) {
+      return isSignedIn() && (
+        request.auth.uid == managerId ||
+        (isStaffAccount(request.auth.uid) && staffManagerId(request.auth.uid) == managerId)
+      );
+    }
+
+    function roleUnchanged() {
+      return request.resource.data.role == resource.data.role;
+    }
+
+    function managerUserIdUnchanged() {
+      return request.resource.data.get('managerUserId', null)
+        == resource.data.get('managerUserId', null);
+    }
+
+    // ── User profile docs: users/{userId} ────────────────────────────────────
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId ||
+        (isManagerAccount(request.auth.uid)
+          && resource.data.get('managerUserId', '') == request.auth.uid)
+      );
+
+      // Manager self-sign-up (web / iOS) or manager provisioning staff Auth profile.
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId
+          && request.resource.data.role == 'manager'
+          && request.resource.data.id == userId
+          && !('managerUserId' in request.resource.data))
+        ||
+        (isManagerAccount(request.auth.uid)
+          && request.resource.data.role in ['employee', 'supervisor']
+          && request.resource.data.managerUserId == request.auth.uid
+          && request.resource.data.id == userId)
+      );
+
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId && roleUnchanged() && managerUserIdUnchanged())
+        ||
+        (isManagerAccount(request.auth.uid)
+          && resource.data.get('managerUserId', '') == request.auth.uid)
+      );
+
+      allow delete: if isSignedIn() && (
+        (request.auth.uid == userId && resource.data.role == 'manager')
+        ||
+        (isManagerAccount(request.auth.uid)
+          && resource.data.get('managerUserId', '') == request.auth.uid)
+      );
+
+      // All manager-tenant data: employees, locations, tasks, books, etc.
+      match /{document=**} {
+        allow read, write: if canAccessManagerTree(userId);
+      }
+    }
+
+    // ── Shared lottery game catalog (iOS manager lottery setup) ───────────────
+
+    match /gameDatabase/{gameId} {
+      allow read: if isSignedIn();
+      allow write: if isManagerAccount(request.auth.uid);
     }
   }
 }

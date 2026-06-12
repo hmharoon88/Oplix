@@ -45,6 +45,62 @@ const OplixAuth = {
         }
     },
 
+    async signUpManager(email, password, username) {
+        const trimmedEmail = email.trim();
+        const trimmedUsername = String(username || "").trim();
+        const credential = await window.oplixAuth.createUserWithEmailAndPassword(
+            trimmedEmail,
+            password
+        );
+        const uid = credential.user.uid;
+
+        try {
+            await credential.user.sendEmailVerification();
+        } catch (err) {
+            console.warn("[Oplix] Verification email failed:", err);
+        }
+
+        try {
+            await window.oplixDb
+                .collection("users")
+                .doc(uid)
+                .set({
+                    id: uid,
+                    username: trimmedUsername || trimmedEmail.split("@")[0] || "manager",
+                    role: "manager",
+                    locationId: null,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                });
+        } catch (err) {
+            try {
+                await credential.user.delete();
+            } catch {
+                /* ignore */
+            }
+            throw err;
+        }
+
+        await window.oplixAuth.signOut();
+        return { email: trimmedEmail };
+    },
+
+    async resendVerificationEmail(email, password) {
+        const trimmedEmail = email.trim();
+        const credential = await window.oplixAuth.signInWithEmailAndPassword(
+            trimmedEmail,
+            password
+        );
+        try {
+            await credential.user.reload();
+            if (credential.user.emailVerified) {
+                throw new Error("Email is already verified. You can sign in now.");
+            }
+            await credential.user.sendEmailVerification();
+        } finally {
+            await window.oplixAuth.signOut();
+        }
+    },
+
     async getCurrentManagerSession() {
         const authUser = window.oplixAuth.currentUser;
         if (!authUser) return null;

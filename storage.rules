@@ -1,26 +1,51 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Helper function to check if user is authenticated
-    function isAuthenticated() {
+
+    function isSignedIn() {
       return request.auth != null;
     }
-    
-    // Task images: task_images/{managerUserId}/{locationId}/{taskId}
-    match /task_images/{managerUserId}/{locationId}/{taskId} {
-      // Allow read for authenticated users (managers and employees can view)
-      allow read: if isAuthenticated();
-      
-      // Allow write (upload) for authenticated users
-      // Employees can upload images for tasks at their location
-      // Managers can upload/delete images for their locations
-      allow write: if isAuthenticated();
+
+    function userDoc(uid) {
+      return firestore.get(/databases/(default)/documents/users/$(uid));
     }
-    
-    // Allow all other paths for authenticated users (for future use)
-    match /{allPaths=**} {
-      allow read, write: if isAuthenticated();
+
+    function userExists(uid) {
+      return userDoc(uid) != null;
     }
+
+    // Same tenant logic as Firestore — manager owns path, staff uses managerUserId.
+    function canAccessManagerFiles(managerUserId) {
+      return isSignedIn() && (
+        request.auth.uid == managerUserId
+        || (
+          userExists(request.auth.uid)
+          && userDoc(request.auth.uid).data.role in ['employee', 'supervisor']
+          && userDoc(request.auth.uid).data.get('managerUserId', '') == managerUserId
+        )
+      );
+    }
+
+    match /task_images/{managerUserId}/{locationId}/{taskId}/{fileName=**} {
+      allow read, write: if canAccessManagerFiles(managerUserId);
+    }
+
+    match /lottery_form_images/{managerUserId}/{locationId}/{formId}/{fileName=**} {
+      allow read, write: if canAccessManagerFiles(managerUserId);
+    }
+
+    match /documents/{managerUserId}/{locationId}/{fileName=**} {
+      allow read, write: if canAccessManagerFiles(managerUserId);
+    }
+
+    match /compliance_attachments/{managerUserId}/{locationId}/{itemId}/{fileName=**} {
+      allow read, write: if canAccessManagerFiles(managerUserId);
+    }
+
+    match /invoice_files/{managerUserId}/{fileName=**} {
+      allow read, write: if canAccessManagerFiles(managerUserId);
+    }
+
+    // Deny anything else by default (no catch-all).
   }
 }
-

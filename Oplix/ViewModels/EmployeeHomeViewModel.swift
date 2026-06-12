@@ -565,33 +565,9 @@ class EmployeeHomeViewModel: ObservableObject {
         }
     }
 
-    /// Preview how a register close would map into Daily books (for overwrite warnings).
-    func previewBooksMerge(for shift: Shift, closedAt: Date) async -> BooksMergePlan? {
-        guard let managerUserId = managerUserId else { return nil }
-        let monthId = BooksService.monthId(from: closedAt)
-        let dayId = BooksService.dayId(from: closedAt)
-        let existingDay = try? await BooksService.shared.loadDay(
-            userId: managerUserId,
-            locationId: locationId,
-            monthId: monthId,
-            dayId: dayId
-        )
-        return BooksRegisterMerger.planMerge(
-            shift: shift,
-            existingDay: existingDay,
-            closedAt: closedAt,
-            hasGasStation: location?.hasGasStation ?? false
-        )
-    }
-
-    /// Save register close to the shift and optionally merge into Daily books.
+    /// Save register close to the shift only. Daily books are entered on the web — app reads books for reports, not writes.
     @discardableResult
-    func saveRegisterClosing(
-        _ shift: Shift,
-        closedAt: Date,
-        mergeToDailyBooks: Bool,
-        overwriteDailyBooks: Bool
-    ) async -> Bool {
+    func saveRegisterClosing(_ shift: Shift, closedAt: Date) async -> Bool {
         guard let managerUserId = managerUserId else {
             errorMessage = "Manager user ID not found"
             return false
@@ -599,36 +575,6 @@ class EmployeeHomeViewModel: ObservableObject {
 
         do {
             try await firebaseService.updateShift(userId: managerUserId, locationId: locationId, shift: shift)
-
-            if mergeToDailyBooks {
-                let monthId = BooksService.monthId(from: closedAt)
-                let dayId = BooksService.dayId(from: closedAt)
-                let existingDay = try await BooksService.shared.loadDay(
-                    userId: managerUserId,
-                    locationId: locationId,
-                    monthId: monthId,
-                    dayId: dayId
-                )
-                let plan = BooksRegisterMerger.planMerge(
-                    shift: shift,
-                    existingDay: existingDay,
-                    closedAt: closedAt,
-                    hasGasStation: location?.hasGasStation ?? false
-                )
-
-                if plan.hasConflicts && !overwriteDailyBooks {
-                    // Caller should have prompted; skip books merge.
-                } else if !plan.slotUpdates.isEmpty || plan.fuelUpdate != nil {
-                    let mergedDay = BooksRegisterMerger.apply(plan: plan)
-                    try await BooksService.shared.saveDay(
-                        userId: managerUserId,
-                        locationId: locationId,
-                        monthId: monthId,
-                        day: mergedDay
-                    )
-                }
-            }
-
             await loadLastLocationRegisterClose(managerUserId: managerUserId, locationId: locationId)
             await loadData()
             return true

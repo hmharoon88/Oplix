@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Create an Oplix owner account">
+    <title>Oplix — Sign up</title>
+    <link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+    <nav class="site-nav">
+        <div class="site-nav-inner">
+            <div class="brand-header">
+                <a href="index.html" class="logo"><span class="logo-mark">Oplix</span></a>
+                <span class="logo-tagline">Manage your operations efficiently</span>
+            </div>
+            <div class="nav-links">
+                <a href="index.html">Home</a>
+                <a href="features.html">Features</a>
+                <a href="support.html">Support</a>
+                <a href="login.html" class="nav-login">Log in</a>
+                <a href="index.html#download" class="btn btn-nav">Get the App</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="login-page">
+        <div class="login-card">
+            <div id="signup-form-view">
+                <h1>Create account</h1>
+                <p class="login-lead">Owner / manager account for the web dashboard and iOS app.</p>
+
+                <p id="signup-error" class="login-error" hidden role="alert"></p>
+
+                <form id="signup-form" class="login-form" novalidate>
+                    <label>
+                        Email
+                        <input type="email" name="email" autocomplete="username" placeholder="you@company.com" required>
+                    </label>
+                    <label>
+                        Password
+                        <input type="password" name="password" autocomplete="new-password" placeholder="At least 6 characters" required minlength="6">
+                    </label>
+                    <label>
+                        Confirm password
+                        <input type="password" name="confirmPassword" autocomplete="new-password" placeholder="••••••••" required minlength="6">
+                    </label>
+                    <button type="submit" id="signup-submit" class="btn btn-primary btn-full">Create account</button>
+                </form>
+
+                <p class="login-links">
+                    Already have an account?
+                    <a href="login.html">Log in</a>
+                    ·
+                    <a href="support.html">Need help?</a>
+                </p>
+            </div>
+
+            <div id="signup-success-view" hidden>
+                <h1>Check your email</h1>
+                <p class="login-lead">We sent a verification link to <strong id="signup-success-email"></strong>.</p>
+                <p class="login-hint">Open the link in your inbox (check spam too), then return here to log in. Your account works in the iOS app once verified.</p>
+                <p id="signup-success-status" class="login-error login-message-info" hidden role="status"></p>
+                <div class="login-form">
+                    <button type="button" id="signup-resend" class="btn btn-primary btn-full">Resend verification email</button>
+                    <a href="login.html" class="btn btn-secondary btn-full" style="display:block;text-align:center;margin-top:12px;text-decoration:none;">Go to log in</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <p>&copy; 2026 AL Global Enterprises LLC. All rights reserved.</p>
+        <p class="footer-legal">Oplix is owned and operated by AL Global Enterprises LLC.</p>
+    </footer>
+
+    <script src="js/firebase-config.js"></script>
+    <script src="js/firebase-config.override.js" onerror=""></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <script src="js/firebase-init.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/signup-page.js"></script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 //  BooksService.swift
 //  Oplix
 //
-//  Firestore access for web Daily books (read + register merge writes).
+//  Firestore read access for web Daily books (iOS manager reports). Writes are web-only.
 //
 
 import Foundation
@@ -90,22 +90,5 @@ final class BooksService {
         let snap = try await dayRef(userId: userId, locationId: locationId, monthId: monthId, dayId: dayId).getDocument()
         guard snap.exists, let data = snap.data() else { return nil }
         return BooksFirestoreParser.parseDay(dayId: dayId, data: data)
-    }
-
-    func ensureMonthExists(userId: String, locationId: String, monthId: String) async throws {
-        let ref = monthRef(userId: userId, locationId: locationId, monthId: monthId)
-        let snap = try await ref.getDocument()
-        guard !snap.exists else { return }
-        var payload = BooksFirestoreEncoder.defaultMonthPayload()
-        payload["updatedAt"] = FieldValue.serverTimestamp()
-        try await ref.setData(payload, merge: true)
-    }
-
-    func saveDay(userId: String, locationId: String, monthId: String, day: BooksDayDoc) async throws {
-        try await ensureMonthExists(userId: userId, locationId: locationId, monthId: monthId)
-        var payload = BooksFirestoreEncoder.encodeDay(day)
-        payload["updatedAt"] = FieldValue.serverTimestamp()
-        try await dayRef(userId: userId, locationId: locationId, monthId: monthId, dayId: day.dayId)
-            .setData(payload, merge: true)
     }
 }
