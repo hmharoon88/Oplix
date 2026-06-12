@@ -9,13 +9,30 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../css/site.css?v=20260524todo">
-    <link rel="stylesheet" href="../css/dashboard-web.css?v=20260524d">
+    <link rel="stylesheet" href="../css/dashboard-web.css?v=20260524search">
 </head>
 <body class="dashboard-body">
     <header class="dashboard-topbar">
         <div class="brand-header">
             <a href="../index.html" class="logo"><span class="logo-mark">Oplix</span></a>
             <span class="logo-tagline">Manage your operations efficiently</span>
+        </div>
+        <div class="global-search" id="global-search">
+            <label class="global-search-label" for="global-search-input">
+                <span class="global-search-icon" aria-hidden="true">⌕</span>
+                <input
+                    type="search"
+                    id="global-search-input"
+                    class="global-search-input"
+                    placeholder="Search facilities, employees, documents…"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-autocomplete="list"
+                    aria-controls="global-search-results"
+                >
+                <kbd class="global-search-kbd" aria-hidden="true">⌘K</kbd>
+            </label>
+            <div id="global-search-results" class="global-search-results" hidden role="listbox"></div>
         </div>
         <button type="button" id="sign-out" class="btn btn-nav btn-nav-outline">Sign out</button>
     </header>
@@ -155,9 +172,13 @@
     <script src="../js/documents-ui.js"></script>
     <script src="../js/payables-model.js"></script>
     <script src="../js/payables-store.js"></script>
-    <script src="../js/payables-ui.js"></script>
+    <script src="../js/payables-ui.js?v=20260524fac"></script>
+    <script src="../js/receivables-model.js"></script>
+    <script src="../js/receivables-store.js"></script>
+    <script src="../js/receivables-ui.js?v=20260524fac"></script>
+    <script src="../js/reminders-ui.js?v=20260524fac"></script>
     <script src="../js/location-store.js"></script>
-    <script src="../js/facilities.js"></script>
+    <script src="../js/facilities.js?v=20260524fac"></script>
     <script src="../js/books-store.js?v=20260524b"></script>
     <script src="../js/data-input.js?v=20260524u"></script>
     <script src="../js/books-summary-charts.js?v=20260524u"></script>
@@ -179,6 +200,7 @@
     <script src="../js/settings-model.js"></script>
     <script src="../js/settings-store.js"></script>
     <script src="../js/settings-ui.js"></script>
+    <script src="../js/global-search.js?v=20260524search"></script>
     <script src="../js/app-dashboard.js"></script>
 </body>
 </html>

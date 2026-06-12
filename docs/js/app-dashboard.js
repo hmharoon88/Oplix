@@ -266,11 +266,22 @@
                 profileCache
             );
         }
+        if (window.OplixGlobalSearch?.rebuildIndex) {
+            OplixGlobalSearch.rebuildIndex();
+        }
         return locationsCache;
     }
 
     window.OplixDashboard = {
         reloadLocations,
+        getSearchContext() {
+            return {
+                userId: currentUserId,
+                locations: locationsCache,
+                employees: employeesCache,
+                tasks: tasksCache,
+            };
+        },
     };
 
     function bindSidebar() {
@@ -377,6 +388,10 @@
             Promise.all([homeLoad, facilitiesLoad]).catch((err) => {
                 console.error("[Oplix] Background dashboard load failed:", err);
             });
+
+            if (window.OplixGlobalSearch) {
+                OplixGlobalSearch.init(user.uid, () => window.OplixDashboard?.getSearchContext?.() || {});
+            }
         } catch (err) {
             showError(err.message || "Unable to load your account.");
         }

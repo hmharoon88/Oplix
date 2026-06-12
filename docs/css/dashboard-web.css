@@ -84,8 +84,168 @@
 }
 
 .dashboard-topbar .brand-header {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.global-search {
+    position: relative;
+    flex: 1;
+    max-width: 520px;
+    min-width: 180px;
+}
+
+.global-search-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--dash-bg, #f8fafc);
+    border: 1px solid var(--dash-border);
+    border-radius: 10px;
+    padding: 0 10px;
+    min-height: 38px;
+}
+
+.global-search-label:focus-within {
+    border-color: var(--dash-accent, #2563eb);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.global-search-icon {
+    color: var(--dash-muted, #64748b);
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.global-search-input {
     flex: 1;
     min-width: 0;
+    border: none;
+    background: transparent;
+    font: inherit;
+    font-size: 0.875rem;
+    color: var(--dash-text, #0f172a);
+    padding: 8px 0;
+}
+
+.global-search-input:focus {
+    outline: none;
+}
+
+.global-search-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+}
+
+.global-search-kbd {
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    line-height: 1;
+    color: var(--dash-muted, #64748b);
+    border: 1px solid var(--dash-border);
+    border-radius: 4px;
+    padding: 3px 5px;
+    background: var(--dash-surface, #fff);
+    font-family: inherit;
+}
+
+.global-search--open .global-search-kbd,
+.global-search-label:focus-within .global-search-kbd {
+    display: none;
+}
+
+.global-search-results {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 200;
+    background: var(--dash-surface, #fff);
+    border: 1px solid var(--dash-border);
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
+    max-height: min(420px, 60vh);
+    overflow: auto;
+    padding: 6px;
+}
+
+.global-search-result {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    padding: 10px;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.global-search-result:hover,
+.global-search-result.is-selected {
+    background: #eff6ff;
+}
+
+.global-search-result-type {
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--dash-muted, #64748b);
+    padding-top: 2px;
+    min-width: 4.5rem;
+}
+
+.global-search-result-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.global-search-result-main strong {
+    font-size: 0.875rem;
+    color: var(--dash-text, #0f172a);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.global-search-result-main span {
+    font-size: 0.75rem;
+    color: var(--dash-muted, #64748b);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.global-search-empty {
+    margin: 0;
+    padding: 14px 10px;
+    font-size: 0.875rem;
+    color: var(--dash-muted, #64748b);
+}
+
+.global-search--indexing .global-search-input::placeholder {
+    color: #94a3b8;
+}
+
+@media (max-width: 900px) {
+    .dashboard-topbar .brand-header .logo-tagline {
+        display: none;
+    }
+
+    .global-search-kbd {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .global-search {
+        max-width: none;
+    }
 }
 
 .dashboard-topbar .brand-header .logo-tagline {
@@ -4993,6 +5153,47 @@
     align-items: center;
     gap: 8px;
     font-weight: 500;
+}
+
+.rem-row {
+    align-items: flex-start;
+}
+
+.rem-check {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    margin-top: 2px;
+    border: 2px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #16a34a;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+}
+
+.rem-row--done .rem-check {
+    border-color: #16a34a;
+    background: #f0fdf4;
+}
+
+.rem-row-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.rem-title--done {
+    text-decoration: line-through;
+    color: var(--dash-text-muted, #64748b);
 }
 
 @media (max-width: 768px) {

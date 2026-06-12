@@ -512,11 +512,29 @@
                       })
                     : renderDocumentsScreen(data);
             case "reminders":
-                return renderRemindersScreen(data);
+                return window.OplixFacilityReminders
+                    ? OplixFacilityReminders.renderSection({
+                          userId,
+                          locationId: data.location.id,
+                          data,
+                      })
+                    : renderComingSoonSection(title);
             case "payables":
-                return renderPayablesScreen(data, true);
+                return window.OplixPayablesUI
+                    ? OplixPayablesUI.renderFacilitySection({
+                          userId,
+                          locationId: data.location.id,
+                          payables: data.payables,
+                      })
+                    : renderComingSoonSection(title);
             case "receivables":
-                return renderPayablesScreen(data, false);
+                return window.OplixReceivablesUI
+                    ? OplixReceivablesUI.renderFacilitySection({
+                          userId,
+                          locationId: data.location.id,
+                          receivables: data.receivables,
+                      })
+                    : renderComingSoonSection(title);
             case "compliance":
                 return window.OplixFacilityCompliance
                     ? OplixFacilityCompliance.renderSection({
@@ -678,57 +696,6 @@
             </ul>`;
     }
 
-    function renderRemindersScreen(data) {
-        const open = data.reminders.filter((r) => !r.isCompleted);
-        const done = data.reminders.filter((r) => r.isCompleted);
-        return `
-            <h2 class="loc-section-heading">Reminders</h2>
-            ${open.length ? `<h3 class="loc-subheading">Open (${open.length})</h3>${renderReminderList(open)}` : ""}
-            ${done.length ? `<h3 class="loc-subheading">Completed</h3>${renderReminderList(done)}` : ""}
-            ${!open.length && !done.length ? '<p class="data-list-empty">No reminders.</p>' : ""}`;
-    }
-
-    function renderReminderList(items) {
-        return `<ul class="loc-row-list">${items
-            .map((r) => {
-                const due = toDate(r.dueDate);
-                return `<li class="loc-row-card"><div><strong>${escapeHtml(r.title || r.text || "Reminder")}</strong>${due ? `<span class="data-list-meta">Due ${due.toLocaleDateString()}</span>` : ""}</div></li>`;
-            })
-            .join("")}</ul>`;
-    }
-
-    function renderPayablesScreen(data, isPayable) {
-        const items = isPayable ? data.payables : data.receivables;
-        const title = isPayable ? "Payables" : "Receivables";
-        const active = items.filter((p) => (isPayable ? !p.isPaid : !p.isReceived));
-        const paid = items.filter((p) => (isPayable ? p.isPaid : p.isReceived));
-        const total = active.reduce((s, p) => s + (p.amount || 0), 0);
-
-        return `
-            <h2 class="loc-section-heading">${title}</h2>
-            <div class="loc-total-banner">
-                <span>Total ${isPayable ? "payables" : "receivables"}</span>
-                <strong>${formatCurrency(total)}</strong>
-            </div>
-            <h3 class="loc-subheading">Active (${active.length})</h3>
-            ${renderMoneyList(active, isPayable)}
-            ${paid.length ? `<h3 class="loc-subheading">History (${paid.length})</h3>${renderMoneyList(paid.slice(0, 20), isPayable, true)}` : ""}`;
-    }
-
-    function renderMoneyList(items, isPayable, history) {
-        if (!items.length) return '<p class="data-list-empty">None</p>';
-        return `<ul class="loc-row-list">${items
-            .map((p) => {
-                const party = isPayable ? p.payTo : p.receiveFrom;
-                const due = toDate(p.dueDate);
-                const sub = [party, due ? `Due ${due.toLocaleDateString()}` : "", history ? "Paid" : ""]
-                    .filter(Boolean)
-                    .join(" · ");
-                return `<li class="loc-row-card"><div><strong>${formatCurrency(p.amount)}</strong><span class="data-list-meta">${escapeHtml(sub)}</span></div></li>`;
-            })
-            .join("")}</ul>`;
-    }
-
     function renderComingSoonSection(title) {
         return `
             <h2 class="loc-section-heading">${escapeHtml(title)}</h2>
@@ -846,6 +813,42 @@
                 userId,
                 locationId: currentDetail.location.id,
                 data: currentDetail,
+                onRefresh: async () => {
+                    currentDetail = await loadLocationDetail(currentDetail.location.id);
+                    openSection(sectionId);
+                },
+            });
+        }
+        if (window.OplixFacilityReminders?.isRemindersSection(sectionId)) {
+            content.dataset.remBound = "";
+            OplixFacilityReminders.bind(content, {
+                userId,
+                locationId: currentDetail.location.id,
+                data: currentDetail,
+                onRefresh: async () => {
+                    currentDetail = await loadLocationDetail(currentDetail.location.id);
+                    openSection(sectionId);
+                },
+            });
+        }
+        if (window.OplixPayablesUI?.isPayablesSection(sectionId)) {
+            content.dataset.payBound = "";
+            OplixPayablesUI.bind(content, {
+                userId,
+                locationId: currentDetail.location.id,
+                payables: currentDetail.payables,
+                onRefresh: async () => {
+                    currentDetail = await loadLocationDetail(currentDetail.location.id);
+                    openSection(sectionId);
+                },
+            });
+        }
+        if (window.OplixReceivablesUI?.isReceivablesSection(sectionId)) {
+            content.dataset.recBound = "";
+            OplixReceivablesUI.bind(content, {
+                userId,
+                locationId: currentDetail.location.id,
+                receivables: currentDetail.receivables,
                 onRefresh: async () => {
                     currentDetail = await loadLocationDetail(currentDetail.location.id);
                     openSection(sectionId);

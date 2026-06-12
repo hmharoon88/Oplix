@@ -116,13 +116,49 @@
         const paid = M().paidPayablesForMonth(ctx.payables, ctx.monthId);
         const total = M().openTotal(ctx.payables);
 
+        return renderShell({
+            hint: "Bills and vendors you owe — saved to the same payables list as the Oplix app for this facility.",
+            totalLabel: "Open payables",
+            total,
+            openCount: open.length,
+            open,
+            paid,
+            paidHeading: `Paid this month (${paid.length})`,
+            paidEmpty: "No payables marked paid this month yet.",
+            ctx,
+        });
+    }
+
+    function renderFacilitySection(ctx) {
+        const all = ctx.payables || [];
+        const open = M().sortPayables(all.filter((p) => !p.isPaid));
+        const paid = M().sortPayables(all.filter((p) => p.isPaid)).slice(0, 50);
+        const total = open.reduce((s, p) => s + (p.amount || 0), 0);
+
+        return renderShell({
+            hint: "Bills and vendors you owe — same data as the Oplix app and Daily books → Payables for this facility.",
+            totalLabel: "Open payables",
+            total,
+            openCount: open.length,
+            open,
+            paid,
+            paidHeading: `Paid (${paid.length}${all.filter((p) => p.isPaid).length > paid.length ? "+ shown" : ""})`,
+            paidEmpty: "No paid payables yet.",
+            ctx,
+            facility: true,
+        });
+    }
+
+    function renderShell(opts) {
+        const { hint, totalLabel, total, openCount, open, paid, paidHeading, paidEmpty, ctx } = opts;
         return `
-            <div class="books-panel data-input-form pay-section" data-pay-section>
-                <p class="books-hint">Bills and vendors you owe — saved to the same payables list as the Oplix app for this facility.</p>
+            <div class="books-panel pay-section${opts.facility ? " pay-section--facility" : " data-input-form"}" data-pay-section>
+                <h2 class="loc-section-heading">Payables</h2>
+                <p class="books-hint">${hint}</p>
                 <div class="loc-total-banner pay-total-banner">
-                    <span>Open payables</span>
+                    <span>${totalLabel}</span>
                     <strong>${money(total)}</strong>
-                    <span class="data-list-meta">${open.length} open</span>
+                    <span class="data-list-meta">${openCount} open</span>
                 </div>
                 <div class="dir-toolbar">
                     <button type="button" class="btn" data-pay-add>Add payable</button>
@@ -137,11 +173,11 @@
                         : `<p class="data-list-empty">No open payables.</p>`
                 }
 
-                <h3 class="loc-subheading">Paid this month (${paid.length})</h3>
+                <h3 class="loc-subheading">${paidHeading}</h3>
                 ${
                     paid.length
                         ? `<ul class="loc-row-list dir-list">${paid.map((p) => renderRow(p, ctx)).join("")}</ul>`
-                        : `<p class="data-list-empty">No payables marked paid this month yet.</p>`
+                        : `<p class="data-list-empty">${paidEmpty}</p>`
                 }
             </div>`;
     }
@@ -250,6 +286,10 @@
 
     window.OplixPayablesUI = {
         renderTab,
+        renderFacilitySection,
         bind,
+        isPayablesSection(sectionId) {
+            return sectionId === "payables";
+        },
     };
 })();
