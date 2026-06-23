@@ -590,7 +590,7 @@
     function cashReconciliationDayStatus(summary) {
         if (summary.matched) return { label: "Reconciled", tone: "ok" };
         if (summary.countedTotal === 0 && summary.expectedTotal > 0) {
-            return { label: "Not entered", tone: "missing" };
+            return { label: "Not reconciled", tone: "unreconciled" };
         }
         if (
             Math.abs(summary.variance) < 0.005 &&
@@ -1086,14 +1086,46 @@
         };
     }
 
+    function emptyPayOutLine(id) {
+        return { id: id || "", description: "", amount: 0 };
+    }
+
+    function normalizePayOuts(raw, legacyPayOut) {
+        if (Array.isArray(raw)) {
+            return raw
+                .map((line) => ({
+                    id: String(line?.id || ""),
+                    description: String(line?.description || ""),
+                    amount: num(line?.amount),
+                }))
+                .filter((line) => line.id);
+        }
+        const legacy = num(legacyPayOut);
+        if (legacy !== 0) {
+            return [{ id: "legacy", description: "", amount: legacy }];
+        }
+        return [];
+    }
+
+    function sumPayOuts(payOuts) {
+        return (payOuts || []).reduce((total, line) => total + num(line.amount), 0);
+    }
+
+    function payOutsHaveActivity(payOuts) {
+        return (payOuts || []).some(
+            (line) => num(line.amount) !== 0 || String(line.description || "").trim() !== ""
+        );
+    }
+
     function emptyCashReconShift() {
-        return { countedCash: 0, verified: false, note: "" };
+        return { countedCash: 0, payOuts: [], verified: false, note: "" };
     }
 
     function normalizeReconEntry(raw) {
         const src = raw || {};
         return {
             countedCash: num(src.countedCash),
+            payOuts: normalizePayOuts(src.payOuts, src.payOut),
             verified: src.verified === true,
             note: src.note || "",
         };
@@ -1193,6 +1225,7 @@
             const booksEntered = hasBooksData(row);
             const hasReconActivity =
                 num(row.counted) !== 0 ||
+                payOutsHaveActivity(row.payOuts) ||
                 row.verified ||
                 String(row.note || "").trim() !== "";
             return booksEntered || hasReconActivity;
@@ -1201,13 +1234,19 @@
 
     function summarizeReconSection(rows, depositAmount, expectedDeposit, cashExpensesTotal) {
         let expectedTotal = 0;
+        let receivedTotal = 0;
+        let payOutTotal = 0;
         let countedTotal = 0;
         let verifiedCount = 0;
         const rowCount = rows.length;
 
         rows.forEach((row) => {
+            const received = num(row.counted);
+            const payOut = sumPayOuts(row.payOuts);
             expectedTotal += num(row.expected);
-            countedTotal += num(row.counted);
+            receivedTotal += received;
+            payOutTotal += payOut;
+            countedTotal += received + payOut;
             if (row.verified) verifiedCount += 1;
         });
 
@@ -1230,6 +1269,8 @@
         return {
             rows,
             expectedTotal,
+            receivedTotal,
+            payOutTotal,
             countedTotal,
             variance,
             cashExpensesTotal: cashExpensesTotal || 0,
@@ -1257,6 +1298,8 @@
                 const expected = expectedRegisterCash(normalized, regKey, sh);
                 const entry = recon[regKey][sh];
                 const counted = num(entry.countedCash);
+                const payOuts = entry.payOuts || [];
+                const payOut = sumPayOuts(payOuts);
                 registerRowsAll.push({
                     kind: "register",
                     regKey,
@@ -1266,7 +1309,9 @@
                     namePrefix: `cr_${regKey}_${sh}`,
                     expected,
                     counted,
-                    variance: counted - expected,
+                    payOuts,
+                    payOut,
+                    variance: counted + payOut - expected,
                     verified: entry.verified === true,
                     note: entry.note || "",
                 });
@@ -1281,6 +1326,8 @@
             const expected = expectedLotteryCash(normalized, sh);
             const entry = recon.lottery[sh];
             const counted = num(entry.countedCash);
+            const payOuts = entry.payOuts || [];
+            const payOut = sumPayOuts(payOuts);
             lotteryRowsAll.push({
                 kind: "lottery",
                 shiftKey: sh,
@@ -1289,7 +1336,9 @@
                 namePrefix: `cr_lottery_${sh}`,
                 expected,
                 counted,
-                variance: counted - expected,
+                payOuts,
+                payOut,
+                variance: counted + payOut - expected,
                 verified: entry.verified === true,
                 note: entry.note || "",
             });
@@ -1302,6 +1351,8 @@
             const entry = recon.pulltabs[pt.id] || emptyCashReconShift();
             const expected = num(pt.cash);
             const counted = num(entry.countedCash);
+            const payOuts = entry.payOuts || [];
+            const payOut = sumPayOuts(payOuts);
             const ticket = String(pt.ticketNumber || "").trim();
             return {
                 kind: "pulltab",
@@ -1311,7 +1362,9 @@
                 namePrefix: `cr_pt_${pt.id}`,
                 expected,
                 counted,
-                variance: counted - expected,
+                payOuts,
+                payOut,
+                variance: counted + payOut - expected,
                 verified: entry.verified === true,
                 note: entry.note || "",
             };
@@ -1325,6 +1378,8 @@
             const entry = recon.windStations[ws.id] || emptyCashReconShift();
             const expected = num(ws.cash);
             const counted = num(entry.countedCash);
+            const payOuts = entry.payOuts || [];
+            const payOut = sumPayOuts(payOuts);
             const station = String(ws.station || "").trim() || String(idx + 1);
             return {
                 kind: "wind",
@@ -1334,7 +1389,9 @@
                 namePrefix: `cr_ws_${ws.id}`,
                 expected,
                 counted,
-                variance: counted - expected,
+                payOuts,
+                payOut,
+                variance: counted + payOut - expected,
                 verified: entry.verified === true,
                 note: entry.note || "",
             };
@@ -1551,6 +1608,8 @@
         expectedRegisterCash,
         cashReconciliationSummary,
         cashReconciliationDayStatus,
+        sumPayOuts,
+        emptyCashReconShift,
         aggregateCashReconciliation,
         enrichAggregateWithLotteryForms,
         lotteryFormCashEnclosed,

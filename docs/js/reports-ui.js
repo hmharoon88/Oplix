@@ -396,7 +396,7 @@
                                     }
                                     <th class="home-cc-num">${escapeHtml(salesHeader)}</th>
                                     <th class="home-cc-num">Cash exp.</th>
-                                    <th class="home-cc-num">Checks</th>
+                                    <th class="home-cc-num">Check Exp</th>
                                     <th class="home-cc-num">Other</th>
                                     <th class="home-cc-num">Total exp.</th>
                                     <th class="home-cc-num">Net</th>

@@ -349,6 +349,28 @@
             if (utilRm) {
                 deleteUtility(utilRm.dataset.diUtilRm);
             }
+            const payoutAdd = e.target.closest("[data-cr-payout-add]");
+            if (payoutAdd) {
+                syncFromForm();
+                const entry = reconEntryFromPrefix(payoutAdd.dataset.crPayoutAdd);
+                if (entry) {
+                    if (!entry.payOuts) entry.payOuts = [];
+                    entry.payOuts.push({ id: lineId(), description: "", amount: 0 });
+                    render();
+                }
+                return;
+            }
+            const payoutRm = e.target.closest("[data-cr-payout-rm]");
+            if (payoutRm) {
+                syncFromForm();
+                const entry = reconEntryFromPrefix(payoutRm.dataset.crPayoutRm);
+                const payoutId = payoutRm.dataset.payoutId;
+                if (entry && payoutId) {
+                    entry.payOuts = (entry.payOuts || []).filter((line) => line.id !== payoutId);
+                    render();
+                }
+                return;
+            }
         });
 
         panel.addEventListener("focusout", (e) => {
@@ -432,6 +454,64 @@
         }
     }
 
+    function reconEntryFromPrefix(prefix) {
+        if (!state.day.cashReconciliation) {
+            state.day.cashReconciliation = M().defaultCashReconciliation();
+        }
+        const cr = state.day.cashReconciliation;
+        const regMatch = prefix.match(/^cr_(register[12])_(shift[12])$/);
+        if (regMatch) return cr[regMatch[1]][regMatch[2]];
+        const lotMatch = prefix.match(/^cr_lottery_(shift[12])$/);
+        if (lotMatch) {
+            if (!cr.lottery) cr.lottery = M().defaultCashReconciliation().lottery;
+            return cr.lottery[lotMatch[1]];
+        }
+        if (prefix.startsWith("cr_pt_")) {
+            const id = prefix.slice("cr_pt_".length);
+            if (!cr.pulltabs) cr.pulltabs = {};
+            if (!cr.pulltabs[id]) cr.pulltabs[id] = M().emptyCashReconShift();
+            return cr.pulltabs[id];
+        }
+        if (prefix.startsWith("cr_ws_")) {
+            const id = prefix.slice("cr_ws_".length);
+            if (!cr.windStations) cr.windStations = {};
+            if (!cr.windStations[id]) cr.windStations[id] = M().emptyCashReconShift();
+            return cr.windStations[id];
+        }
+        return null;
+    }
+
+    function syncPayOutsForPrefix(prefix, entry) {
+        const root = $("data-input-root");
+        const container = root?.querySelector(`[data-cr-payouts="${prefix}"]`);
+        if (!container || !entry) return;
+        const updated = [];
+        container.querySelectorAll("[data-payout-id]").forEach((row) => {
+            const id = row.dataset.payoutId;
+            if (!id) return;
+            const desc = row.querySelector(`[name="${prefix}_payOut_desc_${id}"]`);
+            const amt = row.querySelector(`[name="${prefix}_payOut_amt_${id}"]`);
+            updated.push({
+                id,
+                description: desc ? desc.value : "",
+                amount: amt ? M().num(amt.value) : 0,
+            });
+        });
+        entry.payOuts = updated;
+    }
+
+    function syncReconShiftFromDom(prefix, entry) {
+        const root = $("data-input-root");
+        if (!root || !entry) return;
+        const counted = root.querySelector(`[name="${prefix}_counted"]`);
+        const verified = root.querySelector(`[name="${prefix}_verified"]`);
+        const note = root.querySelector(`[name="${prefix}_note"]`);
+        if (counted) entry.countedCash = M().num(counted.value);
+        syncPayOutsForPrefix(prefix, entry);
+        if (verified) entry.verified = verified.checked;
+        if (note) entry.note = note.value;
+    }
+
     function syncFromForm() {
         const root = $("data-input-root");
         if (!root) return;
@@ -453,7 +533,7 @@
         if (tax) state.month.salesTax = M().num(tax.value);
         if (acct) state.month.accountant = M().num(acct.value);
 
-        const registerFields = ["cardSale", "cashSale", "overShort"];
+        const registerFields = ["cardSale", "cashSale"];
         ["register1", "register2"].forEach((regKey) => {
             if (!state.day[regKey]) state.day[regKey] = M().defaultRegisterUnit();
             ["shift1", "shift2"].forEach((sh) => {
@@ -498,18 +578,7 @@
         }
         ["register1", "register2"].forEach((regKey) => {
             ["shift1", "shift2"].forEach((sh) => {
-                const counted = root.querySelector(`[name="cr_${regKey}_${sh}_counted"]`);
-                const verified = root.querySelector(`[name="cr_${regKey}_${sh}_verified"]`);
-                const note = root.querySelector(`[name="cr_${regKey}_${sh}_note"]`);
-                if (counted) {
-                    state.day.cashReconciliation[regKey][sh].countedCash = M().num(counted.value);
-                }
-                if (verified) {
-                    state.day.cashReconciliation[regKey][sh].verified = verified.checked;
-                }
-                if (note) {
-                    state.day.cashReconciliation[regKey][sh].note = note.value;
-                }
+                syncReconShiftFromDom(`cr_${regKey}_${sh}`, state.day.cashReconciliation[regKey][sh]);
             });
         });
         const deposit = root.querySelector('[name="cr_day_deposit"]');
@@ -521,41 +590,20 @@
         if (dayNote) state.day.cashReconciliation.note = dayNote.value;
 
         ["shift1", "shift2"].forEach((sh) => {
-            const counted = root.querySelector(`[name="cr_lottery_${sh}_counted"]`);
-            const verified = root.querySelector(`[name="cr_lottery_${sh}_verified"]`);
-            const note = root.querySelector(`[name="cr_lottery_${sh}_note"]`);
             if (!state.day.cashReconciliation.lottery) {
                 state.day.cashReconciliation.lottery = M().defaultCashReconciliation().lottery;
             }
-            if (counted) state.day.cashReconciliation.lottery[sh].countedCash = M().num(counted.value);
-            if (verified) state.day.cashReconciliation.lottery[sh].verified = verified.checked;
-            if (note) state.day.cashReconciliation.lottery[sh].note = note.value;
+            syncReconShiftFromDom(`cr_lottery_${sh}`, state.day.cashReconciliation.lottery[sh]);
         });
 
         (state.day.pulltabs || []).forEach((pt) => {
-            const counted = root.querySelector(`[name="cr_pt_${pt.id}_counted"]`);
-            const verified = root.querySelector(`[name="cr_pt_${pt.id}_verified"]`);
-            const note = root.querySelector(`[name="cr_pt_${pt.id}_note"]`);
             if (!state.day.cashReconciliation.pulltabs) state.day.cashReconciliation.pulltabs = {};
-            if (!state.day.cashReconciliation.pulltabs[pt.id]) {
-                state.day.cashReconciliation.pulltabs[pt.id] = { countedCash: 0, verified: false, note: "" };
-            }
-            if (counted) state.day.cashReconciliation.pulltabs[pt.id].countedCash = M().num(counted.value);
-            if (verified) state.day.cashReconciliation.pulltabs[pt.id].verified = verified.checked;
-            if (note) state.day.cashReconciliation.pulltabs[pt.id].note = note.value;
+            syncReconShiftFromDom(`cr_pt_${pt.id}`, reconEntryFromPrefix(`cr_pt_${pt.id}`));
         });
 
         (state.day.windStations || []).forEach((ws) => {
-            const counted = root.querySelector(`[name="cr_ws_${ws.id}_counted"]`);
-            const verified = root.querySelector(`[name="cr_ws_${ws.id}_verified"]`);
-            const note = root.querySelector(`[name="cr_ws_${ws.id}_note"]`);
             if (!state.day.cashReconciliation.windStations) state.day.cashReconciliation.windStations = {};
-            if (!state.day.cashReconciliation.windStations[ws.id]) {
-                state.day.cashReconciliation.windStations[ws.id] = { countedCash: 0, verified: false, note: "" };
-            }
-            if (counted) state.day.cashReconciliation.windStations[ws.id].countedCash = M().num(counted.value);
-            if (verified) state.day.cashReconciliation.windStations[ws.id].verified = verified.checked;
-            if (note) state.day.cashReconciliation.windStations[ws.id].note = note.value;
+            syncReconShiftFromDom(`cr_ws_${ws.id}`, reconEntryFromPrefix(`cr_ws_${ws.id}`));
         });
 
         const lotteryDeposit = root.querySelector('[name="cr_lottery_deposit"]');
@@ -699,7 +747,6 @@
     const REGISTER_SHIFT_FIELDS = [
         { name: "cardSale", label: "Card sale" },
         { name: "cashSale", label: "Cash sale" },
-        { name: "overShort", label: "Over / short" },
     ];
 
     function renderRegisterUnit(title, regKey, unit) {
@@ -708,7 +755,7 @@
             <h3 class="books-subtitle">${escapeHtml(title)}</h3>
             ${renderShiftBlock("Shift 1", `reg_${regKey}_shift1`, unit.shift1, REGISTER_SHIFT_FIELDS)}
             ${renderShiftBlock("Shift 2", `reg_${regKey}_shift2`, unit.shift2, REGISTER_SHIFT_FIELDS)}
-            <p class="books-total-line">${escapeHtml(title)} total: ${money(total.card + total.cash)} card+cash · O/S ${money(total.overShort)}</p>`;
+            <p class="books-total-line">${escapeHtml(title)} total: ${money(total.card + total.cash)} card+cash</p>`;
     }
 
     function renderShiftBlock(title, prefix, data, fields) {
@@ -964,7 +1011,7 @@
 
     function renderDailyDetailSheet(reg, fuel) {
         const totals = `
-            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash · O/S ${money(reg.overShort)}</p>
+            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash</p>
             <p class="books-hint">Register card/cash on the detail sheet is for shift reconciliation only — not added to merch, pump credit, or fuel.</p>`;
 
         return `
@@ -1023,7 +1070,7 @@
             <p class="books-hint"><strong>Total sales</strong> in Books summary uses register card + cash (both registers, both shifts). Lottery and pulltab are tracked separately.</p>
             ${renderRegisterUnit("Register 1", "register1", state.day.register1)}
             ${renderRegisterUnit("Register 2", "register2", state.day.register2)}
-            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash · O/S ${money(reg.overShort)}</p>
+            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash</p>
 
             ${renderPulltabs()}
 
@@ -1084,16 +1131,35 @@
             </div>`;
     }
 
+    function renderPayOutsCell(prefix, payOuts) {
+        const lines = Array.isArray(payOuts) ? payOuts : [];
+        const rows = lines
+            .map(
+                (line) => `
+            <div class="books-cash-recon-payout-row" data-payout-id="${escapeHtml(line.id)}">
+                <input type="text" class="books-input books-cash-recon-payout-desc"
+                    name="${prefix}_payOut_desc_${escapeHtml(line.id)}"
+                    value="${escapeHtml(line.description)}"
+                    placeholder="Description"
+                    aria-label="Pay out description">
+                <input ${amountInputAttrs(`${prefix}_payOut_amt_${line.id}`, line.amount)} aria-label="Pay out amount">
+                <button type="button" class="books-rm" data-cr-payout-rm="${escapeHtml(prefix)}" data-payout-id="${escapeHtml(line.id)}" title="Remove payout">×</button>
+            </div>`
+            )
+            .join("");
+        const total = M().sumPayOuts(lines);
+        return `
+            <div class="books-cash-recon-payouts" data-cr-payouts="${escapeHtml(prefix)}">
+                ${rows}
+                <button type="button" class="books-add-line books-cash-recon-payout-add" data-cr-payout-add="${escapeHtml(prefix)}">+ Add payout</button>
+                ${lines.length ? `<p class="books-cash-recon-payout-total">Total: ${money(total)}</p>` : ""}
+            </div>`;
+    }
+
     function renderReconTableRows(rows, col1, col2) {
         return rows
             .map((row) => {
                 const prefix = row.namePrefix;
-                const varCls =
-                    Math.abs(row.variance) < 0.005
-                        ? "books-cash-recon-var--ok"
-                        : row.counted === 0 && row.expected === 0
-                          ? ""
-                          : "books-cash-recon-var--bad";
                 return `
                     <tr>
                         <td>${escapeHtml(row[col1] || row.rowLabel)}</td>
@@ -1101,7 +1167,9 @@
                         <td class="home-cc-num">
                             <input ${amountInputAttrs(`${prefix}_counted`, row.counted)} aria-label="Received">
                         </td>
-                        <td class="home-cc-num ${varCls}">${money(row.variance)}</td>
+                        <td class="books-cash-recon-payout-col">
+                            ${renderPayOutsCell(prefix, row.payOuts)}
+                        </td>
                         <td class="books-cash-recon-verified">
                             <label class="books-check-label">
                                 <input type="checkbox" name="${prefix}_verified"${row.verified ? " checked" : ""}>
@@ -1141,7 +1209,17 @@
                 ${hint ? `<p class="books-hint">${hint}</p>` : ""}
                 <div class="${summaryCls}">
                     <div class="books-cash-recon-totals">
-                        <span><em>Received</em> <strong>${money(section.countedTotal)}</strong></span>
+                        <span><em>Received</em> <strong>${money(section.receivedTotal)}</strong></span>
+                        ${
+                            section.payOutTotal > 0
+                                ? `<span><em>Pay out</em> <strong>${money(section.payOutTotal)}</strong></span>`
+                                : ""
+                        }
+                        ${
+                            section.payOutTotal > 0
+                                ? `<span><em>Total received</em> <strong>${money(section.countedTotal)}</strong></span>`
+                                : ""
+                        }
                         ${
                             section.cashExpensesTotal > 0
                                 ? `<span><em>Cash expenses</em> <strong>${money(section.cashExpensesTotal)}</strong></span>`
@@ -1151,8 +1229,8 @@
                         ${
                             section.deposit != null
                                 ? `<span><em>Received / deposited</em> <strong>${money(section.deposit)}</strong></span>
-                                   <span><em>Variance</em> <strong class="${section.depositMatch ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(section.depositVariance)}</strong></span>`
-                                : `<span><em>Shift variance</em> <strong>${money(section.variance)}</strong></span>`
+                                   <span><em>Cash variance</em> <strong class="${section.depositMatch ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(section.depositVariance)}</strong></span>`
+                                : `<span><em>Cash variance</em> <strong class="${Math.abs(section.variance) < 0.005 ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(section.variance)}</strong></span>`
                         }
                         <span><em>Verified</em> <strong>${section.verifiedCount} / ${section.shiftCount}</strong></span>
                     </div>
@@ -1166,7 +1244,7 @@
                                 <th>${escapeHtml(title.includes("Register") ? "Register" : title.split(" ")[0])}</th>
                                 <th>${rows[0]?.kind === "pulltab" ? "Ticket" : rows[0]?.kind === "wind" ? "Type" : "Shift"}</th>
                                 <th class="home-cc-num">Received</th>
-                                <th class="home-cc-num">Variance</th>
+                                <th class="home-cc-num">Pay out</th>
                                 <th>Status</th>
                                 <th>Note</th>
                             </tr>
@@ -1175,8 +1253,8 @@
                         <tfoot>
                             <tr class="books-cash-recon-total-row">
                                 <td colspan="2"><strong>Day total</strong></td>
-                                <td class="home-cc-num"><strong>${money(section.countedTotal)}</strong></td>
-                                <td class="home-cc-num"><strong>${money(section.variance)}</strong></td>
+                                <td class="home-cc-num"><strong>${money(section.receivedTotal)}</strong></td>
+                                <td class="home-cc-num"><strong>${money(section.payOutTotal)}</strong></td>
                                 <td colspan="2"></td>
                             </tr>
                         </tfoot>
@@ -1190,7 +1268,7 @@
                 </label>
                 ${
                     section.deposit != null
-                        ? `<p class="books-total-line books-cash-recon-deposit-check ${depositVarCls}">Variance: ${money(section.depositVariance)}${section.depositMatch ? " — matches expected" : ""}</p>`
+                        ? `<p class="books-total-line books-cash-recon-deposit-check ${depositVarCls}">Cash variance: ${money(section.depositVariance)}${section.depositMatch ? " — matches expected" : ""}</p>`
                         : ""
                 }
             </section>`;
@@ -1241,7 +1319,7 @@
                     <p class="books-cash-recon-summary-title">${escapeHtml(matchLabel)}</p>
                 </div>
 
-                <p class="books-hint">Only shifts and machines with data on the <strong>Daily sheet</strong> appear here. Enter <strong>received</strong> amounts, verify each row, then the <strong>received / deposited</strong> total for that section.</p>
+                <p class="books-hint">Only shifts and machines with data on the <strong>Daily sheet</strong> appear here. Enter <strong>received</strong> amounts and add one or more <strong>pay outs</strong> (with description) per row, verify each row, then the <strong>received / deposited</strong> total for that section. Cash variance is shown in the summary above each table.</p>
 
                 ${
                     sections.length === 0
@@ -1413,6 +1491,23 @@
                 state.monthId === monthId
             ) {
                 loadCurrent();
+            }
+        },
+        async openCashReconciliation(opts = {}) {
+            const { dayId, monthId, locationId } = opts;
+            bindShell();
+            if (window.showDashboardPanel) {
+                await window.showDashboardPanel("data-input");
+            }
+            if (locationId) state.locationId = locationId;
+            if (monthId) state.monthId = monthId;
+            else if (dayId) state.monthId = String(dayId).slice(0, 7);
+            if (dayId) state.dayId = dayId;
+            state.tab = "cash-recon";
+            if (state.locationId) {
+                await loadCurrent();
+            } else {
+                render();
             }
         },
     };

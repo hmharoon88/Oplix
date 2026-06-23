@@ -451,7 +451,7 @@
                                 ${gasHead}
                                 <th class="home-cc-num">${escapeHtml(salesHeader)}</th>
                                 <th class="home-cc-num">Cash exp.</th>
-                                <th class="home-cc-num">Checks</th>
+                                <th class="home-cc-num">Check Exp</th>
                                 <th class="home-cc-num">Other</th>
                                 <th class="home-cc-num">Total exp.</th>
                                 <th class="home-cc-num">Net</th>
@@ -502,9 +502,14 @@
         const tableRows = rows
             .map((row) => {
                 const tone = row.status?.tone || "missing";
+                const label = row.status?.label || "—";
                 const depositCell = row.deposit == null ? "—" : money(row.deposit);
                 const varianceCell =
                     row.deposit != null ? money(row.depositVariance) : money(row.variance);
+                const statusCell =
+                    tone === "unreconciled"
+                        ? `<button type="button" class="bs-cash-recon-badge bs-cash-recon-badge--${tone} bs-cash-recon-badge--link" data-an-open-recon="${escapeHtml(row.dayId)}" title="Open cash reconciliation for this day">${escapeHtml(label)}</button>`
+                        : `<span class="bs-cash-recon-badge bs-cash-recon-badge--${tone}">${escapeHtml(label)}</span>`;
                 return `
                     <tr>
                         <td>${escapeHtml(formatDayId(row.dayId))}</td>
@@ -517,7 +522,7 @@
                         <td class="home-cc-num">${money(row.expectedDeposit)}</td>
                         <td class="home-cc-num">${depositCell}</td>
                         <td class="home-cc-num">${varianceCell}</td>
-                        <td><span class="bs-cash-recon-badge bs-cash-recon-badge--${tone}">${escapeHtml(row.status?.label || "—")}</span></td>
+                        <td>${statusCell}</td>
                     </tr>`;
             })
             .join("");
@@ -843,6 +848,19 @@
             }
             if (e.target.closest("[data-an-drill-close]")) {
                 closeDrill();
+                return;
+            }
+            const openRecon = e.target.closest("[data-an-open-recon]");
+            if (openRecon) {
+                const dayId = openRecon.dataset.anOpenRecon;
+                if (dayId && window.OplixDataInput?.openCashReconciliation) {
+                    OplixDataInput.openCashReconciliation({
+                        dayId,
+                        monthId: state.monthId,
+                        locationId: state.locationId,
+                    });
+                }
+                return;
             }
         });
 

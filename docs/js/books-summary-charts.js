@@ -52,7 +52,7 @@
             "Fuel sales ($)": "Fuel",
             "Register — card": "Reg card",
             "Register — cash": "Reg cash",
-            "Checks / ACH": "Checks",
+            "Checks / ACH": "Check Exp",
             "Cash expense": "Cash exp.",
         };
         if (map[s]) return map[s];
