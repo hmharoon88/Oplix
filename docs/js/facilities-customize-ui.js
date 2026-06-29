@@ -668,7 +668,10 @@
         form?.addEventListener("submit", async (e) => {
             e.preventDefault();
             if (!Store()?.updateFacilityCustomization) {
-                if (status) status.textContent = "Save unavailable.";
+                if (status) {
+                    status.textContent =
+                        "Save unavailable — reload the page (Cmd+Shift+R) to load the latest scripts.";
+                }
                 return;
             }
             const payload = readForm(form, location);
