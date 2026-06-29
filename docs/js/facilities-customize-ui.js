@@ -245,7 +245,7 @@
         return `
             <section class="fac-customize-section" id="fac-customize-notifications">
                 <h3 class="fac-customize-section-title">Notifications</h3>
-                <p class="books-hint">Choose which alerts appear under <strong>Needs attention</strong> for this facility. Lead time applies to expiry-based alerts.</p>
+                <p class="books-hint">Choose which alerts appear under <strong>Needs attention</strong> for this facility (Home and facility overview). Lead time applies to expiry-based alerts. Scroll down and click <strong>Save all changes</strong> to apply.</p>
                 ${blocks}
             </section>`;
     }

@@ -350,114 +350,28 @@
         return { shifts, lotteryForms, payables, receivables, locationEmployees, documents };
     }
 
-    function buildAlertsForLocation(location, bundle, nameLookup) {
-        const alerts = [];
-        const now = new Date();
-        const todayStart = startOfDay(now);
-        const tomorrowStart = addDays(todayStart, 1);
-        const cutoffUnclosed = new Date(now.getTime() - UNCLOSED_SHIFT_HOURS * 3600000);
-        const cutoffVariance = addDays(now, -VARIANCE_LOOKBACK_DAYS);
-        const cutoffRegister = addDays(now, -MISSING_REGISTER_LOOKBACK_DAYS);
+    function buildAlertsForLocation(location, bundle, nameLookup, managerTasks) {
+        const LA = window.OplixLocationAlerts;
+        if (!LA?.buildLocationAlerts) return [];
 
-        for (const shift of bundle.shifts) {
-            const clockIn = toDate(shift.clockInTime);
-            if (shiftIsActive(shift) && clockIn && clockIn < cutoffUnclosed) {
-                const name = nameLookup[shift.employeeId] || "Employee";
-                const hours = Math.floor((now - clockIn) / 3600000);
-                alerts.push({
-                    id: `clockout_${shift.id}`,
-                    locationId: location.id,
-                    severity: 0,
-                    title: `${name} forgot to clock out`,
-                    subtitle: `${location.name} · clocked in ${hours}h ago`,
-                    sortKey: 0,
-                });
-            }
-
-            const clockOut = toDate(shift.clockOutTime);
-            if (clockOut && clockOut >= cutoffRegister && !shiftHasRegisterData(shift)) {
-                const hours = shiftHoursWorked(shift);
-                if (hours == null || hours >= 1) {
-                    const name = nameLookup[shift.employeeId] || "Employee";
-                    alerts.push({
-                        id: `noregister_${shift.id}`,
-                        locationId: location.id,
-                        severity: 0,
-                        title: `${location.name} — register data missing`,
-                        subtitle: `${name}'s shift · ${formatDateMedium(clockOut)}`,
-                        sortKey: 1,
-                    });
-                }
-            }
-
-            const dateRef = shiftDateRef(shift);
-            if (dateRef && dateRef >= cutoffVariance) {
-                const regs = shift.registers || [];
-                if (regs.length) {
-                    regs.forEach((reg, i) => {
-                        const v = reg.overShort;
-                        if (v != null && Math.abs(v) >= VARIANCE_THRESHOLD) {
-                            alerts.push(makeVarianceAlert(location, "register", v, dateRef, `regvar_${shift.id}_${i}`));
-                        }
-                    });
-                } else if (shift.overShort != null && Math.abs(shift.overShort) >= VARIANCE_THRESHOLD) {
-                    alerts.push(
-                        makeVarianceAlert(location, "register", shift.overShort, dateRef, `regvar_legacy_${shift.id}`)
-                    );
-                }
-            }
-        }
-
-        const forms = bundle.lotteryForms;
-        const activityCutoff = addDays(now, -LOTTERY_ACTIVITY_DAYS);
-        const hasLottery = forms.some((f) => {
-            const t = toDate(f.submittedAt);
-            return t && t >= activityCutoff;
+        const raw = LA.buildLocationAlerts({
+            locationId: location.id,
+            shifts: bundle.shifts || [],
+            forms: bundle.lotteryForms || [],
+            payables: bundle.payables || [],
+            employees: bundle.locationEmployees || [],
+            documents: bundle.documents || [],
+            managerTasks: (managerTasks || []).filter((t) => t.locationId === location.id),
+            facilityProfile: location.facilityProfile,
+            profileSlotConfig: location.profileSlotConfig,
+            notificationSettings: location.notificationSettings,
         });
-        if (hasLottery) {
-            const yesterday = addDays(todayStart, -1);
-            const submittedYesterday = forms.some((f) => {
-                const t = toDate(f.submittedAt);
-                return t && t >= yesterday && t < todayStart;
-            });
-            if (!submittedYesterday) {
-                alerts.push({
-                    id: `lotteryclose_${location.id}`,
-                    locationId: location.id,
-                    severity: 0,
-                    title: `${location.name} — lottery not closed`,
-                    subtitle: `No submission for ${formatDateMedium(yesterday)}`,
-                    sortKey: 2,
-                });
-            }
-        }
 
-        for (const form of forms) {
-            const submitted = toDate(form.submittedAt);
-            const v = form.shiftSummary?.overShort;
-            if (submitted && submitted >= cutoffVariance && v != null && Math.abs(v) >= VARIANCE_THRESHOLD) {
-                alerts.push(makeVarianceAlert(location, "lottery", v, submitted, `lotvar_${form.id}`));
-            }
-        }
-
-        const overdue = bundle.payables.filter((p) => {
-            if (p.isPaid) return false;
-            const due = toDate(p.dueDate);
-            return due && startOfDay(due) < todayStart;
-        });
-        if (overdue.length) {
-            const total = overdue.reduce((s, p) => s + (p.amount || 0), 0);
-            alerts.push({
-                id: `payables_${location.id}`,
-                locationId: location.id,
-                severity: 2,
-                title: `${overdue.length} payable${overdue.length === 1 ? "" : "s"} overdue · ${formatCurrency(total)}`,
-                subtitle: location.name,
-                sortKey: 20,
-            });
-        }
-
-        return alerts;
+        return raw.map((a) => ({
+            ...a,
+            locationId: location.id,
+            subtitle: a.subtitle ? `${location.name} · ${a.subtitle}` : location.name,
+        }));
     }
 
     function makeVarianceAlert(location, kind, value, date, id) {
@@ -851,12 +765,17 @@
 
     function buildGlobalAlerts(employees, tasks, locations, allDocs) {
         const alerts = [];
+        const NM = window.OplixFacilityNotificationModel;
+        const locById = Object.fromEntries(locations.map((l) => [l.id, l]));
         const now = new Date();
         const todayStart = startOfDay(now);
-        const docCutoff = addDays(now, DOC_EXPIRY_DAYS);
         const nameById = Object.fromEntries(locations.map((l) => [l.id, l.name]));
 
         allDocs.forEach((doc) => {
+            const loc = locById[doc.locationId];
+            if (NM && loc && !NM.isEnabled(loc.notificationSettings, "document_expiry")) return;
+            const leadDays = NM?.leadDays(loc?.notificationSettings, "document_expiry") ?? DOC_EXPIRY_DAYS;
+            const docCutoff = addDays(now, leadDays);
             const exp = toDate(doc.expiryDate);
             if (!exp || exp < now || exp > docCutoff) return;
             const days = Math.max(0, Math.floor((exp - now) / 86400000));
@@ -878,23 +797,27 @@
             return startOfDay(d);
         })();
 
-        employees.forEach((emp) => {
-            if (!emp.weeklySchedule) return;
-            let workingDays = 0;
-            for (let i = 0; i < 7; i++) {
-                const day = addDays(weekStart, i);
-                if (employeeWorksOn(emp, day)) workingDays += 1;
-            }
-            if (workingDays === 0) {
-                alerts.push({
-                    id: `schedgap_${emp.id}`,
-                    severity: 2,
-                    title: `${emp.name || "Employee"} has no shifts this week`,
-                    subtitle: "",
-                    sortKey: 30,
-                });
-            }
-        });
+        const scheduleAlertsOn =
+            !NM || locations.some((loc) => NM.isEnabled(loc.notificationSettings, "schedule_gaps"));
+        if (scheduleAlertsOn) {
+            employees.forEach((emp) => {
+                if (!emp.weeklySchedule) return;
+                let workingDays = 0;
+                for (let i = 0; i < 7; i++) {
+                    const day = addDays(weekStart, i);
+                    if (employeeWorksOn(emp, day)) workingDays += 1;
+                }
+                if (workingDays === 0) {
+                    alerts.push({
+                        id: `schedgap_${emp.id}`,
+                        severity: 2,
+                        title: `${emp.name || "Employee"} has no shifts this week`,
+                        subtitle: "",
+                        sortKey: 30,
+                    });
+                }
+            });
+        }
 
         const byLoc = {};
         tasks.forEach((task) => {
@@ -904,6 +827,8 @@
             if (hasDisapproved) byLoc[task.locationId] = (byLoc[task.locationId] || 0) + 1;
         });
         Object.entries(byLoc).forEach(([locId, count]) => {
+            const loc = locById[locId];
+            if (NM && loc && !NM.isEnabled(loc.notificationSettings, "tasks_rework")) return;
             alerts.push({
                 id: `disapp_${locId}`,
                 locationId: locId,
@@ -995,7 +920,7 @@
         lastBundlesByLocationId = {};
         bundles.forEach(({ location, bundle }) => {
             lastBundlesByLocationId[location.id] = bundle;
-            alerts = alerts.concat(buildAlertsForLocation(location, bundle, nameLookup));
+            alerts = alerts.concat(buildAlertsForLocation(location, bundle, nameLookup, tasks));
 
             const pulse = computeWeeklyPulse(location, bundle.payables, bundle.receivables);
             weeklyPulse.receivablesDue += pulse.receivablesDue;
