@@ -41,6 +41,11 @@
     let showCreateForm = false;
 
     const FAC_NAV_KEY = "oplix.facilities.nav";
+    const SUBCOLLECTION_TIMEOUT_MS = 30000;
+    const LOAD_TOTAL_TIMEOUT_MS = 90000;
+    const ROLE_LOOKUP_TIMEOUT_MS = 12000;
+
+    let locationLoadSeq = 0;
 
     const Store = () => window.OplixLocationStore;
 
@@ -132,6 +137,44 @@
             .collection(name)
             .get();
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+
+    function withTimeout(promise, ms, message) {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                setTimeout(() => reject(new Error(message || "Request timed out")), ms);
+            }),
+        ]);
+    }
+
+    async function fetchSubSafe(uid, locationId, name) {
+        try {
+            return await withTimeout(
+                fetchSub(uid, locationId, name),
+                SUBCOLLECTION_TIMEOUT_MS,
+                `Timed out loading ${name}`
+            );
+        } catch (err) {
+            console.warn(`Oplix: could not load ${name} for location ${locationId}`, err);
+            return [];
+        }
+    }
+
+    async function loadDirectorySafe(uid, locationId) {
+        if (!window.OplixLocationDirectoryStore?.loadAll) {
+            return { vendors: [], utilityProviders: [], servicers: [] };
+        }
+        try {
+            return await withTimeout(
+                OplixLocationDirectoryStore.loadAll(uid, locationId),
+                SUBCOLLECTION_TIMEOUT_MS,
+                "Timed out loading vendors and utilities"
+            );
+        } catch (err) {
+            console.warn(`Oplix: could not load directory for location ${locationId}`, err);
+            return { vendors: [], utilityProviders: [], servicers: [] };
+        }
     }
 
     function renderLocationCard(loc, index) {
@@ -248,99 +291,200 @@
 
     async function fetchUserRole(employeeId) {
         try {
-            const doc = await window.oplixDb.collection("users").doc(employeeId).get();
+            const doc = await withTimeout(
+                window.oplixDb.collection("users").doc(employeeId).get(),
+                ROLE_LOOKUP_TIMEOUT_MS,
+                "Role lookup timed out"
+            );
             if (doc.exists) return doc.data().role || "employee";
-        } catch {
-            /* ignore */
+        } catch (err) {
+            console.warn(`Oplix: could not load role for ${employeeId}`, err);
         }
         return "employee";
     }
 
-    async function loadLocationDetail(locationId) {
-        const loc = locations.find((l) => l.id === locationId);
-        if (!loc) return null;
-
-        const [
-            allPeople,
-            locTasks,
-            shifts,
-            lotteryForms,
-            payables,
-            receivables,
-            reminders,
-            documents,
-            directory,
-            complianceItems,
-        ] = await Promise.all([
-            fetchSub(userId, locationId, "employees"),
-            fetchSub(userId, locationId, "tasks"),
-            fetchSub(userId, locationId, "shifts"),
-            fetchSub(userId, locationId, "lotteryForms"),
-            fetchSub(userId, locationId, "payables"),
-            fetchSub(userId, locationId, "receivables"),
-            fetchSub(userId, locationId, "reminders"),
-            fetchSub(userId, locationId, "documents"),
-            window.OplixLocationDirectoryStore
-                ? OplixLocationDirectoryStore.loadAll(userId, locationId)
-                : Promise.resolve({ vendors: [], utilityProviders: [], servicers: [] }),
-            window.OplixComplianceStore
-                ? OplixComplianceStore.list(userId, locationId)
-                : Promise.resolve([]),
-        ]);
-
-        const roles = await Promise.all(allPeople.map((e) => fetchUserRole(e.id)));
+    async function splitPeopleByRole(allPeople) {
         const employees = [];
         const supervisors = [];
         const nameById = {};
+        if (!allPeople.length) {
+            return { employees, supervisors, nameById };
+        }
+        const roles = await Promise.all(allPeople.map((e) => fetchUserRole(e.id)));
         allPeople.forEach((e, i) => {
             nameById[e.id] = e.name || e.username || "Employee";
             if (roles[i] === "supervisor") supervisors.push(e);
             else employees.push(e);
         });
+        return { employees, supervisors, nameById };
+    }
 
-        const managerTasksHere = tasks.filter((t) => t.locationId === locationId);
-        let alerts = OplixLocationAlerts.buildLocationAlerts({
-            locationId,
-            shifts,
-            forms: lotteryForms,
-            payables,
-            employees: allPeople,
-            documents,
-            managerTasks: tasks,
-            facilityProfile: loc.facilityProfile,
-            profileSlotConfig: loc.profileSlotConfig,
-            notificationSettings: loc.notificationSettings,
-        });
-        const acknowledged = getAcknowledgedSet(userId);
-        alerts = alerts.filter((a) => !acknowledged.has(a.id));
-
+    async function ensurePeopleRoles(data) {
+        if (!data || data.rolesLoaded || !data.allPeople?.length) return data;
+        const split = await splitPeopleByRole(data.allPeople);
         return {
-            location: loc,
-            employees,
-            supervisors,
-            allPeople,
-            nameById,
-            tasks: locTasks,
-            managerTasks: managerTasksHere,
-            shifts,
-            lotteryForms,
-            payables,
-            receivables,
-            reminders,
-            documents,
+            ...data,
+            ...split,
+            nameById: { ...(data.nameById || {}), ...split.nameById },
+            rolesLoaded: true,
+        };
+    }
+
+    async function ensureDirectoryData(data) {
+        if (!data || data.directoriesLoaded) return data;
+        const directory = await loadDirectorySafe(userId, data.location.id);
+        return {
+            ...data,
             vendors: directory.vendors || [],
             utilityProviders: directory.utilityProviders || [],
             servicers: directory.servicers || [],
-            complianceItems: complianceItems || [],
-            alerts,
-            recurringPayables: payables.filter(
-                (p) => p.frequency && p.frequency !== "none" && !p.isPaid
-            ).length,
-            recurringReceivables: receivables.filter(
-                (r) => r.frequency && r.frequency !== "none" && !r.isReceived
-            ).length,
-            openReminders: reminders.filter((r) => !r.isCompleted).length,
+            directoriesLoaded: true,
         };
+    }
+
+    async function loadLocationDetail(locationId, options = {}) {
+        const includeDirectory = options.includeDirectory === true;
+        const includeRoles = options.includeRoles === true;
+        const loc = locations.find((l) => l.id === locationId);
+        if (!loc) return null;
+
+        const loadCore = async () => {
+            const [
+                allPeople,
+                locTasks,
+                shifts,
+                lotteryForms,
+                payables,
+                receivables,
+                reminders,
+                documents,
+                directory,
+                complianceItems,
+            ] = await Promise.all([
+                fetchSubSafe(userId, locationId, "employees"),
+                fetchSubSafe(userId, locationId, "tasks"),
+                fetchSubSafe(userId, locationId, "shifts"),
+                fetchSubSafe(userId, locationId, "lotteryForms"),
+                fetchSubSafe(userId, locationId, "payables"),
+                fetchSubSafe(userId, locationId, "receivables"),
+                fetchSubSafe(userId, locationId, "reminders"),
+                fetchSubSafe(userId, locationId, "documents"),
+                includeDirectory
+                    ? loadDirectorySafe(userId, locationId)
+                    : Promise.resolve({ vendors: [], utilityProviders: [], servicers: [] }),
+                window.OplixComplianceStore
+                    ? withTimeout(
+                          OplixComplianceStore.list(userId, locationId),
+                          SUBCOLLECTION_TIMEOUT_MS,
+                          "Timed out loading compliance"
+                      ).catch((err) => {
+                          console.warn(`Oplix: could not load compliance for ${locationId}`, err);
+                          return [];
+                      })
+                    : Promise.resolve([]),
+            ]);
+
+            let employees = allPeople;
+            let supervisors = [];
+            const nameById = {};
+            allPeople.forEach((e) => {
+                nameById[e.id] = e.name || e.username || "Employee";
+            });
+
+            if (includeRoles && allPeople.length) {
+                const split = await splitPeopleByRole(allPeople);
+                employees = split.employees;
+                supervisors = split.supervisors;
+                Object.assign(nameById, split.nameById);
+            }
+
+            const managerTasksHere = tasks.filter((t) => t.locationId === locationId);
+            let alerts = OplixLocationAlerts.buildLocationAlerts({
+                locationId,
+                shifts,
+                forms: lotteryForms,
+                payables,
+                employees: allPeople,
+                documents,
+                managerTasks: tasks,
+                facilityProfile: loc.facilityProfile,
+                profileSlotConfig: loc.profileSlotConfig,
+                notificationSettings: loc.notificationSettings,
+            });
+            const acknowledged = getAcknowledgedSet(userId);
+            alerts = alerts.filter((a) => !acknowledged.has(a.id));
+
+            return {
+                location: loc,
+                employees,
+                supervisors,
+                allPeople,
+                nameById,
+                tasks: locTasks,
+                managerTasks: managerTasksHere,
+                shifts,
+                lotteryForms,
+                payables,
+                receivables,
+                reminders,
+                documents,
+                vendors: directory.vendors || [],
+                utilityProviders: directory.utilityProviders || [],
+                servicers: directory.servicers || [],
+                complianceItems: complianceItems || [],
+                alerts,
+                rolesLoaded: includeRoles,
+                directoriesLoaded: includeDirectory,
+                recurringPayables: payables.filter(
+                    (p) => p.frequency && p.frequency !== "none" && !p.isPaid
+                ).length,
+                recurringReceivables: receivables.filter(
+                    (r) => r.frequency && r.frequency !== "none" && !r.isReceived
+                ).length,
+                openReminders: reminders.filter((r) => !r.isCompleted).length,
+            };
+        };
+
+        return withTimeout(
+            loadCore(),
+            LOAD_TOTAL_TIMEOUT_MS,
+            "Loading this facility took too long. Check your connection and try again."
+        );
+    }
+
+    async function enrichLocationDetailBackground(locationId, seq) {
+        try {
+            const [directory, roleData] = await Promise.all([
+                loadDirectorySafe(userId, locationId),
+                currentDetail?.allPeople?.length && !currentDetail.rolesLoaded
+                    ? splitPeopleByRole(currentDetail.allPeople)
+                    : Promise.resolve(null),
+            ]);
+            if (seq !== locationLoadSeq || !currentDetail || currentDetail.location?.id !== locationId) {
+                return;
+            }
+            currentDetail = {
+                ...currentDetail,
+                vendors: directory.vendors || [],
+                utilityProviders: directory.utilityProviders || [],
+                servicers: directory.servicers || [],
+                directoriesLoaded: true,
+                ...(roleData
+                    ? {
+                          employees: roleData.employees,
+                          supervisors: roleData.supervisors,
+                          nameById: { ...(currentDetail.nameById || {}), ...roleData.nameById },
+                          rolesLoaded: true,
+                      }
+                    : {}),
+            };
+            if (!currentSectionId && !$("location-detail-main").hidden) {
+                $("location-detail-main").innerHTML = renderLocationMain(currentDetail);
+                bindDetailMainEvents(currentDetail);
+            }
+        } catch (err) {
+            console.warn("Oplix: background facility enrich failed", err);
+        }
     }
 
     function renderNeedsAttention(alerts) {
@@ -784,13 +928,22 @@
         });
     }
 
-    function openSection(sectionId, options) {
+    async function openSection(sectionId, options) {
         if (!currentDetail) return;
         currentSectionId = sectionId === "books-config" ? "facility-customize" : sectionId;
         const focusBooks = options?.focusBooks === true || sectionId === "books-config";
         $("location-detail-main").hidden = true;
         $("location-section-panel").hidden = false;
         const content = $("location-section-content");
+
+        if (sectionId === "employees" || sectionId === "supervisors") {
+            content.innerHTML = `<p class="data-list-empty">Loading staff…</p>`;
+            currentDetail = await ensurePeopleRoles(currentDetail);
+        } else if (window.OplixFacilityDirectory?.isDirectorySection(sectionId)) {
+            content.innerHTML = `<p class="data-list-empty">Loading directory…</p>`;
+            currentDetail = await ensureDirectoryData(currentDetail);
+        }
+
         try {
             content.innerHTML = renderSection(sectionId, currentDetail);
         } catch (err) {
@@ -950,6 +1103,7 @@
         const listView = $("facilities-list-view");
         const detailView = $("location-detail-view");
         const sectionId = options?.sectionId || null;
+        const loadSeq = ++locationLoadSeq;
 
         currentSectionId = sectionId === "books-config" ? "facility-customize" : sectionId;
         listView.hidden = true;
@@ -961,13 +1115,19 @@
 
         try {
             const data = await loadLocationDetail(locationId);
+            if (loadSeq !== locationLoadSeq) return;
+            if (!data) {
+                throw new Error("Facility not found. Go back to the list and try again.");
+            }
             showDetailMain(data);
+            void enrichLocationDetailBackground(locationId, loadSeq);
             if (sectionId) {
-                openSection(sectionId, { focusBooks: options?.focusBooks === true });
+                await openSection(sectionId, { focusBooks: options?.focusBooks === true });
             } else {
                 saveFacNav();
             }
         } catch (err) {
+            if (loadSeq !== locationLoadSeq) return;
             if (options?.restoring) {
                 clearFacNav();
                 currentSectionId = null;
@@ -978,12 +1138,17 @@
             }
             $("location-detail-loading").hidden = true;
             $("location-detail-main").hidden = false;
-            $("location-detail-main").innerHTML = `<p class="app-error">${escapeHtml(err.message || "Failed to load facility.")}</p>`;
+            $("location-section-panel").hidden = true;
+            $("location-detail-main").innerHTML = `<p class="app-error">${escapeHtml(err.message || "Failed to load facility.")}</p><p><button type="button" class="btn btn-nav-outline" id="fac-load-retry">Try again</button></p>`;
+            $("location-detail-main")
+                .querySelector("#fac-load-retry")
+                ?.addEventListener("click", () => openLocation(locationId, options));
             updateNav("detail");
         }
     }
 
     function closeLocation() {
+        locationLoadSeq += 1;
         $("facilities-list-view").hidden = false;
         $("location-detail-view").hidden = true;
         currentDetail = null;
