@@ -26,6 +26,10 @@ struct BooksGamingShift: Equatable {
 struct BooksFuelSale: Equatable {
     var gallons: Double
     var dollars: Double
+    var regular: Double
+    var midGrade: Double
+    var premium: Double
+    var diesel: Double
 }
 
 struct BooksLineItem: Equatable {
@@ -48,6 +52,12 @@ struct BooksWindStationEntry: Equatable {
     var cash: Double
 }
 
+struct BooksKenoStationEntry: Equatable {
+    var id: String
+    var station: String
+    var cash: Double
+}
+
 struct BooksLotteryUnit: Equatable {
     var shift1: BooksGamingShift
     var shift2: BooksGamingShift
@@ -60,9 +70,15 @@ struct BooksDayDoc: Equatable {
     var lottery: BooksLotteryUnit
     var pulltabs: [BooksPulltabEntry]
     var windStations: [BooksWindStationEntry]
+    var kenoStations: [BooksKenoStationEntry]
     var fuelSale: BooksFuelSale
     var merchSale: Double
     var creditCard: Double
+    var inHouseAccount: Double
+    var waynePass: Double
+    var lotteryPayOut: Double
+    var pullTabPayout: Double
+    var otherCashPayOut: Double
     var cashExpenses: [BooksLineItem]
     var checksAch: [BooksLineItem]
     var otherExpenses: [BooksLineItem]
@@ -78,9 +94,15 @@ struct BooksDayDoc: Equatable {
             lottery: BooksLotteryUnit(shift1: emptyGaming, shift2: emptyGaming),
             pulltabs: [],
             windStations: [],
-            fuelSale: BooksFuelSale(gallons: 0, dollars: 0),
+            kenoStations: [],
+            fuelSale: BooksFuelSale(gallons: 0, dollars: 0, regular: 0, midGrade: 0, premium: 0, diesel: 0),
             merchSale: 0,
             creditCard: 0,
+            inHouseAccount: 0,
+            waynePass: 0,
+            lotteryPayOut: 0,
+            pullTabPayout: 0,
+            otherCashPayOut: 0,
             cashExpenses: [],
             checksAch: [],
             otherExpenses: []
@@ -233,11 +255,16 @@ enum BooksFirestoreParser {
 
         let pulltabs = parsePulltabs(data["pulltabs"], legacy: data["pulltab"])
         let windStations = parseWindStations(data["windStations"])
+        let kenoStations = parseKenoStations(data["kenoStations"])
 
         let fuelRaw = data["fuelSale"] as? [String: Any] ?? [:]
         let fuel = BooksFuelSale(
             gallons: double(fuelRaw["gallons"]),
-            dollars: double(fuelRaw["dollars"])
+            dollars: double(fuelRaw["dollars"]),
+            regular: double(fuelRaw["regular"]),
+            midGrade: double(fuelRaw["midGrade"]),
+            premium: double(fuelRaw["premium"]),
+            diesel: double(fuelRaw["diesel"])
         )
 
         return BooksDayDoc(
@@ -247,9 +274,19 @@ enum BooksFirestoreParser {
             lottery: lottery,
             pulltabs: pulltabs,
             windStations: windStations,
+            kenoStations: kenoStations,
             fuelSale: fuel,
             merchSale: double(data["merchSale"]),
             creditCard: double(data["creditCard"]),
+            inHouseAccount: double(data["inHouseAccount"]),
+            waynePass: double(data["waynePass"]),
+            lotteryPayOut: {
+                let parsed = double(data["lotteryPayOut"])
+                if parsed != 0 { return parsed }
+                return double(data["waynePassLotteryPayOut"])
+            }(),
+            pullTabPayout: double(data["pullTabPayout"]),
+            otherCashPayOut: double(data["otherCashPayOut"]),
             cashExpenses: parseLineItems(data["cashExpenses"]),
             checksAch: parseLineItems(data["checksAch"]),
             otherExpenses: parseLineItems(data["otherExpenses"])
@@ -348,6 +385,17 @@ enum BooksFirestoreParser {
             )
         }
     }
+
+    private static func parseKenoStations(_ raw: Any?) -> [BooksKenoStationEntry] {
+        guard let rows = raw as? [[String: Any]], !rows.isEmpty else { return [] }
+        return rows.enumerated().map { index, row in
+            BooksKenoStationEntry(
+                id: string(row["id"]).isEmpty ? "ks_\(index)" : string(row["id"]),
+                station: string(row["station"]),
+                cash: double(row["cash"])
+            )
+        }
+    }
 }
 
 enum BooksFirestoreEncoder {
@@ -405,6 +453,16 @@ enum BooksFirestoreEncoder {
         }
     }
 
+    static func encodeKenoStations(_ items: [BooksKenoStationEntry]) -> [[String: Any]] {
+        items.map { item in
+            [
+                "id": item.id,
+                "station": item.station,
+                "cash": item.cash,
+            ]
+        }
+    }
+
     static func encodeDay(_ day: BooksDayDoc) -> [String: Any] {
         [
             "register1": encodeRegisterUnit(day.register1),
@@ -415,12 +473,22 @@ enum BooksFirestoreEncoder {
             ],
             "pulltabs": encodePulltabs(day.pulltabs),
             "windStations": encodeWindStations(day.windStations),
+            "kenoStations": encodeKenoStations(day.kenoStations),
             "fuelSale": [
                 "gallons": day.fuelSale.gallons,
                 "dollars": day.fuelSale.dollars,
+                "regular": day.fuelSale.regular,
+                "midGrade": day.fuelSale.midGrade,
+                "premium": day.fuelSale.premium,
+                "diesel": day.fuelSale.diesel,
             ],
             "merchSale": day.merchSale,
             "creditCard": day.creditCard,
+            "inHouseAccount": day.inHouseAccount,
+            "waynePass": day.waynePass,
+            "lotteryPayOut": day.lotteryPayOut,
+            "pullTabPayout": day.pullTabPayout,
+            "otherCashPayOut": day.otherCashPayOut,
             "cashExpenses": encodeLineItems(day.cashExpenses),
             "checksAch": encodeLineItems(day.checksAch),
             "otherExpenses": encodeLineItems(day.otherExpenses),

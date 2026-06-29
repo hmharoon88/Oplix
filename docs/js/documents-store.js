@@ -78,7 +78,7 @@
         }
     }
 
-    async function create(userId, locationId, { name, file, expiryDate, uploadedBy }) {
+    async function create(userId, locationId, { name, file, expiryDate, uploadedBy, profileSlot }) {
         const trimmed = String(name || "").trim();
         if (!trimmed) throw new Error("Document name is required.");
         if (!file) throw new Error("Please choose a file to upload.");
@@ -99,9 +99,41 @@
         if (expiryDate) {
             payload.expiryDate = firebase.firestore.Timestamp.fromDate(expiryDate);
         }
+        if (profileSlot) {
+            payload.profileSlot = String(profileSlot);
+        }
 
         await colRef(userId, locationId).doc(id).set(payload);
-        return id;
+        return { id, ...payload };
+    }
+
+    async function update(userId, locationId, docId, fields) {
+        if (!docId) return null;
+        await colRef(userId, locationId).doc(docId).set(fields, { merge: true });
+        const snap = await colRef(userId, locationId).doc(docId).get();
+        return snap.exists ? { id: docId, ...snap.data() } : null;
+    }
+
+    async function createFromUrl(userId, locationId, { name, fileURL, fileType, profileSlot, uploadedBy }) {
+        const trimmed = String(name || "").trim();
+        const url = String(fileURL || "").trim();
+        if (!trimmed || !url) return null;
+
+        const id = window.oplixDb.collection("users").doc().id;
+        const payload = {
+            id,
+            locationId,
+            name: trimmed,
+            fileURL: url,
+            fileType: fileType || fileExtension(trimmed),
+            uploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            uploadedBy: uploadedBy || userId,
+            mirroredFromCompliance: true,
+        };
+        if (profileSlot) payload.profileSlot = String(profileSlot);
+
+        await colRef(userId, locationId).doc(id).set(payload);
+        return { id, ...payload };
     }
 
     async function remove(userId, locationId, document) {
@@ -111,6 +143,8 @@
 
     window.OplixDocumentsStore = {
         create,
+        update,
+        createFromUrl,
         remove,
         MAX_BYTES,
     };

@@ -88,13 +88,13 @@ enum BooksRegisterMerger {
         if hasGasStation {
             let gallons = sourceRegisters.compactMap(\.fuelSaleGallons).reduce(0, +)
             let dollars = sourceRegisters.compactMap(\.fuelSaleDollars).reduce(0, +)
-            if fuelHasData(BooksFuelSale(gallons: gallons, dollars: dollars)) {
+            if fuelHasData(BooksFuelSale(gallons: gallons, dollars: dollars, regular: 0, midGrade: 0, premium: 0, diesel: 0)) {
                 if fuelHasData(day.fuelSale) {
                     conflicts.append(BooksMergeConflict(
                         message: "Fuel totals for \(dayId) already recorded (\(formatGallons(day.fuelSale.gallons)), \(formatCurrency(day.fuelSale.dollars))). Saving will replace them with register fuel (\(formatGallons(gallons)), \(formatCurrency(dollars)))."
                     ))
                 }
-                fuelUpdate = BooksFuelSale(gallons: gallons, dollars: dollars)
+                fuelUpdate = BooksFuelSale(gallons: gallons, dollars: dollars, regular: 0, midGrade: 0, premium: 0, diesel: 0)
             }
         }
 
@@ -117,7 +117,8 @@ enum BooksRegisterMerger {
         }
 
         if let fuel = plan.fuelUpdate {
-            day.fuelSale = fuel
+            day.fuelSale.gallons = fuel.gallons
+            day.fuelSale.dollars = fuel.dollars
         }
 
         return day

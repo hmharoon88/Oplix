@@ -420,13 +420,14 @@
             { label: "Lottery", get: (a) => a.lotteryCash },
             { label: "Pulltab", get: (a) => a.pulltabCash },
             { label: "Wind station", get: (a) => a.windStationCash },
+            { label: "Keno station", get: (a) => a.kenoStationCash },
             { label: "Credit card (pump)", get: (a) => a.creditCard },
             { label: "Fuel ($)", get: (a) => a.fuelDollars },
             { label: "Fuel (gal.)", get: (a) => a.fuelGallons, format: "number" },
         ];
 
         if (!hasGas) {
-            cols.splice(4, 3);
+            cols.splice(4, 4);
         } else {
             cols.splice(0, 3);
             cols.unshift(

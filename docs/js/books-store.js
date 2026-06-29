@@ -141,9 +141,11 @@
     /** Load many months for comparison (cap to avoid huge reads). */
     async function loadMonthsForCompare(userId, locationIds, monthIds, options) {
         const facilityTypesById = (options && options.facilityTypesById) || {};
+        const booksFieldConfigsById = (options && options.booksFieldConfigsById) || {};
         const tasks = [];
         for (const locationId of locationIds) {
             const hasGasStation = facilityTypesById[locationId] === "c_store_gas";
+            const booksFieldConfig = booksFieldConfigsById[locationId] || null;
             for (const monthId of monthIds) {
                 tasks.push(
                     loadMonth(userId, locationId, monthId)
@@ -152,14 +154,20 @@
                             monthId,
                             month,
                             daysById,
-                            aggregate: M().aggregateMonth(month, daysById, { hasGasStation }),
+                            aggregate: M().aggregateMonth(month, daysById, {
+                                hasGasStation,
+                                booksFieldConfig,
+                            }),
                         }))
                         .catch(() => ({
                             locationId,
                             monthId,
                             month: M().defaultMonthDoc(),
                             daysById: {},
-                            aggregate: M().aggregateMonth(M().defaultMonthDoc(), {}, { hasGasStation }),
+                            aggregate: M().aggregateMonth(M().defaultMonthDoc(), {}, {
+                                hasGasStation,
+                                booksFieldConfig,
+                            }),
                         }))
                 );
             }

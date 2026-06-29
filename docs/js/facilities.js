@@ -39,8 +39,6 @@
     let currentDetail = null;
     let currentSectionId = null;
     let showCreateForm = false;
-    let showEditForm = false;
-    let facEditSaveReady = null;
 
     const FAC_NAV_KEY = "oplix.facilities.nav";
 
@@ -309,6 +307,9 @@
             employees: allPeople,
             documents,
             managerTasks: tasks,
+            facilityProfile: loc.facilityProfile,
+            profileSlotConfig: loc.profileSlotConfig,
+            notificationSettings: loc.notificationSettings,
         });
         const acknowledged = getAcknowledgedSet(userId);
         alerts = alerts.filter((a) => !acknowledged.has(a.id));
@@ -378,29 +379,29 @@
             </section>`;
     }
 
-    function renderEditForm(data) {
-        const loc = data.location;
-        const type = effectiveFacilityType(loc);
-        return `
-            <form id="fac-edit-form" class="fac-create-form fac-edit-form">
-                <h2 class="fac-create-title">Edit facility</h2>
-                <div class="books-grid-2">
-                    <label class="books-label">Name *
-                        <input class="books-input" name="name" required value="${escapeHtml(loc.name || "")}">
-                    </label>
-                    <label class="books-label">Type
-                        <select class="books-select" name="facilityType">${renderFacilityTypeOptions(type)}</select>
-                    </label>
-                </div>
-                <label class="books-label">Address *
-                    <textarea class="books-input fac-create-address" name="address" rows="2" required>${escapeHtml(loc.address || "")}</textarea>
-                </label>
-                <div class="dir-form-actions">
-                    <button type="submit" class="btn">Save changes</button>
-                    <button type="button" class="btn btn-nav-outline" id="fac-edit-cancel">Cancel</button>
-                    <span class="dir-status" id="fac-edit-status"></span>
-                </div>
-            </form>`;
+    function formatContactLine(loc) {
+        const parts = [];
+        if (loc?.contactName) parts.push(String(loc.contactName).trim());
+        if (loc?.contactPhone) parts.push(String(loc.contactPhone).trim());
+        if (loc?.contactEmail) parts.push(String(loc.contactEmail).trim());
+        return parts.filter(Boolean).join(" · ");
+    }
+
+    function renderProfileAlert(loc) {
+        const PM = window.OplixFacilityProfileModel;
+        const NM = window.OplixFacilityNotificationModel;
+        if (!PM) return "";
+        const leadDays = NM?.leadDays(loc?.notificationSettings, "profile_expiry") ?? 60;
+        if (NM && !NM.isEnabled(loc?.notificationSettings, "profile_expiry")) return "";
+        const sum = PM.profileSummary(loc?.facilityProfile, {
+            leadDays,
+            slotConfig: loc?.profileSlotConfig,
+        });
+        if (!sum.expired && !sum.expiring) return "";
+        const msgs = [];
+        if (sum.expired) msgs.push(`${sum.expired} expired`);
+        if (sum.expiring) msgs.push(`${sum.expiring} expiring soon`);
+        return `<p class="fac-profile-alert">Profile: ${escapeHtml(msgs.join(", "))} — <button type="button" class="books-link-btn" data-fac-open-customize>Review in Customize</button></p>`;
     }
 
     function renderLocationMain(data) {
@@ -421,14 +422,15 @@
                 <div class="fac-detail-header-text">
                     <h1>${escapeHtml(data.location.name)}</h1>
                     <p>${escapeHtml(data.location.address || "")}</p>
+                    ${formatContactLine(data.location) ? `<p class="fac-detail-contact">${escapeHtml(formatContactLine(data.location))}</p>` : ""}
                     <p class="fac-detail-type">${escapeHtml(FACILITY_TYPES.find((t) => t.id === effectiveFacilityType(data.location))?.label || "C Store")}</p>
+                    ${renderProfileAlert(data.location)}
                 </div>
                 <div class="fac-detail-actions">
-                    <button type="button" class="btn btn-nav-outline" id="fac-edit-btn">Edit</button>
+                    <button type="button" class="btn btn-nav-outline" id="fac-customize-btn">Customize</button>
                     <button type="button" class="btn fac-btn-delete" id="fac-delete-btn">Delete</button>
                 </div>
             </header>
-            ${showEditForm ? renderEditForm(data) : ""}
             ${renderNeedsAttention(data.alerts)}
             <div class="fac-section-grid">
                 ${SECTIONS.map((s) => {
@@ -453,6 +455,12 @@
         });
         main.querySelectorAll(".fac-section-tile").forEach((btn) => {
             btn.addEventListener("click", () => openSection(btn.dataset.section));
+        });
+        main.querySelector("[data-fac-open-customize]")?.addEventListener("click", () => {
+            openSection("facility-customize");
+        });
+        main.querySelector("#fac-customize-btn")?.addEventListener("click", () => {
+            openSection("facility-customize");
         });
     }
 
@@ -553,6 +561,16 @@
                           data,
                       })
                     : renderComingSoonSection(title);
+            case "books-config":
+            case "facility-customize":
+                return window.OplixFacilityCustomize
+                    ? OplixFacilityCustomize.renderSection({
+                          location: data.location,
+                          documents: data.documents,
+                          complianceItems: data.complianceItems,
+                          focusBooks: sectionId === "books-config",
+                      })
+                    : renderComingSoonSection("Customize facility");
             case "reports":
                 return window.OplixReports
                     ? OplixReports.renderEmbedded({
@@ -725,16 +743,6 @@
         $("location-detail-main").innerHTML = renderLocationMain(data);
         bindDetailMainEvents(data);
         updateNav("detail");
-        attachFacEditSaveReady();
-    }
-
-    function attachFacEditSaveReady() {
-        facEditSaveReady?.detach();
-        facEditSaveReady = null;
-        if (!showEditForm || !window.OplixFormSaveReady) return;
-        const form = $("fac-edit-form");
-        if (!form) return;
-        facEditSaveReady = OplixFormSaveReady.watch(form, { mode: "edit" });
     }
 
     function bindPeopleSectionActions(content, sectionId) {
@@ -776,13 +784,19 @@
         });
     }
 
-    function openSection(sectionId) {
+    function openSection(sectionId, options) {
         if (!currentDetail) return;
-        currentSectionId = sectionId;
+        currentSectionId = sectionId === "books-config" ? "facility-customize" : sectionId;
+        const focusBooks = options?.focusBooks === true || sectionId === "books-config";
         $("location-detail-main").hidden = true;
         $("location-section-panel").hidden = false;
         const content = $("location-section-content");
-        content.innerHTML = renderSection(sectionId, currentDetail);
+        try {
+            content.innerHTML = renderSection(sectionId, currentDetail);
+        } catch (err) {
+            console.error("Oplix: section render failed", sectionId, err);
+            content.innerHTML = `<p class="app-error">${escapeHtml(err.message || "Could not open this section.")}</p>`;
+        }
         content.dataset.dirBound = "";
         if (window.OplixFacilityDirectory?.isDirectorySection(sectionId)) {
             OplixFacilityDirectory.bind(content, sectionId, {
@@ -855,6 +869,26 @@
                 },
             });
         }
+        if (
+            window.OplixFacilityCustomize &&
+            (sectionId === "facility-customize" || sectionId === "books-config")
+        ) {
+            content.dataset.facCustomizeBound = "";
+            OplixFacilityCustomize.bind(content, {
+                userId,
+                location: currentDetail.location,
+                documents: currentDetail.documents,
+                complianceItems: currentDetail.complianceItems,
+                focusBooks,
+                onRefresh: async () => {
+                    if (window.OplixDashboard?.reloadLocations) {
+                        await OplixDashboard.reloadLocations();
+                    }
+                    currentDetail = await loadLocationDetail(currentDetail.location.id);
+                    openSection("facility-customize");
+                },
+            });
+        }
         if (sectionId === "reports" && window.OplixReports) {
             content.querySelector("#rpt-embedded-root")?.removeAttribute("data-rpt-embedded-bound");
             OplixReports.bindEmbedded(content, {
@@ -917,8 +951,7 @@
         const detailView = $("location-detail-view");
         const sectionId = options?.sectionId || null;
 
-        showEditForm = false;
-        currentSectionId = sectionId;
+        currentSectionId = sectionId === "books-config" ? "facility-customize" : sectionId;
         listView.hidden = true;
         detailView.hidden = false;
         $("location-detail-loading").hidden = false;
@@ -930,7 +963,7 @@
             const data = await loadLocationDetail(locationId);
             showDetailMain(data);
             if (sectionId) {
-                openSection(sectionId);
+                openSection(sectionId, { focusBooks: options?.focusBooks === true });
             } else {
                 saveFacNav();
             }
@@ -955,14 +988,12 @@
         $("location-detail-view").hidden = true;
         currentDetail = null;
         currentSectionId = null;
-        showEditForm = false;
         clearFacNav();
         updateNav("list");
     }
 
     function resetToRoot() {
         showCreateForm = false;
-        showEditForm = false;
         closeLocation();
         renderCreateForm();
     }
@@ -984,15 +1015,8 @@
                 renderList();
                 return;
             }
-            if (e.target.id === "fac-edit-btn" && currentDetail) {
-                showEditForm = true;
-                showDetailMain(currentDetail);
-                $("fac-edit-form")?.querySelector('[name="name"]')?.focus();
-                return;
-            }
-            if (e.target.id === "fac-edit-cancel" && currentDetail) {
-                showEditForm = false;
-                showDetailMain(currentDetail);
+            if (e.target.id === "fac-customize-btn" && currentDetail) {
+                openSection("facility-customize");
                 return;
             }
             if (e.target.id === "fac-delete-btn" && currentDetail) {
@@ -1004,10 +1028,8 @@
                 ) {
                     return;
                 }
-                const status = $("fac-edit-status") || $("location-detail-main");
                 try {
                     await Store().deleteLocation(userId, currentDetail.location.id);
-                    showEditForm = false;
                     closeLocation();
                     await afterLocationsChanged();
                 } catch (err) {
@@ -1017,35 +1039,6 @@
         });
 
         panel.addEventListener("submit", async (e) => {
-            if (e.target.id === "fac-edit-form" && currentDetail) {
-                e.preventDefault();
-                const status = $("fac-edit-status");
-                const fd = new FormData(e.target);
-                const name = String(fd.get("name") || "").trim();
-                const address = String(fd.get("address") || "").trim();
-                const facilityType = fd.get("facilityType");
-                if (!name || !address) return;
-                if (status) status.textContent = "Saving…";
-                try {
-                    const updated = await Store().updateLocation(
-                        userId,
-                        currentDetail.location.id,
-                        { name, address, facilityType }
-                    );
-                    if (updated) {
-                        const idx = locations.findIndex((l) => l.id === updated.id);
-                        if (idx >= 0) locations[idx] = { ...locations[idx], ...updated };
-                    }
-                    showEditForm = false;
-                    await afterLocationsChanged();
-                    currentDetail = await loadLocationDetail(currentDetail.location.id);
-                    showDetailMain(currentDetail);
-                    if (status) status.textContent = "";
-                } catch (err) {
-                    if (status) status.textContent = err.message || "Could not save.";
-                }
-                return;
-            }
             if (e.target.id !== "fac-create-form") return;
             e.preventDefault();
             const status = $("fac-create-status");
@@ -1113,6 +1106,19 @@
 
         ensureLoaded() {
             if (!listRendered && userId) renderList();
+        },
+
+        async openCustomize(locationId, options) {
+            if (!locationId) return;
+            await openLocation(locationId, {
+                sectionId: "facility-customize",
+                focusBooks: options?.focusBooks === true,
+            });
+        },
+
+        /** @deprecated use openCustomize */
+        async openBooksConfig(locationId) {
+            return this.openCustomize(locationId, { focusBooks: true });
         },
 
         openLocation,

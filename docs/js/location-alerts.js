@@ -8,7 +8,6 @@
     const VARIANCE_LOOKBACK_DAYS = 7;
     const MISSING_REGISTER_LOOKBACK_DAYS = 7;
     const LOTTERY_ACTIVITY_DAYS = 30;
-    const DOC_EXPIRY_DAYS = 30;
     const WEEKDAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
     function toDate(value) {
@@ -101,7 +100,21 @@
         employees,
         documents,
         managerTasks,
+        facilityProfile,
+        profileSlotConfig,
+        notificationSettings,
     }) {
+        const NM = window.OplixFacilityNotificationModel;
+        const PM = window.OplixFacilityProfileModel;
+        const settings = NM?.normalizeNotificationSettings(notificationSettings);
+        const alertOn = (typeId) => !NM || NM.isEnabled(settings, typeId);
+        const profileLeadDays = NM?.leadDays(settings, "profile_expiry") ?? 60;
+        const docLeadDays = NM?.leadDays(settings, "document_expiry") ?? 30;
+        const profileEntries = PM
+            ? PM.normalizeProfileEntries(facilityProfile, profileSlotConfig)
+            : {};
+        const profileSlots = PM ? PM.enabledProfileSlots(profileSlotConfig) : [];
+
         const alerts = [];
         const now = new Date();
         const todayStart = startOfDay(now);
@@ -115,7 +128,12 @@
 
         for (const shift of shifts) {
             const clockIn = toDate(shift.clockInTime);
-            if (shiftIsActive(shift) && clockIn && clockIn < cutoffUnclosed) {
+            if (
+                alertOn("clock_out") &&
+                shiftIsActive(shift) &&
+                clockIn &&
+                clockIn < cutoffUnclosed
+            ) {
                 const name = nameLookup[shift.employeeId] || "Employee";
                 const hours = Math.floor((now - clockIn) / 3600000);
                 alerts.push({
@@ -127,7 +145,12 @@
                 });
             }
             const clockOut = toDate(shift.clockOutTime);
-            if (clockOut && clockOut >= cutoffRegister && !shiftHasRegisterData(shift)) {
+            if (
+                alertOn("missing_register") &&
+                clockOut &&
+                clockOut >= cutoffRegister &&
+                !shiftHasRegisterData(shift)
+            ) {
                 const hours = shiftHoursWorked(shift);
                 if (hours == null || hours >= 1) {
                     const name = nameLookup[shift.employeeId] || "Employee";
@@ -142,7 +165,7 @@
             }
             const dateRef =
                 toDate(shift.registerClosedAt) || toDate(shift.clockOutTime);
-            if (dateRef && dateRef >= cutoffVariance) {
+            if (alertOn("register_variance") && dateRef && dateRef >= cutoffVariance) {
                 const regs = shift.registers || [];
                 if (regs.length) {
                     regs.forEach((reg, i) => {
@@ -178,7 +201,7 @@
             const t = toDate(f.submittedAt);
             return t && t >= activityCutoff;
         });
-        if (hasLottery) {
+        if (hasLottery && alertOn("lottery_not_closed")) {
             const yesterday = addDays(todayStart, -1);
             const submittedYesterday = forms.some((f) => {
                 const t = toDate(f.submittedAt);
@@ -198,7 +221,13 @@
         for (const form of forms) {
             const submitted = toDate(form.submittedAt);
             const v = form.shiftSummary?.overShort;
-            if (submitted && submitted >= cutoffVariance && v != null && Math.abs(v) >= VARIANCE_THRESHOLD) {
+            if (
+                alertOn("lottery_variance") &&
+                submitted &&
+                submitted >= cutoffVariance &&
+                v != null &&
+                Math.abs(v) >= VARIANCE_THRESHOLD
+            ) {
                 alerts.push(
                     makeVarianceAlert(`lotvar_${form.id}`, "lottery", v, submitted, 11)
                 );
@@ -210,7 +239,7 @@
             const due = toDate(p.dueDate);
             return due && startOfDay(due) < todayStart;
         });
-        if (overdue.length) {
+        if (alertOn("payables_overdue") && overdue.length) {
             const total = overdue.reduce((s, p) => s + (p.amount || 0), 0);
             alerts.push({
                 id: `payables_${locationId}`,
@@ -221,7 +250,8 @@
             });
         }
 
-        const docCutoff = addDays(now, DOC_EXPIRY_DAYS);
+        if (alertOn("document_expiry")) {
+        const docCutoff = addDays(now, docLeadDays);
         for (const doc of documents) {
             const exp = toDate(doc.expiryDate);
             if (!exp || exp < now || exp > docCutoff) continue;
@@ -232,6 +262,30 @@
                 title: `${doc.name || "Document"} expires in ${days} day${days === 1 ? "" : "s"}`,
                 subtitle: "",
                 sortKey: 21,
+            });
+        }
+        }
+
+        if (alertOn("profile_expiry") && PM && profileSlots.length) {
+            profileSlots.forEach((slot) => {
+                const entry = PM.normalizeProfileEntry(profileEntries[slot.id]);
+                if (!entry.expiryDate || !entry.notifyOnExpiry) return;
+                const status = PM.profileExpiryStatus(entry, profileLeadDays);
+                if (!status || status.tone === "ok") return;
+                const exp = toDate(entry.expiryDate);
+                const days = exp
+                    ? Math.max(0, Math.floor((exp - now) / 86400000))
+                    : null;
+                alerts.push({
+                    id: `profile_${slot.id}`,
+                    severity: status.tone === "expired" ? 0 : days != null && days <= 7 ? 1 : 2,
+                    title:
+                        status.tone === "expired"
+                            ? `${slot.label} expired`
+                            : `${slot.label} expires in ${days} day${days === 1 ? "" : "s"}`,
+                    subtitle: exp ? formatDateMedium(exp) : "",
+                    sortKey: status.tone === "expired" ? 3 : 22,
+                });
             });
         }
 
@@ -249,7 +303,7 @@
             for (let i = 0; i < 7; i++) {
                 if (employeeWorksOn(emp, addDays(weekStart, i))) workingDays += 1;
             }
-            if (workingDays === 0) {
+            if (alertOn("schedule_gaps") && workingDays === 0) {
                 alerts.push({
                     id: `schedgap_${emp.id}`,
                     severity: 2,
@@ -264,7 +318,7 @@
         const disapproved = here.filter((task) =>
             Object.values(task.employeeCompletions || {}).some((c) => c.isApproved === false)
         ).length;
-        if (disapproved > 0) {
+        if (alertOn("tasks_rework") && disapproved > 0) {
             alerts.push({
                 id: `disapp_${locationId}`,
                 severity: 1,

@@ -196,12 +196,33 @@
                 if (st) st.textContent = "Uploading…";
                 form.querySelector('[type="submit"]')?.setAttribute("disabled", "disabled");
                 try {
-                    await Store().create(ctx.userId, ctx.locationId, {
+                    const loc = ctx.data?.location;
+                    const PDS = window.OplixProfileDocumentSync;
+                    const matchedSlot = PDS?.matchNameToSlot(name, loc?.profileSlotConfig);
+                    const created = await Store().create(ctx.userId, ctx.locationId, {
                         name,
                         file,
                         expiryDate,
                         uploadedBy: ctx.userId,
+                        profileSlot: matchedSlot?.id,
                     });
+                    if (PDS && created?.id && loc) {
+                        if (matchedSlot) {
+                            await PDS.linkDocumentToSlot(
+                                ctx.userId,
+                                ctx.locationId,
+                                matchedSlot.id,
+                                created.id
+                            );
+                        } else {
+                            await PDS.afterFacilityDocumentUpload(
+                                ctx.userId,
+                                ctx.locationId,
+                                loc,
+                                created
+                            );
+                        }
+                    }
                     closeForm();
                     setStatus("Document uploaded.");
                     await ctx.onRefresh();

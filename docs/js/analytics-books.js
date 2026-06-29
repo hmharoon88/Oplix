@@ -59,8 +59,20 @@
         return map;
     }
 
+    function booksFieldConfigsById() {
+        const FC = window.OplixBooksFieldConfig;
+        const out = {};
+        locations.forEach((l) => {
+            out[l.id] = FC ? FC.configFromLocation(l) : null;
+        });
+        return out;
+    }
+
     function loadOptions() {
-        return { facilityTypesById: facilityTypesById() };
+        return {
+            facilityTypesById: facilityTypesById(),
+            booksFieldConfigsById: booksFieldConfigsById(),
+        };
     }
 
     async function fetchLotteryForms(locationId) {
@@ -586,6 +598,11 @@
                 subtitle: "Wind station cash from the Daily sheet.",
                 data: cr?.wind,
             },
+            {
+                title: "Keno station cash",
+                subtitle: "Keno station cash from the Daily sheet.",
+                data: cr?.keno,
+            },
         ];
 
         const hasAny = categories.some((c) => (c.data?.dailyRows || []).length > 0);
@@ -596,7 +613,7 @@
                     <div class="bs-panel-head">
                         <div class="bs-panel-head-text">
                             <h3 class="bs-panel-title">Cash reconciliation</h3>
-                            <p class="bs-panel-sub">Register, lottery, pulltab, and wind station cash by day.</p>
+                            <p class="bs-panel-sub">Register, lottery, pulltab, wind, and keno station cash by day.</p>
                         </div>
                     </div>
                     <p class="books-hint">No cash entries this month yet. Enter amounts on <strong>Daily books → Daily sheet</strong>, then reconcile on <strong>Cash reconciliation</strong>.</p>
@@ -643,6 +660,10 @@
 
     function buildEmptyPack(locationId, monthId) {
         const hasGasStation = facilityTypesById()[locationId] === "c_store_gas";
+        const loc = locations.find((l) => l.id === locationId);
+        const booksFieldConfig = window.OplixBooksFieldConfig
+            ? OplixBooksFieldConfig.configFromLocation(loc || { facilityType: hasGasStation ? "c_store_gas" : "c_store" })
+            : null;
         const month = M().defaultMonthDoc();
         const daysById = {};
         return {
@@ -650,7 +671,7 @@
             monthId,
             month,
             daysById,
-            aggregate: M().aggregateMonth(month, daysById, { hasGasStation }),
+            aggregate: M().aggregateMonth(month, daysById, { hasGasStation, booksFieldConfig }),
         };
     }
 

@@ -6,6 +6,7 @@
     const Store = () => window.OplixBooksStore;
     const DirStore = () => window.OplixLocationDirectoryStore;
     const DirModel = () => window.OplixLocationDirectoryModel;
+    const FC = () => window.OplixBooksFieldConfig;
 
     let userId = null;
     let locations = [];
@@ -257,6 +258,52 @@
         return effectiveFacilityType(loc || currentLocation()) === "c_store_gas";
     }
 
+    function booksFieldConfig() {
+        if (!FC()) return null;
+        return FC().normalizeBooksFieldConfig(currentLocation()?.booksFieldConfig, hasGasStation());
+    }
+
+    function showField(fieldId) {
+        if (!FC()) return true;
+        return FC().fieldEnabled(booksFieldConfig(), fieldId, hasGasStation());
+    }
+
+    function enabledCustomFields(group) {
+        if (!FC()) return [];
+        return FC().enabledCustomFields(booksFieldConfig(), group);
+    }
+
+    function renderCustomBooksFields(group, amounts) {
+        const fields = enabledCustomFields(group);
+        if (!fields.length) return "";
+        const vals = amounts || {};
+        return `
+            <h3 class="books-subtitle">Custom fields</h3>
+            <div class="books-grid-2 books-custom-fields">
+                ${fields
+                    .map(
+                        (cf) => `
+                <label class="books-label">${escapeHtml(cf.label)} ($)
+                    <input ${amountInputAttrs(`custom_${cf.id}`, vals[cf.id])}>
+                </label>`
+                    )
+                    .join("")}
+            </div>`;
+    }
+
+    function syncCustomAmountsFromDom(root, target, group) {
+        if (!target.customAmounts) target.customAmounts = {};
+        enabledCustomFields(group).forEach((cf) => {
+            const el = root.querySelector(`[name="custom_${cf.id}"]`);
+            if (el) target.customAmounts[cf.id] = M().num(el.value);
+        });
+    }
+
+    function tabVisible(tabId) {
+        if (!FC()) return true;
+        return FC().tabEnabled(booksFieldConfig(), tabId, hasGasStation());
+    }
+
     function amountValue(v) {
         if (v == null || v === "") return "";
         return M().formatAmountForInput(v);
@@ -327,6 +374,15 @@
             }
             if (e.target.id === "di-save-day") {
                 saveDay();
+                return;
+            }
+            if (e.target.id === "di-open-books-config" && state.locationId) {
+                if (window.showDashboardPanel) showDashboardPanel("facilities");
+                if (window.OplixFacilities?.openCustomize) {
+                    OplixFacilities.openCustomize(state.locationId, { focusBooks: true });
+                } else if (window.OplixFacilities?.openBooksConfig) {
+                    OplixFacilities.openBooksConfig(state.locationId);
+                }
                 return;
             }
             const add = e.target.closest("[data-di-add]");
@@ -441,6 +497,17 @@
                 station: String(next),
                 cash: 0,
             });
+        } else if (list === "kenoStations") {
+            if ((state.day.kenoStations || []).length >= 3) {
+                window.alert("You can add up to 3 keno stations per day.");
+                return;
+            }
+            const next = (state.day.kenoStations || []).length + 1;
+            state.day.kenoStations.push({
+                id: lineId(),
+                station: String(next),
+                cash: 0,
+            });
         } else if (list === "receivables") {
             state.month.receivables.push({ id: lineId(), description: "", amount: 0 });
         }
@@ -478,6 +545,12 @@
             if (!cr.windStations[id]) cr.windStations[id] = M().emptyCashReconShift();
             return cr.windStations[id];
         }
+        if (prefix.startsWith("cr_ks_")) {
+            const id = prefix.slice("cr_ks_".length);
+            if (!cr.kenoStations) cr.kenoStations = {};
+            if (!cr.kenoStations[id]) cr.kenoStations[id] = M().emptyCashReconShift();
+            return cr.kenoStations[id];
+        }
         return null;
     }
 
@@ -510,6 +583,45 @@
         syncPayOutsForPrefix(prefix, entry);
         if (verified) entry.verified = verified.checked;
         if (note) entry.note = note.value;
+    }
+
+    function syncFuelGradesToGallons(root) {
+        if (!root || !state.day.fuelSale) return false;
+        const fuelRegular = root.querySelector('[name="fuel_regular"]');
+        const fuelMidGrade = root.querySelector('[name="fuel_mid_grade"]');
+        const fuelPremium = root.querySelector('[name="fuel_premium"]');
+        const fuelDiesel = root.querySelector('[name="fuel_diesel"]');
+        const fuelG = root.querySelector('[name="fuel_gallons"]');
+        const gradeFields = [fuelRegular, fuelMidGrade, fuelPremium, fuelDiesel];
+        const hasGradeEntry = gradeFields.some((el) => String(el?.value ?? "").trim() !== "");
+
+        let regular = 0;
+        let midGrade = 0;
+        let premium = 0;
+        let diesel = 0;
+        if (fuelRegular) regular = M().num(fuelRegular.value);
+        if (fuelMidGrade) midGrade = M().num(fuelMidGrade.value);
+        if (fuelPremium) premium = M().num(fuelPremium.value);
+        if (fuelDiesel) diesel = M().num(fuelDiesel.value);
+
+        state.day.fuelSale.regular = regular;
+        state.day.fuelSale.midGrade = midGrade;
+        state.day.fuelSale.premium = premium;
+        state.day.fuelSale.diesel = diesel;
+
+        if (hasGradeEntry) {
+            const gradeSum = regular + midGrade + premium + diesel;
+            state.day.fuelSale.gallons = gradeSum;
+            if (fuelG) {
+                fuelG.value = M().formatAmountForInput(gradeSum);
+                fuelG.readOnly = true;
+                fuelG.setAttribute("aria-readonly", "true");
+            }
+        } else if (fuelG) {
+            fuelG.readOnly = false;
+            fuelG.removeAttribute("aria-readonly");
+        }
+        return hasGradeEntry;
     }
 
     function syncFromForm() {
@@ -546,6 +658,7 @@
 
         syncLinesFromDom("pulltabs", ["ticketNumber", "cash", "winner", "overShort"]);
         syncLinesFromDom("windStations", ["station", "cash"]);
+        syncLinesFromDom("kenoStations", ["station", "cash"]);
         ["shift1", "shift2"].forEach((sh) => {
             const cash = root.querySelector(`[name="lot_shift${sh === "shift1" ? "1" : "2"}_cash"]`);
             const os = root.querySelector(`[name="lot_shift${sh === "shift1" ? "1" : "2"}_overShort"]`);
@@ -558,20 +671,45 @@
             if (merch) state.day.merchSale = M().num(merch.value);
             const fuelG = root.querySelector('[name="fuel_gallons"]');
             const fuelD = root.querySelector('[name="fuel_dollars"]');
+            const fuelRegular = root.querySelector('[name="fuel_regular"]');
+            const fuelMidGrade = root.querySelector('[name="fuel_mid_grade"]');
+            const fuelPremium = root.querySelector('[name="fuel_premium"]');
+            const fuelDiesel = root.querySelector('[name="fuel_diesel"]');
             const credit = root.querySelector('[name="credit_card"]');
-            if (fuelG) state.day.fuelSale.gallons = M().num(fuelG.value);
+            const inHouse = root.querySelector('[name="in_house_account"]');
+            const waynePass = root.querySelector('[name="wayne_pass"]');
+            const lotteryPayOut = root.querySelector('[name="lottery_pay_out"]');
+            const pullTabPay = root.querySelector('[name="pull_tab_payout"]');
+            const otherCashPayOut = root.querySelector('[name="other_cash_pay_out"]');
+            if (!state.day.fuelSale) state.day.fuelSale = M().defaultFuelSale();
+            const gradesActive = syncFuelGradesToGallons(root);
+            if (!gradesActive && fuelG) {
+                state.day.fuelSale.gallons = M().num(fuelG.value);
+            }
             if (fuelD) state.day.fuelSale.dollars = M().num(fuelD.value);
             if (credit) state.day.creditCard = M().num(credit.value);
+            if (inHouse) state.day.inHouseAccount = M().num(inHouse.value);
+            if (waynePass) state.day.waynePass = M().num(waynePass.value);
+            if (lotteryPayOut) state.day.lotteryPayOut = M().num(lotteryPayOut.value);
+            if (pullTabPay) state.day.pullTabPayout = M().num(pullTabPay.value);
+            if (otherCashPayOut) state.day.otherCashPayOut = M().num(otherCashPayOut.value);
         } else {
             state.day.merchSale = 0;
             state.day.fuelSale = M().defaultFuelSale();
             state.day.creditCard = 0;
+            state.day.inHouseAccount = 0;
+            state.day.waynePass = 0;
+            state.day.lotteryPayOut = 0;
+            state.day.pullTabPayout = 0;
+            state.day.otherCashPayOut = 0;
         }
 
         syncLinesFromDom("cashExpenses", ["description", "amount", "overShort"]);
         syncLinesFromDom("checksAch", ["date", "description", "checkNo", "amount"]);
         syncLinesFromDom("otherExpenses", ["description", "amount"]);
         syncLinesFromDom("receivables", ["description", "amount"], true);
+        syncCustomAmountsFromDom(root, state.day, "daily");
+        syncCustomAmountsFromDom(root, state.month, "month");
 
         if (!state.day.cashReconciliation) {
             state.day.cashReconciliation = M().defaultCashReconciliation();
@@ -606,9 +744,15 @@
             syncReconShiftFromDom(`cr_ws_${ws.id}`, reconEntryFromPrefix(`cr_ws_${ws.id}`));
         });
 
+        (state.day.kenoStations || []).forEach((ks) => {
+            if (!state.day.cashReconciliation.kenoStations) state.day.cashReconciliation.kenoStations = {};
+            syncReconShiftFromDom(`cr_ks_${ks.id}`, reconEntryFromPrefix(`cr_ks_${ks.id}`));
+        });
+
         const lotteryDeposit = root.querySelector('[name="cr_lottery_deposit"]');
         const pulltabDeposit = root.querySelector('[name="cr_pulltab_deposit"]');
         const windDeposit = root.querySelector('[name="cr_wind_deposit"]');
+        const kenoDeposit = root.querySelector('[name="cr_keno_deposit"]');
         if (lotteryDeposit) {
             const v = String(lotteryDeposit.value ?? "").trim();
             state.day.cashReconciliation.lotteryDeposit = v === "" ? null : M().num(v);
@@ -620,6 +764,10 @@
         if (windDeposit) {
             const v = String(windDeposit.value ?? "").trim();
             state.day.cashReconciliation.windDeposit = v === "" ? null : M().num(v);
+        }
+        if (kenoDeposit) {
+            const v = String(kenoDeposit.value ?? "").trim();
+            state.day.cashReconciliation.kenoDeposit = v === "" ? null : M().num(v);
         }
     }
 
@@ -877,6 +1025,26 @@
             <p class="books-total-line">Wind station total: ${money(total)} cash</p>`;
     }
 
+    function renderKenoStations() {
+        const total = M().kenoStationDayTotal(state.day);
+        const count = (state.day.kenoStations || []).length;
+        const canAdd = count < 3;
+        return `
+            <h3 class="books-subtitle">Keno station</h3>
+            <p class="books-hint">Cash collected at each keno station (add up to 3 stations per day).</p>
+            ${renderLineList(
+                "kenoStations",
+                [
+                    { name: "station", label: "Station" },
+                    { name: "cash", label: "Cash", type: "number" },
+                ],
+                null,
+                false,
+                canAdd ? "+ Add keno station" : false
+            )}
+            <p class="books-total-line">Keno station total: ${money(total)} cash</p>`;
+    }
+
     function renderUtilitiesPayroll() {
         const utilityKeys = mergedUtilityKeys();
         const utilRows = utilityKeys
@@ -957,9 +1125,9 @@
                 <div class="books-payroll-weeks">${payrollFields}</div>`
             : "";
 
-        return `
-            <div class="books-panel data-input-form">
-                <h3 class="books-subtitle">Utilities</h3>
+        const parts = ['<div class="books-panel data-input-form">'];
+        if (showField("utilities")) {
+            parts.push(`<h3 class="books-subtitle">Utilities</h3>
                 <p class="books-hint">Monthly amounts per utility. Standard types (Internet, Water, Electric, etc.) are always listed; add custom ones below.</p>
                 <div class="books-util-list" data-di-util-list>
                     <div class="books-util-head">
@@ -970,150 +1138,232 @@
                     ${utilRows}
                     <button type="button" class="books-add-line" data-di-util-add>+ Add utility</button>
                 </div>
-                <p class="books-total-line">Utilities total: <strong>${money(utilTotal)}</strong></p>
-
-                <h3 class="books-subtitle">Payroll</h3>
+                <p class="books-total-line">Utilities total: <strong>${money(utilTotal)}</strong></p>`);
+        }
+        if (showField("payroll")) {
+            parts.push(`<h3 class="books-subtitle">Payroll</h3>
                 ${payrollLinesTable}
                 ${payrollWeekBlock}
-                <p class="books-total-line">Payroll total: <strong>${money(payTotal)}</strong></p>
-
-                <h3 class="books-subtitle">Other monthly</h3>
+                <p class="books-total-line">Payroll total: <strong>${money(payTotal)}</strong></p>`);
+        }
+        if (showField("salesTax") || showField("accountant")) {
+            parts.push(`<h3 class="books-subtitle">Other monthly</h3>
                 <div class="books-grid-2">
-                    <label class="books-label">Sales tax
+                    ${
+                        showField("salesTax")
+                            ? `<label class="books-label">Sales tax
                         <input ${amountInputAttrs("salesTax", state.month.salesTax)}>
-                    </label>
-                    <label class="books-label">Accountant
+                    </label>`
+                            : ""
+                    }
+                    ${
+                        showField("accountant")
+                            ? `<label class="books-label">Accountant
                         <input ${amountInputAttrs("accountant", state.month.accountant)}>
-                    </label>
-                </div>
-                <button type="button" class="btn books-save" id="di-save-month">Save month (utilities & payroll)</button>
-            </div>`;
+                    </label>`
+                            : ""
+                    }
+                </div>`);
+        }
+        const customMonth = renderCustomBooksFields("month", state.month.customAmounts);
+        if (customMonth) parts.push(customMonth);
+        parts.push(
+            '<button type="button" class="btn books-save" id="di-save-month">Save month (utilities & payroll)</button>',
+            "</div>"
+        );
+        return parts.join("\n");
     }
 
     function renderDailyMerchEntry() {
         return `
-            <h3 class="books-subtitle">Daily sales</h3>
-            <p class="books-hint"><strong>Merch sale</strong>, <strong>pump credit card</strong>, and <strong>fuel ($)</strong> are three separate fields — never combined into each other.</p>
             <label class="books-label">Merch sale ($)
                 <input ${amountInputAttrs("merch_sale", state.day.merchSale)}>
                 <span class="books-field-hint">In-store merch total for the day</span>
             </label>`;
     }
 
-    function renderDailyGasSales() {
-        return `
-            ${renderDailyMerchEntry()}
-            <label class="books-label">Pump credit card ($)
+    function fuelGradesActive(fuel) {
+        return M().sumFuelGradeGallons(fuel) > 0;
+    }
+
+    function renderDailyGasSales(fuelSale) {
+        const fuel = fuelSale || M().defaultFuelSale();
+        const gradesActive = fuelGradesActive(fuel);
+        const showMerch = showField("merchSale");
+        const showCredit = showField("creditCard");
+        const showFuel = showField("fuel");
+        if (!showMerch && !showCredit && !showFuel) return "";
+
+        const parts = [
+            `<h3 class="books-subtitle">Daily sales</h3>`,
+            `<p class="books-hint">Merch, pump credit, and fuel are separate — none are combined into each other.</p>`,
+        ];
+        if (showMerch) parts.push(renderDailyMerchEntry());
+        if (showCredit) {
+            parts.push(`<label class="books-label">Pump credit card ($)
                 <input ${amountInputAttrs("credit_card", state.day.creditCard)}>
                 <span class="books-field-hint">Outdoor / pump card sales only — separate from merch sale and fuel ($)</span>
+            </label>`);
+        }
+        if (showFuel) {
+            parts.push(`<div class="books-grid-2">
+                <label class="books-label">Gallons sold
+                    <input ${amountInputAttrs("fuel_gallons", fuel.gallons)}${gradesActive ? ' readonly aria-readonly="true"' : ""}>
+                </label>
+                <label class="books-label">Fuel amount ($)
+                    <input ${amountInputAttrs("fuel_dollars", fuel.dollars)}>
+                    <span class="books-field-hint">Fuel revenue — separate from merch and credit card</span>
+                </label>
+            </div>
+            <p class="books-hint books-fuel-grade-hint">Optional — gallons by grade (total updates Gallons sold automatically)</p>
+            <div class="books-grid-4 books-fuel-grades">
+                <label class="books-label">Regular (gal)
+                    <input ${amountInputAttrs("fuel_regular", fuel.regular)}>
+                </label>
+                <label class="books-label">Mid grade (gal)
+                    <input ${amountInputAttrs("fuel_mid_grade", fuel.midGrade)}>
+                </label>
+                <label class="books-label">Premium (gal)
+                    <input ${amountInputAttrs("fuel_premium", fuel.premium)}>
+                </label>
+                <label class="books-label">Diesel (gal)
+                    <input ${amountInputAttrs("fuel_diesel", fuel.diesel)}>
+                </label>
+            </div>`);
+        }
+        return parts.join("\n");
+    }
+
+    function renderRegisterWaynePass() {
+        if (!showField("waynePass")) return "";
+        return `
+            <label class="books-label">Wayne Pass ($)
+                <input ${amountInputAttrs("wayne_pass", state.day.waynePass)}>
+                <span class="books-field-hint">Wayne Pass sales — recorded with register, not a payout</span>
             </label>`;
     }
 
-    function renderDailyDetailSheet(reg, fuel) {
-        const totals = `
-            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash</p>
-            <p class="books-hint">Register card/cash on the detail sheet is for shift reconciliation only — not added to merch, pump credit, or fuel.</p>`;
-
+    function renderRegisterPayoutFields() {
+        if (!showField("registerPayouts")) return "";
         return `
-            <details class="books-detail-sheet" open>
-                <summary class="books-detail-summary">Detail sheet</summary>
-                <div class="books-detail-body">
-                    ${renderRegisterUnit("Register 1", "register1", state.day.register1)}
-                    ${renderRegisterUnit("Register 2", "register2", state.day.register2)}
-                    ${totals}
+            <h3 class="books-subtitle">Register payouts</h3>
+            <p class="books-hint">Cash paid out from the register — not added to merch, pump credit, or fuel.</p>
+            <div class="books-grid-2">
+                <label class="books-label">In house account ($)
+                    <input ${amountInputAttrs("in_house_account", state.day.inHouseAccount)}>
+                </label>
+                <label class="books-label">Lottery pay out ($)
+                    <input ${amountInputAttrs("lottery_pay_out", state.day.lotteryPayOut)}>
+                </label>
+                <label class="books-label">Pull tab payout ($)
+                    <input ${amountInputAttrs("pull_tab_payout", state.day.pullTabPayout)}>
+                </label>
+                <label class="books-label">Other cash pay out ($)
+                    <input ${amountInputAttrs("other_cash_pay_out", state.day.otherCashPayOut)}>
+                </label>
+            </div>`;
+    }
 
-                    <h3 class="books-subtitle">Fuel</h3>
-                    <div class="books-grid-2">
-                        <label class="books-label">Gallons sold
-                            <input ${amountInputAttrs("fuel_gallons", fuel.gallons)}>
-                        </label>
-                        <label class="books-label">Fuel amount ($)
-                            <input ${amountInputAttrs("fuel_dollars", fuel.dollars)}>
-                            <span class="books-field-hint">Fuel revenue — separate from merch and credit card</span>
-                        </label>
-                    </div>
-
-                    ${renderPulltabs()}
-
-                    ${renderWindStations()}
-
-                    ${renderLotteryDaily()}
-
-                    <h3 class="books-subtitle">Cash expense</h3>
+    function renderDailyExpensesBlock() {
+        const parts = [];
+        if (showField("cashExpenses")) {
+            parts.push(`<h3 class="books-subtitle">Cash expense</h3>
                     ${renderLineList("cashExpenses", [
                         { name: "description", label: "Description" },
                         { name: "amount", label: "Amount", type: "number" },
                         { name: "overShort", label: "O/S", type: "number" },
-                    ])}
-
-                    <h3 class="books-subtitle">Checks / ACH</h3>
+                    ])}`);
+        }
+        if (showField("checksAch")) {
+            parts.push(`<h3 class="books-subtitle">Checks / ACH</h3>
                     ${renderLineList("checksAch", [
                         { name: "date", label: "Date" },
                         { name: "description", label: "Description" },
                         { name: "checkNo", label: "Check #" },
                         { name: "amount", label: "Amount", type: "number" },
-                    ])}
-
-                    <h3 class="books-subtitle">Other expense</h3>
+                    ])}`);
+        }
+        if (showField("otherExpenses")) {
+            parts.push(`<h3 class="books-subtitle">Other expense</h3>
                     ${renderLineList("otherExpenses", [
                         { name: "description", label: "Description" },
                         { name: "amount", label: "Amount", type: "number" },
-                    ])}
+                    ])}`);
+        }
+        return parts.join("\n");
+    }
+
+    function renderDailyDetailSheet(reg) {
+        const bodyParts = [];
+        if (showField("registers")) {
+            bodyParts.push(
+                renderRegisterUnit("Register 1", "register1", state.day.register1),
+                renderRegisterUnit("Register 2", "register2", state.day.register2),
+                `<p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash</p>
+            <p class="books-hint">Register card/cash on the detail sheet is for shift reconciliation only — not added to merch, pump credit, or fuel.</p>`
+            );
+        }
+        const wayne = renderRegisterWaynePass();
+        if (wayne) bodyParts.push(wayne);
+        const payouts = renderRegisterPayoutFields();
+        if (payouts) bodyParts.push(payouts);
+        if (showField("pulltabs")) bodyParts.push(renderPulltabs());
+        if (showField("windStations")) bodyParts.push(renderWindStations());
+        if (showField("kenoStations")) bodyParts.push(renderKenoStations());
+        if (showField("lottery")) bodyParts.push(renderLotteryDaily());
+        const expenses = renderDailyExpensesBlock();
+        if (expenses) bodyParts.push(expenses);
+
+        if (!bodyParts.length) return "";
+
+        return `
+            <details class="books-detail-sheet" open>
+                <summary class="books-detail-summary">Detail sheet</summary>
+                <div class="books-detail-body">
+                    ${bodyParts.join("\n")}
                 </div>
             </details>`;
     }
 
     function renderDailyCStore() {
         const reg = M().registerDayTotal(state.day);
-        return `
-            <h3 class="books-subtitle">Registers</h3>
+        const parts = [];
+        if (showField("registers")) {
+            parts.push(
+                `<h3 class="books-subtitle">Registers</h3>
             <p class="books-hint"><strong>Total sales</strong> in Books summary uses register card + cash (both registers, both shifts). Lottery and pulltab are tracked separately.</p>
             ${renderRegisterUnit("Register 1", "register1", state.day.register1)}
             ${renderRegisterUnit("Register 2", "register2", state.day.register2)}
-            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash</p>
-
-            ${renderPulltabs()}
-
-            ${renderWindStations()}
-
-            ${renderLotteryDaily()}
-
-            <h3 class="books-subtitle">Cash expense</h3>
-            ${renderLineList("cashExpenses", [
-                { name: "description", label: "Description" },
-                { name: "amount", label: "Amount", type: "number" },
-                { name: "overShort", label: "O/S", type: "number" },
-            ])}
-
-            <h3 class="books-subtitle">Checks / ACH</h3>
-            ${renderLineList("checksAch", [
-                { name: "date", label: "Date" },
-                { name: "description", label: "Description" },
-                { name: "checkNo", label: "Check #" },
-                { name: "amount", label: "Amount", type: "number" },
-            ])}
-
-            <h3 class="books-subtitle">Other expense</h3>
-            ${renderLineList("otherExpenses", [
-                { name: "description", label: "Description" },
-                { name: "amount", label: "Amount", type: "number" },
-            ])}`;
+            <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash</p>`
+            );
+        }
+        if (showField("pulltabs")) parts.push(renderPulltabs());
+        if (showField("windStations")) parts.push(renderWindStations());
+        if (showField("kenoStations")) parts.push(renderKenoStations());
+        if (showField("lottery")) parts.push(renderLotteryDaily());
+        const expenses = renderDailyExpensesBlock();
+        if (expenses) parts.push(expenses);
+        return parts.join("\n");
     }
 
     function renderDaily() {
         const reg = M().registerDayTotal(state.day);
         const gas = hasGasStation();
-        const fuel = M().fuelDayTotal(state.day);
+        const fuelSale = M().normalizeFuelSale(state.day.fuelSale);
 
         if (gas) {
+            const gasSales = renderDailyGasSales(fuelSale);
+            const detail = renderDailyDetailSheet(reg);
             return `
             <div class="books-panel data-input-form">
                 <label class="books-label">Day
                     <select id="di-day" class="books-select">${dayOptions()}</select>
                 </label>
 
-                ${renderDailyGasSales()}
-                ${renderDailyDetailSheet(reg, fuel)}
+                ${gasSales}
+                ${detail}
+
+                ${renderCustomBooksFields("daily", state.day.customAmounts)}
 
                 <button type="button" class="btn books-save" id="di-save-day">Save this day</button>
             </div>`;
@@ -1126,6 +1376,8 @@
                 </label>
 
                 ${renderDailyCStore()}
+
+                ${renderCustomBooksFields("daily", state.day.customAmounts)}
 
                 <button type="button" class="btn books-save" id="di-save-day">Save this day</button>
             </div>`;
@@ -1242,7 +1494,7 @@
                         <thead>
                             <tr>
                                 <th>${escapeHtml(title.includes("Register") ? "Register" : title.split(" ")[0])}</th>
-                                <th>${rows[0]?.kind === "pulltab" ? "Ticket" : rows[0]?.kind === "wind" ? "Type" : "Shift"}</th>
+                                <th>${rows[0]?.kind === "pulltab" ? "Ticket" : rows[0]?.kind === "wind" || rows[0]?.kind === "keno" ? "Type" : "Shift"}</th>
                                 <th class="home-cc-num">Received</th>
                                 <th class="home-cc-num">Pay out</th>
                                 <th>Status</th>
@@ -1275,11 +1527,21 @@
     }
 
     function renderCashReconciliation() {
+        if (!showField("cashReconciliation")) {
+            return `<p class="data-list-empty">Cash reconciliation is turned off for this facility. Enable it under Facilities → Customize.</p>`;
+        }
         const summary = M().cashReconciliationSummary(state.day);
         const reg = summary.register;
-        const sections = [summary.register, summary.lottery, summary.pulltab, summary.wind].filter(
-            (s) => s.applicable
-        );
+        const sectionEntries = [
+            { section: summary.register, fieldId: "registers" },
+            { section: summary.lottery, fieldId: "lottery" },
+            { section: summary.pulltab, fieldId: "pulltabs" },
+            { section: summary.wind, fieldId: "windStations" },
+            { section: summary.keno, fieldId: "kenoStations" },
+        ];
+        const sections = sectionEntries
+            .filter((e) => e.section.applicable && showField(e.fieldId))
+            .map((e) => e.section);
         const matchLabel =
             sections.length === 0
                 ? "No cash to reconcile — enter shift or machine data on the Daily sheet first"
@@ -1327,38 +1589,56 @@
                         : ""
                 }
 
-                ${renderReconSection(
-                    "Register cash",
-                    "Register cash minus cash expenses (Daily sheet) = expected deposit.",
-                    reg,
-                    "cr_day_deposit",
-                    "Register received / deposited ($)",
-                    registerExtra
-                )}
+                ${showField("registers")
+                    ? renderReconSection(
+                          "Register cash",
+                          "Register cash minus cash expenses (Daily sheet) = expected deposit.",
+                          reg,
+                          "cr_day_deposit",
+                          "Register received / deposited ($)",
+                          registerExtra
+                      )
+                    : ""}
 
-                ${renderReconSection(
-                    "Lottery cash",
-                    "Expected from lottery cash per shift on the Daily sheet.",
-                    summary.lottery,
-                    "cr_lottery_deposit",
-                    "Lottery received / deposited ($)"
-                )}
+                ${showField("lottery")
+                    ? renderReconSection(
+                          "Lottery cash",
+                          "Expected from lottery cash per shift on the Daily sheet.",
+                          summary.lottery,
+                          "cr_lottery_deposit",
+                          "Lottery received / deposited ($)"
+                      )
+                    : ""}
 
-                ${renderReconSection(
-                    "Pulltab cash",
-                    "Expected from pulltab machine cash on the Daily sheet (one row per machine).",
-                    summary.pulltab,
-                    "cr_pulltab_deposit",
-                    "Pulltab received / deposited ($)"
-                )}
+                ${showField("pulltabs")
+                    ? renderReconSection(
+                          "Pulltab cash",
+                          "Expected from pulltab machine cash on the Daily sheet (one row per machine).",
+                          summary.pulltab,
+                          "cr_pulltab_deposit",
+                          "Pulltab received / deposited ($)"
+                      )
+                    : ""}
 
-                ${renderReconSection(
-                    "Wind station cash",
-                    "Expected from wind station cash on the Daily sheet.",
-                    summary.wind,
-                    "cr_wind_deposit",
-                    "Wind station received / deposited ($)"
-                )}
+                ${showField("windStations")
+                    ? renderReconSection(
+                          "Wind station cash",
+                          "Expected from wind station cash on the Daily sheet.",
+                          summary.wind,
+                          "cr_wind_deposit",
+                          "Wind station received / deposited ($)"
+                      )
+                    : ""}
+
+                ${showField("kenoStations")
+                    ? renderReconSection(
+                          "Keno station cash",
+                          "Expected from keno station cash on the Daily sheet.",
+                          summary.keno,
+                          "cr_keno_deposit",
+                          "Keno station received / deposited ($)"
+                      )
+                    : ""}
 
                 <label class="books-label">Day notes
                     <input type="text" class="books-input" name="cr_day_note" value="${escapeHtml(state.day.cashReconciliation?.note || "")}" placeholder="Optional">
@@ -1404,28 +1684,43 @@
             return;
         }
 
-        const tabs = [
+        const allTabs = [
             { id: "daily", label: "Daily sheet" },
             { id: "utilities", label: "Utilities & payroll" },
             { id: "payables", label: "Payables" },
             { id: "receivables", label: "Receivables" },
             { id: "cash-recon", label: "Cash reconciliation" },
         ];
+        const tabs = allTabs.filter((t) => tabVisible(t.id));
+        if (!tabs.some((t) => t.id === state.tab)) {
+            state.tab = tabs[0]?.id || "daily";
+        }
 
         let body = "";
         if (state.tab === "daily") body = renderDaily();
         else if (state.tab === "utilities") body = renderUtilitiesPayroll();
         else if (state.tab === "payables") {
-            body = window.OplixPayablesUI
-                ? OplixPayablesUI.renderTab({
-                      userId,
-                      locationId: state.locationId,
-                      monthId: state.monthId,
-                      payables: state.payables,
-                  })
-                : '<p class="data-list-empty">Payables unavailable.</p>';
+            body = tabVisible("payables")
+                ? window.OplixPayablesUI
+                    ? OplixPayablesUI.renderTab({
+                          userId,
+                          locationId: state.locationId,
+                          monthId: state.monthId,
+                          payables: state.payables,
+                      })
+                    : '<p class="data-list-empty">Payables unavailable.</p>'
+                : '<p class="data-list-empty">Payables is turned off for this facility.</p>';
         } else if (state.tab === "cash-recon") body = renderCashReconciliation();
-        else body = renderReceivables();
+        else {
+            body = tabVisible("receivables")
+                ? renderReceivables()
+                : '<p class="data-list-empty">Receivables is turned off for this facility.</p>';
+        }
+
+        const loc = currentLocation();
+        const customizeHint = loc
+            ? `<p class="books-hint books-customize-hint">Daily books layout for this facility can be customized in <button type="button" class="books-link-btn" id="di-open-books-config">Facilities → Customize</button>.</p>`
+            : "";
 
         root.innerHTML = `
             <div class="books-toolbar">
@@ -1440,6 +1735,7 @@
                 <button type="button" class="btn btn-nav-outline" id="di-reload">Load</button>
                 <span class="books-status" id="di-status"></span>
             </div>
+            ${customizeHint}
             <p class="books-hint books-amount-tip">Amount fields: use <strong>+</strong> or <strong>−</strong> to add/subtract (e.g. <code>100+50-25</code>). Tab out of the field to total.</p>
             <nav class="books-tabs">
                 ${tabs.map((t) => `<button type="button" class="books-tab${state.tab === t.id ? " active" : ""}" data-di-tab="${t.id}">${t.label}</button>`).join("")}

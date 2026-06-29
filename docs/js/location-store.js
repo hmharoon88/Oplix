@@ -91,6 +91,50 @@
         return snap.exists ? { id: locationId, ...snap.data() } : null;
     }
 
+    async function updateFacilityCustomization(userId, locationId, data) {
+        const payload = {
+            name: String(data.name || "").trim(),
+            address: String(data.address || "").trim(),
+            contactName: String(data.contactName || "").trim(),
+            contactPhone: String(data.contactPhone || "").trim(),
+            contactEmail: String(data.contactEmail || "").trim(),
+            facilityProfile: data.facilityProfile || {},
+            profileSlotConfig: data.profileSlotConfig || {},
+            notificationSettings: data.notificationSettings || {},
+            booksFieldConfig: data.booksFieldConfig || {},
+        };
+        payload.facilityType =
+            data.facilityType === "c_store_gas" ? "c_store_gas" : "c_store";
+        await locRef(userId, locationId).set(payload, { merge: true });
+        const snap = await locRef(userId, locationId).get();
+        return snap.exists ? { id: locationId, ...snap.data() } : null;
+    }
+
+    async function setProfileDocumentId(userId, locationId, slotId, documentId) {
+        const snap = await locRef(userId, locationId).get();
+        if (!snap.exists) return null;
+        const PM = window.OplixFacilityProfileModel;
+        const profile = PM
+            ? PM.normalizeProfileEntries(snap.data().facilityProfile, snap.data().profileSlotConfig)
+            : {};
+        if (!profile[slotId]) {
+            profile[slotId] = PM ? PM.defaultProfileEntry() : {};
+        }
+        profile[slotId] = {
+            ...profile[slotId],
+            documentId: String(documentId || "").trim(),
+        };
+        await locRef(userId, locationId).set({ facilityProfile: profile }, { merge: true });
+        const updated = await locRef(userId, locationId).get();
+        return updated.exists ? { id: locationId, ...updated.data() } : null;
+    }
+
+    async function updateBooksFieldConfig(userId, locationId, booksFieldConfig) {
+        await locRef(userId, locationId).set({ booksFieldConfig }, { merge: true });
+        const snap = await locRef(userId, locationId).get();
+        return snap.exists ? { id: locationId, ...snap.data() } : null;
+    }
+
     async function deleteLocation(userId, locationId) {
         await deleteLocationEmployees(userId, locationId);
         await deleteManagerTasksForLocation(userId, locationId);
@@ -119,6 +163,9 @@
     window.OplixLocationStore = {
         createLocation,
         updateLocation,
+        updateFacilityCustomization,
+        setProfileDocumentId,
+        updateBooksFieldConfig,
         deleteLocation,
         newId,
     };

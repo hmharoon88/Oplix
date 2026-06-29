@@ -716,6 +716,337 @@
     flex-wrap: wrap;
     gap: 8px;
     flex-shrink: 0;
+    align-items: center;
+}
+
+.fac-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid var(--dash-border);
+    border-radius: 10px;
+    background: var(--dash-surface);
+    cursor: pointer;
+    font-size: 1.125rem;
+    line-height: 1;
+}
+
+.fac-icon-btn:hover {
+    background: var(--dash-surface-2);
+    border-color: var(--dash-accent);
+}
+
+.fac-icon-btn-glyph {
+    pointer-events: none;
+}
+
+.fac-detail-contact {
+    margin-top: 6px !important;
+    font-size: 0.875rem;
+}
+
+.fac-profile-alert {
+    margin: 10px 0 0 !important;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    color: #92400e;
+    font-size: 0.8125rem;
+}
+
+.fac-customize-screen {
+    max-width: 960px;
+}
+
+.fac-customize-form {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+}
+
+.fac-customize-section {
+    padding: 20px;
+    border: 1px solid var(--dash-border);
+    border-radius: var(--dash-radius);
+    background: var(--dash-surface);
+    box-shadow: var(--dash-shadow);
+}
+
+.fac-customize-section-title {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.fac-customize-subtitle {
+    margin: 16px 0 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--dash-text);
+}
+
+.fac-customize-actions {
+    margin-top: 4px;
+}
+
+.fac-profile-table-wrap {
+    overflow-x: auto;
+    margin-top: 12px;
+}
+
+.fac-profile-table th,
+.fac-profile-table td {
+    vertical-align: middle;
+    font-size: 0.8125rem;
+}
+
+.fac-profile-label {
+    min-width: 140px;
+    white-space: nowrap;
+}
+
+.fac-profile-label strong {
+    display: block;
+}
+
+.fac-profile-status {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.fac-profile-status--expired {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.fac-profile-status--expiring {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.fac-profile-status--ok {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.fac-profile-table .books-input {
+    min-width: 100px;
+    font-size: 0.8125rem;
+}
+
+.fac-profile-expiry {
+    min-width: 130px !important;
+}
+
+.fac-profile-notify-cell {
+    white-space: nowrap;
+}
+
+.fac-profile-notify {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+.fac-profile-notify-cb {
+    width: 16px;
+    height: 16px;
+}
+
+.fac-profile-compliance-cell {
+    white-space: nowrap;
+}
+
+.fac-notify-group + .fac-notify-group {
+    margin-top: 16px;
+}
+
+.fac-notify-table th,
+.fac-notify-table td {
+    vertical-align: middle;
+    font-size: 0.8125rem;
+}
+
+.fac-notify-table .fac-notify-enable {
+    width: 18px;
+    height: 18px;
+}
+
+.fac-notify-lead {
+    width: 72px;
+}
+
+.fac-notify-na {
+    color: var(--dash-muted);
+}
+
+.fac-profile-doc-cell {
+    min-width: 140px;
+}
+
+.fac-profile-doc {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+}
+
+.fac-profile-doc-link {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--dash-accent);
+    text-decoration: none;
+    word-break: break-word;
+}
+
+.fac-profile-doc-link:hover {
+    text-decoration: underline;
+}
+
+.fac-profile-doc-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.fac-profile-doc-btn {
+    font-size: 0.75rem;
+    padding: 4px 10px;
+}
+
+.fac-profile-doc-hint {
+    font-size: 0.6875rem;
+    color: var(--dash-muted);
+}
+
+.fac-profile-doc-status {
+    font-size: 0.6875rem;
+    color: var(--dash-muted);
+}
+
+.fac-profile-doc-upload {
+    cursor: pointer;
+    margin: 0;
+}
+
+.fac-profile-doc-source {
+    font-size: 0.65rem;
+    color: var(--dash-muted);
+    font-weight: 500;
+}
+
+.fac-profile-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.fac-profile-add-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    flex: 1;
+    min-width: 220px;
+}
+
+.fac-profile-new-label {
+    flex: 1;
+    min-width: 160px;
+    max-width: 280px;
+}
+
+.fac-profile-restore {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.fac-profile-restore-select {
+    min-width: 180px;
+}
+
+.fac-profile-rm-cell {
+    white-space: nowrap;
+}
+
+.fac-profile-slot-label {
+    font-weight: 600;
+    min-width: 120px;
+}
+
+.bfc-screen .bfc-group {
+    margin-bottom: 20px;
+}
+
+.bfc-group-title {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.bfc-table th,
+.bfc-table td {
+    vertical-align: middle;
+}
+
+.bfc-table .bfc-enable {
+    width: 18px;
+    height: 18px;
+}
+
+.books-customize-hint {
+    margin: 0 0 12px;
+}
+
+.books-link-btn {
+    display: inline;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--dash-accent);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.bfc-custom-add-row {
+    display: grid;
+    grid-template-columns: 1fr 140px 140px auto;
+    gap: 10px;
+    align-items: end;
+    margin-top: 12px;
+}
+
+.bfc-group-hint {
+    margin: 0 0 8px;
+    font-size: 0.875rem;
+}
+
+.bfc-table--custom .books-input {
+    min-width: 0;
+}
+
+@media (max-width: 720px) {
+    .bfc-custom-add-row {
+        grid-template-columns: 1fr;
+    }
 }
 
 .fac-btn-delete {
@@ -970,6 +1301,15 @@
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 10px;
+}
+
+.books-fuel-grade-hint {
+    margin: 4px 0 6px;
+    font-size: 0.85rem;
+}
+
+.books-fuel-grades {
+    margin-bottom: 4px;
 }
 
 .books-payroll-weeks {
@@ -1352,6 +1692,11 @@
 
 .books-lines[data-di-list="windStations"] .books-lines-head,
 .books-lines[data-di-list="windStations"] .books-lines-row {
+    grid-template-columns: 120px 100px 32px;
+}
+
+.books-lines[data-di-list="kenoStations"] .books-lines-head,
+.books-lines[data-di-list="kenoStations"] .books-lines-row {
     grid-template-columns: 120px 100px 32px;
 }
 
@@ -2987,6 +3332,18 @@
     padding: 4px 8px;
     border-radius: 999px;
     white-space: nowrap;
+}
+
+.comp-profile-badge {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #e0e7ff;
+    color: #3730a3;
+    vertical-align: middle;
 }
 
 .comp-status--active {

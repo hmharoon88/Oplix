@@ -91,8 +91,55 @@
         return [normalizeWindStationEntry({ station: "1" }, "ws_0", 0)];
     }
 
+    function emptyKenoStationEntry() {
+        return { station: "", cash: 0 };
+    }
+
+    function normalizeKenoStationEntry(raw, fallbackId, index) {
+        const row = raw || {};
+        const stationDefault =
+            index != null && index >= 0 ? String(index + 1) : "";
+        return {
+            id: row.id || fallbackId || `ks_${Date.now()}`,
+            station: String(row.station ?? stationDefault),
+            cash: num(row.cash),
+        };
+    }
+
+    /** Up to 3 keno stations per day — cash collected at each station. */
+    function normalizeKenoStations(kenoStations) {
+        if (Array.isArray(kenoStations) && kenoStations.length > 0) {
+            return kenoStations
+                .slice(0, 3)
+                .map((row, i) => normalizeKenoStationEntry(row, `ks_${i}`, i));
+        }
+        return [normalizeKenoStationEntry({ station: "1" }, "ks_0", 0)];
+    }
+
+    function normalizeFuelSale(raw) {
+        const f = raw || {};
+        const regular = num(f.regular);
+        const midGrade = num(f.midGrade);
+        const premium = num(f.premium);
+        const diesel = num(f.diesel);
+        const gradeSum = regular + midGrade + premium + diesel;
+        return {
+            gallons: gradeSum > 0 ? gradeSum : num(f.gallons),
+            dollars: num(f.dollars),
+            regular,
+            midGrade,
+            premium,
+            diesel,
+        };
+    }
+
+    function sumFuelGradeGallons(fuelSale) {
+        const f = fuelSale || {};
+        return num(f.regular) + num(f.midGrade) + num(f.premium) + num(f.diesel);
+    }
+
     function defaultFuelSale() {
-        return { gallons: 0, dollars: 0 };
+        return normalizeFuelSale({});
     }
 
     function defaultUtilities() {
@@ -238,6 +285,7 @@
             salesTax: 0,
             accountant: 0,
             categorySales: {},
+            customAmounts: {},
             updatedAt: null,
         };
     }
@@ -252,12 +300,19 @@
             },
             pulltabs: [],
             windStations: [],
+            kenoStations: [],
             fuelSale: defaultFuelSale(),
             merchSale: 0,
             creditCard: 0,
+            inHouseAccount: 0,
+            waynePass: 0,
+            lotteryPayOut: 0,
+            pullTabPayout: 0,
+            otherCashPayOut: 0,
             cashExpenses: [],
             checksAch: [],
             otherExpenses: [],
+            customAmounts: {},
             cashReconciliation: defaultCashReconciliation(),
             updatedAt: null,
         };
@@ -383,12 +438,26 @@
         return entries.reduce((sum, row) => sum + num(row.cash), 0);
     }
 
+    function kenoStationDayTotal(day) {
+        const entries = normalizeKenoStations(day?.kenoStations);
+        return entries.reduce((sum, row) => sum + num(row.cash), 0);
+    }
+
     function fuelDayTotal(day) {
         const f = day.fuelSale || defaultFuelSale();
         return {
             gallons: num(f.gallons),
             dollars: num(f.dollars),
         };
+    }
+
+    function normalizeCustomAmounts(raw) {
+        const out = {};
+        if (!raw || typeof raw !== "object") return out;
+        Object.keys(raw).forEach((key) => {
+            out[key] = num(raw[key]);
+        });
+        return out;
     }
 
     /** Merge saved day doc with defaults (handles older docs missing fuelSale). */
@@ -415,12 +484,22 @@
         d.pulltabs = normalizePulltabs(day.pulltabs, day.pulltab);
         delete d.pulltab;
         d.windStations = normalizeWindStations(day.windStations);
-        d.fuelSale = { ...defaultFuelSale(), ...(day.fuelSale || {}) };
+        d.kenoStations = normalizeKenoStations(day.kenoStations);
+        d.fuelSale = normalizeFuelSale(day.fuelSale);
         d.merchSale = num(day.merchSale);
         d.creditCard = num(day.creditCard);
+        d.inHouseAccount = num(day.inHouseAccount);
+        d.waynePass = num(day.waynePass);
+        d.lotteryPayOut = num(day.lotteryPayOut);
+        if (num(day.waynePassLotteryPayOut) !== 0 && d.waynePass === 0 && d.lotteryPayOut === 0) {
+            d.lotteryPayOut = num(day.waynePassLotteryPayOut);
+        }
+        d.pullTabPayout = num(day.pullTabPayout);
+        d.otherCashPayOut = num(day.otherCashPayOut);
         d.cashExpenses = day.cashExpenses || [];
         d.checksAch = day.checksAch || [];
         d.otherExpenses = day.otherExpenses || [];
+        d.customAmounts = normalizeCustomAmounts(day.customAmounts);
         d.cashReconciliation = normalizeCashReconciliation(day.cashReconciliation, d);
         delete d._dayId;
         return d;
@@ -457,29 +536,96 @@
     /** Full gas-station sales drill-down — all tracked revenue lines. */
     function gasSalesDetailBreakdownFromAggregate(agg) {
         return [
-            { label: "Merch sale", amount: num(agg.merchSale) },
-            { label: "Register — card", amount: num(agg.registerCard) },
-            { label: "Register — cash", amount: num(agg.registerCash) },
-            { label: "Credit card (pump)", amount: num(agg.creditCard) },
-            { label: "Fuel gallons", amount: num(agg.fuelGallons), format: "number" },
-            { label: "Fuel sales ($)", amount: num(agg.fuelDollars) },
-            { label: "Pulltab", amount: num(agg.pulltabCash) },
-            { label: "Wind station", amount: num(agg.windStationCash) },
-            { label: "Lottery", amount: num(agg.lotteryCash) },
+            { fieldId: "merchSale", label: "Merch sale", amount: num(agg.merchSale) },
+            { fieldId: "registers", label: "Register — card", amount: num(agg.registerCard) },
+            { fieldId: "registers", label: "Register — cash", amount: num(agg.registerCash) },
+            { fieldId: "creditCard", label: "Credit card (pump)", amount: num(agg.creditCard) },
+            { fieldId: "waynePass", label: "Wayne Pass", amount: num(agg.waynePass) },
+            { fieldId: "fuel", label: "Fuel gallons", amount: num(agg.fuelGallons), format: "number" },
+            ...(num(agg.fuelRegular) !== 0
+                ? [{ fieldId: "fuel", label: "Fuel — regular (gal)", amount: num(agg.fuelRegular), format: "number" }]
+                : []),
+            ...(num(agg.fuelMidGrade) !== 0
+                ? [{ fieldId: "fuel", label: "Fuel — mid grade (gal)", amount: num(agg.fuelMidGrade), format: "number" }]
+                : []),
+            ...(num(agg.fuelPremium) !== 0
+                ? [{ fieldId: "fuel", label: "Fuel — premium (gal)", amount: num(agg.fuelPremium), format: "number" }]
+                : []),
+            ...(num(agg.fuelDiesel) !== 0
+                ? [{ fieldId: "fuel", label: "Fuel — diesel (gal)", amount: num(agg.fuelDiesel), format: "number" }]
+                : []),
+            { fieldId: "fuel", label: "Fuel sales ($)", amount: num(agg.fuelDollars) },
+            { fieldId: "pulltabs", label: "Pulltab", amount: num(agg.pulltabCash) },
+            { fieldId: "windStations", label: "Wind station", amount: num(agg.windStationCash) },
+            { fieldId: "kenoStations", label: "Keno station", amount: num(agg.kenoStationCash) },
+            { fieldId: "lottery", label: "Lottery", amount: num(agg.lotteryCash) },
+            { fieldId: "registerPayouts", label: "In house account", amount: num(agg.inHouseAccount) },
+            { fieldId: "registerPayouts", label: "Lottery pay out", amount: num(agg.lotteryPayOut) },
+            { fieldId: "registerPayouts", label: "Pull tab payout", amount: num(agg.pullTabPayout) },
+            { fieldId: "registerPayouts", label: "Other cash pay out", amount: num(agg.otherCashPayOut) },
         ];
     }
 
     function salesBreakdownFromAggregate(agg) {
+        const FC = window.OplixBooksFieldConfig;
+        const config = agg?.booksFieldConfig;
+        const hasGas = !!agg?.hasGasStation;
+        let lines;
         if (agg.hasGasStation) {
-            return gasSalesDetailBreakdownFromAggregate(agg);
+            lines = gasSalesDetailBreakdownFromAggregate(agg);
+        } else {
+            lines = [
+                { fieldId: "registers", label: "Register — card", amount: num(agg.registerCard) },
+                { fieldId: "registers", label: "Register — cash", amount: num(agg.registerCash) },
+                ...(num(agg.windStationCash) !== 0
+                    ? [{ fieldId: "windStations", label: "Wind station", amount: num(agg.windStationCash) }]
+                    : []),
+                ...(num(agg.kenoStationCash) !== 0
+                    ? [{ fieldId: "kenoStations", label: "Keno station", amount: num(agg.kenoStationCash) }]
+                    : []),
+            ];
         }
-        return [
-            { label: "Register — card", amount: num(agg.registerCard) },
-            { label: "Register — cash", amount: num(agg.registerCash) },
-            ...(num(agg.windStationCash) !== 0
-                ? [{ label: "Wind station", amount: num(agg.windStationCash) }]
-                : []),
-        ];
+        lines = appendCustomBreakdownLines(lines, agg);
+        return FC && config ? FC.filterBreakdownLines(lines, config, hasGas) : lines;
+    }
+
+    function appendCustomBreakdownLines(lines, agg) {
+        const config = agg?.booksFieldConfig;
+        if (!config?.customFields?.length) return lines;
+        const totals = agg.customDailyTotals || {};
+        config.customFields.forEach((cf) => {
+            if (cf.group !== "daily" || cf.enabled === false) return;
+            if (cf.category !== "sales" && cf.category !== "none") return;
+            const amount = num(totals[cf.id]);
+            if (amount === 0) return;
+            lines.push({
+                fieldId: cf.id,
+                label: cf.label,
+                amount,
+                custom: true,
+            });
+        });
+        return lines;
+    }
+
+    function appendCustomExpenseLines(lines, agg, month) {
+        const config = agg?.booksFieldConfig;
+        if (!config?.customFields?.length) return lines;
+        const dayTotals = agg.customDailyTotals || {};
+        const monthAmounts = normalizeCustomAmounts(month?.customAmounts);
+        config.customFields.forEach((cf) => {
+            if (cf.enabled === false || cf.category !== "expense") return;
+            const amount =
+                cf.group === "month" ? num(monthAmounts[cf.id]) : num(dayTotals[cf.id]);
+            if (amount === 0) return;
+            lines.push({
+                category: cf.group === "month" ? "Monthly" : "Daily",
+                description: cf.label,
+                amount,
+                custom: true,
+            });
+        });
+        return lines;
     }
 
     /** Gas station chart slices — merch, register card, pump credit, and fuel (separate from total sales). */
@@ -493,7 +639,7 @@
     }
 
     /** Line-level expenses for Books summary drill-down. */
-    function buildExpenseDetail(monthDoc, daysById) {
+    function buildExpenseDetail(monthDoc, daysById, agg) {
         const month = monthDoc || defaultMonthDoc();
         const lines = [];
 
@@ -574,7 +720,7 @@
                 });
             });
 
-        return lines.sort((a, b) => b.amount - a.amount);
+        return appendCustomExpenseLines(lines, agg || {}, month).sort((a, b) => b.amount - a.amount);
     }
 
     /** Daily sales total — merch for gas; register card + cash for C Store. */
@@ -827,7 +973,12 @@
             totalRevenue !== 0 ||
             expenses !== 0 ||
             fuel.gallons !== 0 ||
-            reg.overShort !== 0;
+            reg.overShort !== 0 ||
+            num(day.inHouseAccount) !== 0 ||
+            num(day.waynePass) !== 0 ||
+            num(day.lotteryPayOut) !== 0 ||
+            num(day.pullTabPayout) !== 0 ||
+            num(day.otherCashPayOut) !== 0;
 
         return {
             dayId,
@@ -900,6 +1051,7 @@
         const month = monthDoc || defaultMonthDoc();
         const days = Object.values(daysById || {});
         const hasGasStation = !!(options && options.hasGasStation);
+        const booksFieldConfig = options?.booksFieldConfig || null;
 
         let registerCard = 0;
         let registerCash = 0;
@@ -910,27 +1062,41 @@
         let pulltabWinner = 0;
         let pulltabOverShort = 0;
         let windStationCash = 0;
+        let kenoStationCash = 0;
         let cashExpense = 0;
         let checksAch = 0;
         let otherExpense = 0;
         let fuelGallons = 0;
         let fuelDollars = 0;
+        let fuelRegular = 0;
+        let fuelMidGrade = 0;
+        let fuelPremium = 0;
+        let fuelDiesel = 0;
         let merchSale = 0;
         let creditCard = 0;
+        let inHouseAccount = 0;
+        let waynePass = 0;
+        let lotteryPayOut = 0;
+        let pullTabPayout = 0;
+        let otherCashPayOut = 0;
 
         const dailySeries = [];
 
+        const customDailyTotals = {};
+
         days.forEach((day) => {
-            const reg = registerDayTotal(day);
-            const lot = lotteryDayTotal(day);
-            const pull = pulltabDayTotal(day);
-            const wind = windStationDayTotal(day);
-            const fuel = fuelDayTotal(day);
-            const dayMerch = num(day.merchSale);
-            const dayCredit = num(day.creditCard);
-            const dayCash = sumLines(day.cashExpenses, "amount");
-            const dayChecks = sumLines(day.checksAch, "amount");
-            const dayOther = sumLines(day.otherExpenses, "amount");
+            const normalized = normalizeDayDoc(day);
+            const reg = registerDayTotal(normalized);
+            const lot = lotteryDayTotal(normalized);
+            const pull = pulltabDayTotal(normalized);
+            const wind = windStationDayTotal(normalized);
+            const keno = kenoStationDayTotal(normalized);
+            const fuel = fuelDayTotal(normalized);
+            const dayMerch = num(normalized.merchSale);
+            const dayCredit = num(normalized.creditCard);
+            const dayCash = sumLines(normalized.cashExpenses, "amount");
+            const dayChecks = sumLines(normalized.checksAch, "amount");
+            const dayOther = sumLines(normalized.otherExpenses, "amount");
 
             registerCard += reg.card;
             registerCash += reg.cash;
@@ -941,17 +1107,34 @@
             pulltabWinner += pull.winner;
             pulltabOverShort += pull.overShort;
             windStationCash += wind;
+            kenoStationCash += keno;
             fuelGallons += fuel.gallons;
             fuelDollars += fuel.dollars;
+            const fuelSale = normalized.fuelSale || defaultFuelSale();
+            fuelRegular += num(fuelSale.regular);
+            fuelMidGrade += num(fuelSale.midGrade);
+            fuelPremium += num(fuelSale.premium);
+            fuelDiesel += num(fuelSale.diesel);
             merchSale += dayMerch;
             creditCard += dayCredit;
+            inHouseAccount += num(normalized.inHouseAccount);
+            waynePass += num(normalized.waynePass);
+            lotteryPayOut += num(normalized.lotteryPayOut);
+            pullTabPayout += num(normalized.pullTabPayout);
+            otherCashPayOut += num(normalized.otherCashPayOut);
             cashExpense += dayCash;
             checksAch += dayChecks;
             otherExpense += dayOther;
 
+            (booksFieldConfig?.customFields || []).forEach((cf) => {
+                if (cf.group !== "daily" || cf.enabled === false) return;
+                const amt = num(normalized.customAmounts?.[cf.id]);
+                customDailyTotals[cf.id] = (customDailyTotals[cf.id] || 0) + amt;
+            });
+
             dailySeries.push({
-                dayId: day._dayId,
-                sales: daySalesForAggregate(day, hasGasStation),
+                dayId: normalized._dayId || day._dayId,
+                sales: daySalesForAggregate(normalized, hasGasStation),
                 fuelGallons: fuel.gallons,
                 fuelDollars: fuel.dollars,
                 merchSale: dayMerch,
@@ -959,6 +1142,17 @@
                 expenses: dayCash + dayChecks + dayOther,
                 overShort: reg.overShort + lot.overShort + pull.overShort,
             });
+        });
+
+        const monthCustomAmounts = normalizeCustomAmounts(month.customAmounts);
+        let customExpenseTotal = 0;
+        (booksFieldConfig?.customFields || []).forEach((cf) => {
+            if (cf.enabled === false || cf.category !== "expense") return;
+            if (cf.group === "month") {
+                customExpenseTotal += num(monthCustomAmounts[cf.id]);
+            } else {
+                customExpenseTotal += num(customDailyTotals[cf.id]);
+            }
         });
 
         const utilities = month.utilities || defaultUtilities();
@@ -982,10 +1176,13 @@
             utilitiesTotal +
             payrollTotal +
             num(month.salesTax) +
-            num(month.accountant);
+            num(month.accountant) +
+            customExpenseTotal;
 
         const aggCore = {
             hasGasStation,
+            booksFieldConfig,
+            customDailyTotals,
             sales,
             registerCard,
             registerCash,
@@ -996,10 +1193,20 @@
             pulltabWinner,
             pulltabOverShort,
             windStationCash,
+            kenoStationCash,
             fuelGallons,
             fuelDollars,
+            fuelRegular,
+            fuelMidGrade,
+            fuelPremium,
+            fuelDiesel,
             merchSale,
             creditCard,
+            inHouseAccount,
+            waynePass,
+            lotteryPayOut,
+            pullTabPayout,
+            otherCashPayOut,
             cashExpense,
             checksAch,
             otherExpense,
@@ -1025,7 +1232,7 @@
         return {
             ...aggCore,
             salesBreakdown: salesBreakdownFromAggregate(aggCore),
-            expenseDetail: buildExpenseDetail(month, daysById),
+            expenseDetail: buildExpenseDetail(month, daysById, aggCore),
             cashReconciliation: aggregateCashReconciliation(daysById),
         };
     }
@@ -1145,10 +1352,12 @@
             lottery: defaultCashReconRegisterUnit(),
             pulltabs: {},
             windStations: {},
+            kenoStations: {},
             dayDeposit: null,
             lotteryDeposit: null,
             pulltabDeposit: null,
             windDeposit: null,
+            kenoDeposit: null,
             note: "",
         };
     }
@@ -1172,7 +1381,17 @@
         windRows.forEach((ws) => {
             base.windStations[ws.id] = normalizeReconEntry(raw.windStations?.[ws.id]);
         });
-        const depositFields = ["dayDeposit", "lotteryDeposit", "pulltabDeposit", "windDeposit"];
+        const kenoRows = day ? normalizeKenoStations(day.kenoStations) : [];
+        kenoRows.forEach((ks) => {
+            base.kenoStations[ks.id] = normalizeReconEntry(raw.kenoStations?.[ks.id]);
+        });
+        const depositFields = [
+            "dayDeposit",
+            "lotteryDeposit",
+            "pulltabDeposit",
+            "windDeposit",
+            "kenoDeposit",
+        ];
         depositFields.forEach((f) => {
             base[f] = raw[f] == null || raw[f] === "" ? null : num(raw[f]);
         });
@@ -1217,6 +1436,10 @@
 
     function windRowHasBooksData(ws) {
         return num(ws.cash) !== 0;
+    }
+
+    function kenoRowHasBooksData(ks) {
+        return num(ks.cash) !== 0;
     }
 
     /** Keep rows with Daily sheet data, or in-progress reconciliation entries. */
@@ -1401,6 +1624,33 @@
             return ws ? windRowHasBooksData(ws) : false;
         });
 
+        const kenoRowsAll = normalized.kenoStations.map((ks, idx) => {
+            const entry = recon.kenoStations[ks.id] || emptyCashReconShift();
+            const expected = num(ks.cash);
+            const counted = num(entry.countedCash);
+            const payOuts = entry.payOuts || [];
+            const payOut = sumPayOuts(payOuts);
+            const station = String(ks.station || "").trim() || String(idx + 1);
+            return {
+                kind: "keno",
+                rowId: ks.id,
+                rowLabel: `Station ${station}`,
+                shiftLabel: "Cash",
+                namePrefix: `cr_ks_${ks.id}`,
+                expected,
+                counted,
+                payOuts,
+                payOut,
+                variance: counted + payOut - expected,
+                verified: entry.verified === true,
+                note: entry.note || "",
+            };
+        });
+        const kenoRows = filterReconRows(kenoRowsAll, (row) => {
+            const ks = normalized.kenoStations.find((k) => k.id === row.rowId);
+            return ks ? kenoRowHasBooksData(ks) : false;
+        });
+
         const cashExpensesTotal = dayCashExpensesTotal(normalized);
         const registerCashExpected = registerRows.reduce((s, r) => s + r.expected, 0);
         const registerExpectedDeposit =
@@ -1435,8 +1685,17 @@
             windExpected,
             0
         );
+        const kenoExpected = kenoRows.reduce((s, r) => s + r.expected, 0);
+        const keno = summarizeReconSection(
+            kenoRows,
+            kenoRows.length > 0 ? recon.kenoDeposit : null,
+            kenoExpected,
+            0
+        );
 
-        const applicableSections = [register, lottery, pulltab, wind].filter((s) => s.applicable);
+        const applicableSections = [register, lottery, pulltab, wind, keno].filter(
+            (s) => s.applicable
+        );
         const matched =
             applicableSections.length === 0 || applicableSections.every((s) => s.matched);
 
@@ -1445,6 +1704,7 @@
             lottery,
             pulltab,
             wind,
+            keno,
             matched,
             // Legacy register aliases
             rows: registerRows,
@@ -1533,12 +1793,14 @@
         const lottery = aggregateReconCategory(daysById, (s) => s.lottery);
         const pulltab = aggregateReconCategory(daysById, (s) => s.pulltab);
         const wind = aggregateReconCategory(daysById, (s) => s.wind);
+        const keno = aggregateReconCategory(daysById, (s) => s.keno);
 
         return {
             register,
             lottery,
             pulltab,
             wind,
+            keno,
             // Legacy register aliases
             dailyRows: register.dailyRows,
             daysWithBooksCash: register.daysWithExpected,
@@ -1565,7 +1827,11 @@
         normalizePulltabs,
         emptyWindStationEntry,
         normalizeWindStations,
+        emptyKenoStationEntry,
+        normalizeKenoStations,
         defaultFuelSale,
+        normalizeFuelSale,
+        sumFuelGradeGallons,
         fuelDayTotal,
         normalizeDayDoc,
         defaultUtilities,
@@ -1593,6 +1859,7 @@
         registerDayTotal,
         pulltabDayTotal,
         windStationDayTotal,
+        kenoStationDayTotal,
         lotteryDayTotal,
         daySalesForAggregate,
         cardCashBreakdownFromAggregate,

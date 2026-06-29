@@ -49,11 +49,15 @@
         const disp = M().displayStatus(item);
         const hint = M().expiryHint(item);
         const rowClass = needsRowClass(disp.id);
+        const profileBadge = item.profileLinked
+            ? `<span class="comp-profile-badge">From profile</span>`
+            : "";
         return `
             <tr class="comp-table-row${rowClass ? ` ${rowClass}` : ""}" data-comp-id="${escapeHtml(item.id)}">
                 <td>${escapeHtml(M().recordTypeLabel(item.recordType))}</td>
                 <td>
                     <strong class="comp-table-title">${escapeHtml(title)}</strong>
+                    ${profileBadge}
                     <span class="comp-table-meta">${escapeHtml(M().categoryLabel(item.category))}</span>
                 </td>
                 <td class="comp-table-mono">${item.identifier ? escapeHtml(item.identifier) : "—"}</td>
@@ -359,7 +363,10 @@
 
             form?.querySelector("[data-comp-cancel]")?.addEventListener("click", closeForm);
             form?.querySelector("[data-comp-delete]")?.addEventListener("click", async () => {
-                if (!id || !confirm("Delete this license / registration record?")) return;
+                const msg = existingItem?.profileLinked
+                    ? "Remove this profile-linked record from Compliance? To stop syncing, uncheck Compliance in Customize → Facility profile."
+                    : "Delete this license / registration record?";
+                if (!id || !confirm(msg)) return;
                 const st = form.querySelector("[data-comp-form-status]");
                 if (st) st.textContent = "Deleting…";
                 try {
@@ -389,6 +396,15 @@
                     const payload = readForm(form, attachmentFields);
                     if (st) st.textContent = "Saving…";
                     await Store().save(ctx.userId, ctx.locationId, docId, payload);
+                    const loc = ctx.data?.location;
+                    if (loc && window.OplixProfileDocumentSync && attachmentFields.attachmentUrl) {
+                        await OplixProfileDocumentSync.afterComplianceSave(
+                            ctx.userId,
+                            ctx.locationId,
+                            { ...loc, _documentsCache: ctx.data.documents || [] },
+                            { ...payload, id: docId }
+                        );
+                    }
                     closeForm();
                     setStatus("Saved.");
                     await ctx.onRefresh();
