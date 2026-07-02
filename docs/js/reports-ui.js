@@ -270,37 +270,48 @@
     }
 
     function renderAllLocationsBody(report) {
-        const gas = report.anyGas;
+        const salesHeader = report.salesHeader || (report.anyGas ? "Merch / sales" : "Sales");
+        const detailRow = (r) => `
+                        <tr>
+                            <td>${escapeHtml(r.location)}</td>
+                            <td class="home-cc-num">${money(r.sales)}</td>
+                            <td class="home-cc-num">${money(r.registerCard)}</td>
+                            <td class="home-cc-num">${money(r.registerCash)}</td>
+                            <td class="home-cc-num">${money(r.creditCard)}</td>
+                            <td class="home-cc-num">${money(r.fuel)}</td>
+                            <td class="home-cc-num">${formatValue(r.fuelGallons, "number")}</td>
+                            <td class="home-cc-num">${money(r.expenses)}</td>
+                            <td class="home-cc-num">${money(r.net)}</td>
+                        </tr>`;
+        const t = report.totals;
         return `
+            <p class="books-hint rpt-all-locs-hint"><strong>${escapeHtml(salesHeader)}</strong> and <strong>Net</strong> use the official books totals. Register card, cash sale, credit card, fuel, and gallons are shown for reference — they are not added again to ${escapeHtml(salesHeader.toLowerCase())}.</p>
             <table class="home-cc-table rpt-table">
                 <thead>
                     <tr>
                         <th>Facility</th>
-                        <th class="home-cc-num">${gas ? "Merch / sales" : "Sales"}</th>
-                        ${gas ? `<th class="home-cc-num">Credit card</th><th class="home-cc-num">Fuel ($)</th>` : ""}
+                        <th class="home-cc-num">${escapeHtml(salesHeader)}</th>
+                        <th class="home-cc-num">Register card</th>
+                        <th class="home-cc-num">Cash sale</th>
+                        <th class="home-cc-num">Credit card</th>
+                        <th class="home-cc-num">Fuel ($)</th>
+                        <th class="home-cc-num">Gallons</th>
                         <th class="home-cc-num">Expenses</th>
                         <th class="home-cc-num">Net</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${report.tableRows
-                        .map(
-                            (r) => `
-                        <tr>
-                            <td>${escapeHtml(r.location)}</td>
-                            <td class="home-cc-num">${money(r.sales)}</td>
-                            ${gas ? `<td class="home-cc-num">${money(r.creditCard)}</td><td class="home-cc-num">${money(r.fuel)}</td>` : ""}
-                            <td class="home-cc-num">${money(r.expenses)}</td>
-                            <td class="home-cc-num">${money(r.net)}</td>
-                        </tr>`
-                        )
-                        .join("")}
+                    ${report.tableRows.map(detailRow).join("")}
                     <tr class="an-total-row">
                         <td><strong>Total</strong></td>
-                        <td class="home-cc-num"><strong>${money(report.totals.sales)}</strong></td>
-                        ${gas ? `<td class="home-cc-num"><strong>${money(report.totals.creditCard)}</strong></td><td class="home-cc-num"><strong>${money(report.totals.fuel)}</strong></td>` : ""}
-                        <td class="home-cc-num"><strong>${money(report.totals.expenses)}</strong></td>
-                        <td class="home-cc-num"><strong>${money(report.totals.net)}</strong></td>
+                        <td class="home-cc-num"><strong>${money(t.sales)}</strong></td>
+                        <td class="home-cc-num"><strong>${money(t.registerCard)}</strong></td>
+                        <td class="home-cc-num"><strong>${money(t.registerCash)}</strong></td>
+                        <td class="home-cc-num"><strong>${money(t.creditCard)}</strong></td>
+                        <td class="home-cc-num"><strong>${money(t.fuel)}</strong></td>
+                        <td class="home-cc-num"><strong>${formatValue(t.fuelGallons, "number")}</strong></td>
+                        <td class="home-cc-num"><strong>${money(t.expenses)}</strong></td>
+                        <td class="home-cc-num"><strong>${money(t.net)}</strong></td>
                     </tr>
                 </tbody>
             </table>`;

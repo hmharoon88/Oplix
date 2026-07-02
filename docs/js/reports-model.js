@@ -266,8 +266,11 @@
                 location: p.locationName,
                 hasGas: a.hasGasStation,
                 sales: a.sales,
+                registerCard: a.registerCard,
+                registerCash: a.registerCash,
                 creditCard: a.creditCard,
                 fuel: a.fuelDollars,
+                fuelGallons: a.fuelGallons,
                 expenses: a.expenses,
                 net: a.net,
             };
@@ -275,14 +278,38 @@
         const totals = tableRows.reduce(
             (t, r) => ({
                 sales: t.sales + r.sales,
+                registerCard: t.registerCard + r.registerCard,
+                registerCash: t.registerCash + r.registerCash,
                 creditCard: t.creditCard + r.creditCard,
                 fuel: t.fuel + r.fuel,
+                fuelGallons: t.fuelGallons + r.fuelGallons,
                 expenses: t.expenses + r.expenses,
                 net: t.net + r.net,
             }),
-            { sales: 0, creditCard: 0, fuel: 0, expenses: 0, net: 0 }
+            {
+                sales: 0,
+                registerCard: 0,
+                registerCash: 0,
+                creditCard: 0,
+                fuel: 0,
+                fuelGallons: 0,
+                expenses: 0,
+                net: 0,
+            }
         );
         const anyGas = tableRows.some((r) => r.hasGas);
+        const salesHeader = anyGas ? "Merch / sales" : "Sales";
+        const detailHeaders = [
+            "Facility",
+            salesHeader,
+            "Register card",
+            "Cash sale",
+            "Credit card",
+            "Fuel ($)",
+            "Gallons",
+            "Expenses",
+            "Net",
+        ];
 
         return {
             type: "all_locations_books",
@@ -298,18 +325,31 @@
             tableRows,
             totals,
             anyGas,
+            salesHeader,
             csvRows: [
-                anyGas
-                    ? ["Facility", "Merch / sales", "Credit card", "Fuel ($)", "Expenses", "Net"]
-                    : ["Facility", "Sales", "Expenses", "Net"],
-                ...tableRows.map((r) =>
-                    anyGas
-                        ? [r.location, r.sales, r.creditCard, r.fuel, r.expenses, r.net]
-                        : [r.location, r.sales, r.expenses, r.net]
-                ),
-                anyGas
-                    ? ["Total", totals.sales, totals.creditCard, totals.fuel, totals.expenses, totals.net]
-                    : ["Total", totals.sales, totals.expenses, totals.net],
+                detailHeaders,
+                ...tableRows.map((r) => [
+                    r.location,
+                    r.sales,
+                    r.registerCard,
+                    r.registerCash,
+                    r.creditCard,
+                    r.fuel,
+                    r.fuelGallons,
+                    r.expenses,
+                    r.net,
+                ]),
+                [
+                    "Total",
+                    totals.sales,
+                    totals.registerCard,
+                    totals.registerCash,
+                    totals.creditCard,
+                    totals.fuel,
+                    totals.fuelGallons,
+                    totals.expenses,
+                    totals.net,
+                ],
             ],
         };
     }
