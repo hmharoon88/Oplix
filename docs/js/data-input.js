@@ -1294,19 +1294,23 @@
         if (!showField("registerPayouts")) return "";
         return `
             <h3 class="books-subtitle">Register payouts</h3>
-            <p class="books-hint">Cash paid out from the register — not added to merch, credit card, or fuel.</p>
+            <p class="books-hint">Track payouts from the register. In house account, lottery pay out, and pull tab payout are <strong>track only</strong> — they do not change cash reconciliation. Other cash pay out lowers expected deposit.</p>
             <div class="books-grid-2">
                 <label class="books-label">In house account ($)
                     <input ${amountInputAttrs("in_house_account", state.day.inHouseAccount)}>
+                    <span class="books-field-hint">Track only — not subtracted on Cash reconciliation</span>
                 </label>
                 <label class="books-label">Lottery pay out ($)
                     <input ${amountInputAttrs("lottery_pay_out", state.day.lotteryPayOut)}>
+                    <span class="books-field-hint">Track only — not subtracted on Cash reconciliation</span>
                 </label>
                 <label class="books-label">Pull tab payout ($)
                     <input ${amountInputAttrs("pull_tab_payout", state.day.pullTabPayout)}>
+                    <span class="books-field-hint">Track only — not subtracted on Cash reconciliation</span>
                 </label>
                 <label class="books-label">Other cash pay out ($)
                     <input ${amountInputAttrs("other_cash_pay_out", state.day.otherCashPayOut)}>
+                    <span class="books-field-hint">Reduces expected deposit on Cash reconciliation</span>
                 </label>
             </div>`;
     }
@@ -1548,7 +1552,12 @@
                         }
                         ${
                             section.dailyRegisterPayouts > 0
-                                ? `<span><em>Register payouts (Daily sheet)</em> <strong>− ${money(section.dailyRegisterPayouts)}</strong></span>`
+                                ? `<span><em>Other cash pay out</em> <strong>− ${money(section.dailyRegisterPayouts)}</strong></span>`
+                                : ""
+                        }
+                        ${
+                            section.dailyRegisterPayoutsTrackOnly > 0
+                                ? `<span><em>Track only (payouts)</em> <strong>${money(section.dailyRegisterPayoutsTrackOnly)}</strong></span>`
                                 : ""
                         }
                         ${
@@ -1616,20 +1625,33 @@
 
     function dailyRegisterPayoutLines(day) {
         const d = M().normalizeDayDoc(day);
-        const lines = [];
+        const trackOnly = [];
+        const recon = [];
         if (M().num(d.inHouseAccount) !== 0) {
-            lines.push({ label: "In house account", amount: d.inHouseAccount });
+            trackOnly.push({ label: "In house account", amount: d.inHouseAccount });
         }
         if (M().num(d.lotteryPayOut) !== 0) {
-            lines.push({ label: "Lottery pay out", amount: d.lotteryPayOut });
+            trackOnly.push({ label: "Lottery pay out", amount: d.lotteryPayOut });
         }
         if (M().num(d.pullTabPayout) !== 0) {
-            lines.push({ label: "Pull tab payout", amount: d.pullTabPayout });
+            trackOnly.push({ label: "Pull tab payout", amount: d.pullTabPayout });
         }
         if (M().num(d.otherCashPayOut) !== 0) {
-            lines.push({ label: "Other cash pay out", amount: d.otherCashPayOut });
+            recon.push({ label: "Other cash pay out", amount: d.otherCashPayOut });
         }
-        return lines;
+        return { trackOnly, recon };
+    }
+
+    function renderPayoutLinesList(lines) {
+        if (!lines.length) return "";
+        return `<ul class="books-cash-recon-expense-list">
+            ${lines
+                .map(
+                    (row) =>
+                        `<li><span>${escapeHtml(row.label)}</span> <strong>${money(M().num(row.amount))}</strong></li>`
+                )
+                .join("")}
+        </ul>`;
     }
 
     function renderCashReconciliation() {
@@ -1670,17 +1692,6 @@
                         .join("")}
                    </ul>`;
         const payoutLines = dailyRegisterPayoutLines(state.day);
-        const payoutList =
-            payoutLines.length === 0
-                ? ""
-                : `<ul class="books-cash-recon-expense-list">
-                    ${payoutLines
-                        .map(
-                            (row) =>
-                                `<li><span>${escapeHtml(row.label)}</span> <strong>${money(M().num(row.amount))}</strong></li>`
-                        )
-                        .join("")}
-                   </ul>`;
         const registerExtraParts = [];
         if (reg.cashExpensesTotal > 0) {
             registerExtraParts.push(`<div class="books-cash-recon-expenses">
@@ -1688,10 +1699,17 @@
                     ${cashExpenseList}
                    </div>`);
         }
-        if (payoutLines.length > 0) {
+        if (payoutLines.recon.length > 0) {
             registerExtraParts.push(`<div class="books-cash-recon-expenses">
-                    <h4 class="books-subtitle books-subtitle--sm">Register payouts (Daily sheet — lowers expected cash)</h4>
-                    ${payoutList}
+                    <h4 class="books-subtitle books-subtitle--sm">Other cash pay out (Daily sheet — lowers expected cash)</h4>
+                    ${renderPayoutLinesList(payoutLines.recon)}
+                   </div>`);
+        }
+        if (payoutLines.trackOnly.length > 0) {
+            registerExtraParts.push(`<div class="books-cash-recon-expenses books-cash-recon-track-only">
+                    <h4 class="books-subtitle books-subtitle--sm">Track only — in house, lottery pay out, pull tab payout</h4>
+                    <p class="books-hint">Recorded for reporting only. These amounts are <strong>not</strong> subtracted from expected cash on reconciliation.</p>
+                    ${renderPayoutLinesList(payoutLines.trackOnly)}
                    </div>`);
         }
         const registerExtra = registerExtraParts.join("");
@@ -1706,7 +1724,7 @@
                     <p class="books-cash-recon-summary-title">${escapeHtml(matchLabel)}</p>
                 </div>
 
-                <p class="books-hint">Per shift: <strong>Expected</strong> = cash sale from the Daily sheet. <strong>Received + pay out</strong> should equal Expected for that shift. <strong>Cash expenses</strong> and <strong>register payouts</strong> on the Daily sheet lower expected cash for the day — they are listed below and included in <strong>Expected cash (net)</strong>. Enter <strong>Received</strong> as cash counted; use <strong>Pay out</strong> on each row for cash removed from that shift. Check <strong>Verified</strong> on each row, then enter <strong>Received / deposited</strong>.</p>
+                <p class="books-hint">Per shift: <strong>Expected</strong> = cash sale from the Daily sheet. <strong>Received + pay out</strong> should equal Expected. <strong>Cash expenses</strong> and <strong>other cash pay out</strong> lower expected cash. In house account, lottery pay out, and pull tab payout are <strong>track only</strong> — listed below but not subtracted.</p>
 
                 ${
                     sections.length === 0
@@ -1717,7 +1735,7 @@
                 ${showField("registers")
                     ? renderReconSection(
                           "Register cash",
-                          "Expected deposit = cash sales − cash expenses − register payouts (Daily sheet). Per shift: received + pay out = cash sale. Reconciliation pay outs explain cash removed from each shift — not subtracted again from the deposit.",
+                          "Expected deposit = cash sales − cash expenses − other cash pay out. In house account, lottery pay out, and pull tab payout are track only. Per shift: received + pay out = cash sale.",
                           reg,
                           "cr_day_deposit",
                           "Register received / deposited ($)",

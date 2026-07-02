@@ -1414,15 +1414,24 @@
         return sumLines(normalizeDayDoc(day).cashExpenses, "amount");
     }
 
-    /** Register payout lines on the Daily sheet (in house, lottery pay out, etc.). */
-    function dayRegisterPayoutsTotal(day) {
+    /** Track-only register payouts — recorded on Daily sheet but do not reduce expected cash on reconciliation. */
+    function dayRegisterPayoutsTrackOnlyTotal(day) {
         const d = normalizeDayDoc(day);
         return (
             num(d.inHouseAccount) +
             num(d.lotteryPayOut) +
-            num(d.pullTabPayout) +
-            num(d.otherCashPayOut)
+            num(d.pullTabPayout)
         );
+    }
+
+    /** Register payouts that reduce expected deposit (other cash pay out only). */
+    function dayRegisterPayoutsReconTotal(day) {
+        return num(normalizeDayDoc(day).otherCashPayOut);
+    }
+
+    /** All register payout lines on the Daily sheet (track-only + recon). */
+    function dayRegisterPayoutsTotal(day) {
+        return dayRegisterPayoutsTrackOnlyTotal(day) + dayRegisterPayoutsReconTotal(day);
     }
 
     /** Expected register cash for one shift — cash sale from the Daily sheet. */
@@ -1440,15 +1449,23 @@
     }
 
     /**
-     * Register recon: cash sales are gross expected; daily cash expenses and register payouts
-     * reduce net expected. Reconciliation pay outs per shift explain cash removed (received + pay out = cash sale).
-     * Net deposit = gross cash sales − daily expenses − daily register payouts (recon pay outs are not subtracted again).
+     * Register recon: cash sales are gross expected; daily cash expenses and other cash pay out
+     * reduce net expected. In house account, lottery pay out, and pull tab payout are track-only.
+     * Reconciliation pay outs per shift explain cash removed (received + pay out = cash sale).
+     * Net deposit = gross cash sales − daily expenses − other cash pay out (recon pay outs are not subtracted again).
      */
-    function finalizeRegisterReconSection(section, grossCash, cashExpensesTotal, dailyRegisterPayouts) {
-        const expectedNet = grossCash - cashExpensesTotal - dailyRegisterPayouts;
+    function finalizeRegisterReconSection(
+        section,
+        grossCash,
+        cashExpensesTotal,
+        dailyRegisterPayoutsRecon,
+        dailyRegisterPayoutsTrackOnly
+    ) {
+        const expectedNet = grossCash - cashExpensesTotal - dailyRegisterPayoutsRecon;
         section.expectedGross = grossCash;
         section.expectedNetCash = expectedNet;
-        section.dailyRegisterPayouts = dailyRegisterPayouts;
+        section.dailyRegisterPayouts = dailyRegisterPayoutsRecon;
+        section.dailyRegisterPayoutsTrackOnly = dailyRegisterPayoutsTrackOnly;
         section.expectedDeposit = expectedNet;
 
         const deposit = section.deposit;
@@ -1711,11 +1728,12 @@
         });
 
         const cashExpensesTotal = dayCashExpensesTotal(normalized);
-        const dailyRegisterPayouts = dayRegisterPayoutsTotal(normalized);
+        const dailyRegisterPayoutsRecon = dayRegisterPayoutsReconTotal(normalized);
+        const dailyRegisterPayoutsTrackOnly = dayRegisterPayoutsTrackOnlyTotal(normalized);
         const registerCashExpected = registerRows.reduce((s, r) => s + r.expected, 0);
         const registerExpectedNet =
             registerRows.length > 0
-                ? registerCashExpected - cashExpensesTotal - dailyRegisterPayouts
+                ? registerCashExpected - cashExpensesTotal - dailyRegisterPayoutsRecon
                 : 0;
         const registerExpenses =
             registerRows.length > 0 ? cashExpensesTotal : 0;
@@ -1729,7 +1747,8 @@
             ),
             registerCashExpected,
             cashExpensesTotal,
-            dailyRegisterPayouts
+            dailyRegisterPayoutsRecon,
+            dailyRegisterPayoutsTrackOnly
         );
         const lotteryExpected = lotteryRows.reduce((s, r) => s + r.expected, 0);
         const lottery = summarizeReconSection(
@@ -1938,6 +1957,8 @@
         compareAggregates,
         dayCashExpensesTotal,
         dayRegisterPayoutsTotal,
+        dayRegisterPayoutsReconTotal,
+        dayRegisterPayoutsTrackOnlyTotal,
         defaultCashReconciliation,
         normalizeCashReconciliation,
         expectedRegisterCash,
