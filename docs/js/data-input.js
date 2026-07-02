@@ -748,7 +748,11 @@
         }
 
         syncLinesFromDom("cashExpenses", ["description", "amount", "overShort"]);
-        syncLinesFromDom("checksAch", ["date", "description", "checkNo", "amount"]);
+        syncLinesFromDom("checksAch", ["description", "checkNo", "amount"]);
+        state.day.checksAch = (state.day.checksAch || []).map((row) => ({
+            ...row,
+            date: state.dayId,
+        }));
         syncLinesFromDom("otherExpenses", ["description", "amount"]);
         syncLinesFromDom("receivables", ["description", "amount"], true);
         syncCustomAmountsFromDom(root, state.day, "daily");
@@ -1328,7 +1332,6 @@
         if (showField("checksAch")) {
             parts.push(`<h3 class="books-subtitle">Checks / ACH</h3>
                     ${renderLineList("checksAch", [
-                        { name: "date", label: "Date" },
                         { name: "description", label: "Description" },
                         { name: "checkNo", label: "Check #" },
                         { name: "amount", label: "Amount", type: "number" },
