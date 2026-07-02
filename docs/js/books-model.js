@@ -1452,7 +1452,8 @@
      * Register recon: cash sales are gross expected; daily cash expenses and other cash pay out
      * reduce net expected. In house account, lottery pay out, and pull tab payout are track-only.
      * Reconciliation pay outs per shift explain cash removed (received + pay out = cash sale).
-     * Net deposit = gross cash sales − daily expenses − other cash pay out (recon pay outs are not subtracted again).
+     * Net deposit = gross cash sales − daily expenses − all register payouts (track-only + other).
+     * Track-only payouts are labeled separately but still reduce expected deposit.
      */
     function finalizeRegisterReconSection(
         section,
@@ -1461,11 +1462,13 @@
         dailyRegisterPayoutsRecon,
         dailyRegisterPayoutsTrackOnly
     ) {
-        const expectedNet = grossCash - cashExpensesTotal - dailyRegisterPayoutsRecon;
+        const allRegisterPayouts = dailyRegisterPayoutsRecon + dailyRegisterPayoutsTrackOnly;
+        const expectedNet = grossCash - cashExpensesTotal - allRegisterPayouts;
         section.expectedGross = grossCash;
         section.expectedNetCash = expectedNet;
         section.dailyRegisterPayouts = dailyRegisterPayoutsRecon;
         section.dailyRegisterPayoutsTrackOnly = dailyRegisterPayoutsTrackOnly;
+        section.dailyRegisterPayoutsAll = allRegisterPayouts;
         section.expectedDeposit = expectedNet;
 
         const deposit = section.deposit;
@@ -1475,10 +1478,7 @@
         const netVariance = section.receivedTotal - expectedNet;
         section.netVariance = netVariance;
         section.rowTotalsMatch = section.totalsMatch;
-
-        if (deposit == null) {
-            section.variance = netVariance;
-        }
+        section.variance = deposit != null ? section.depositVariance : netVariance;
 
         section.matched =
             section.applicable &&
@@ -1733,7 +1733,10 @@
         const registerCashExpected = registerRows.reduce((s, r) => s + r.expected, 0);
         const registerExpectedNet =
             registerRows.length > 0
-                ? registerCashExpected - cashExpensesTotal - dailyRegisterPayoutsRecon
+                ? registerCashExpected -
+                  cashExpensesTotal -
+                  dailyRegisterPayoutsRecon -
+                  dailyRegisterPayoutsTrackOnly
                 : 0;
         const registerExpenses =
             registerRows.length > 0 ? cashExpensesTotal : 0;

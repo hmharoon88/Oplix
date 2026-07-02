@@ -1551,14 +1551,18 @@
                                 : ""
                         }
                         ${
-                            section.dailyRegisterPayouts > 0
-                                ? `<span><em>Other cash pay out</em> <strong>− ${money(section.dailyRegisterPayouts)}</strong></span>`
-                                : ""
-                        }
-                        ${
-                            section.dailyRegisterPayoutsTrackOnly > 0
-                                ? `<span><em>Track only (payouts)</em> <strong>${money(section.dailyRegisterPayoutsTrackOnly)}</strong></span>`
-                                : ""
+                            section.dailyRegisterPayoutsAll > 0 &&
+                            section.dailyRegisterPayoutsTrackOnly > 0 &&
+                            section.dailyRegisterPayouts !== section.dailyRegisterPayoutsAll
+                                ? `<span><em>Other cash pay out</em> <strong>− ${money(section.dailyRegisterPayouts)}</strong></span>
+                                   <span><em>Track only (payouts)</em> <strong>− ${money(section.dailyRegisterPayoutsTrackOnly)}</strong></span>`
+                                : section.dailyRegisterPayoutsAll > 0
+                                  ? `<span><em>Register payouts (Daily sheet)</em> <strong>− ${money(section.dailyRegisterPayoutsAll)}</strong></span>`
+                                  : section.dailyRegisterPayouts > 0
+                                    ? `<span><em>Other cash pay out</em> <strong>− ${money(section.dailyRegisterPayouts)}</strong></span>`
+                                    : section.dailyRegisterPayoutsTrackOnly > 0
+                                      ? `<span><em>Track only (payouts)</em> <strong>− ${money(section.dailyRegisterPayoutsTrackOnly)}</strong></span>`
+                                      : ""
                         }
                         ${
                             section.payOutTotal > 0
@@ -1575,7 +1579,7 @@
                             section.deposit != null
                                 ? `<span><em>Received / deposited</em> <strong>${money(section.deposit)}</strong></span>
                                    <span><em>Cash variance</em> <strong class="${varianceColorClass(section.depositVariance)}">${money(section.depositVariance)}</strong></span>`
-                                : `<span><em>Cash variance</em> <strong class="${varianceColorClass(section.variance)}">${money(section.variance)}</strong></span>`
+                                : `<span><em>Cash variance</em> <strong class="${varianceColorClass(section.variance)}" title="Received minus expected cash (net)">${money(section.variance)}</strong> <span class="books-cash-recon-var-hint">(Received − expected cash net)</span></span>`
                         }
                         <span><em>Verified</em> <strong>${section.verifiedCount} / ${section.shiftCount}</strong></span>
                     </div>
@@ -1708,7 +1712,7 @@
         if (payoutLines.trackOnly.length > 0) {
             registerExtraParts.push(`<div class="books-cash-recon-expenses books-cash-recon-track-only">
                     <h4 class="books-subtitle books-subtitle--sm">Track only — in house, lottery pay out, pull tab payout</h4>
-                    <p class="books-hint">Recorded for reporting only. These amounts are <strong>not</strong> subtracted from expected cash on reconciliation.</p>
+                    <p class="books-hint">Track-only payouts (in house, lottery pay out, pull tab) are recorded separately from cash expenses but still reduce <strong>expected cash (net)</strong>. Other cash pay out also reduces expected cash.</p>
                     ${renderPayoutLinesList(payoutLines.trackOnly)}
                    </div>`);
         }
@@ -1735,7 +1739,7 @@
                 ${showField("registers")
                     ? renderReconSection(
                           "Register cash",
-                          "Expected deposit = cash sales − cash expenses − other cash pay out. In house account, lottery pay out, and pull tab payout are track only. Per shift: received + pay out = cash sale.",
+                          "Expected deposit = cash sales − cash expenses − register payouts (Daily sheet). Cash variance = received counted − expected cash (net), not cash sales alone. Per shift: received + pay out = cash sale.",
                           reg,
                           "cr_day_deposit",
                           "Register received / deposited ($)",
