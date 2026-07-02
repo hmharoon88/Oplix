@@ -1459,16 +1459,23 @@
         return rows
             .map((row) => {
                 const prefix = row.namePrefix;
+                const rowVariance = num(row.counted) + num(row.payOut) - num(row.expected);
+                const varCls =
+                    Math.abs(rowVariance) < 0.005
+                        ? "books-cash-recon-var--ok"
+                        : "books-cash-recon-var--bad";
                 return `
                     <tr>
                         <td>${escapeHtml(row[col1] || row.rowLabel)}</td>
                         <td>${escapeHtml(row[col2] || row.shiftLabel)}</td>
+                        <td class="home-cc-num books-cash-recon-expected">${money(row.expected)}</td>
                         <td class="home-cc-num">
                             <input ${amountInputAttrs(`${prefix}_counted`, row.counted)} aria-label="Received">
                         </td>
                         <td class="books-cash-recon-payout-col">
                             ${renderPayOutsCell(prefix, row.payOuts)}
                         </td>
+                        <td class="home-cc-num ${varCls}">${money(rowVariance)}</td>
                         <td class="books-cash-recon-verified">
                             <label class="books-check-label">
                                 <input type="checkbox" name="${prefix}_verified"${row.verified ? " checked" : ""}>
@@ -1481,6 +1488,10 @@
                     </tr>`;
             })
             .join("");
+    }
+
+    function num(v) {
+        return M().num(v);
     }
 
     function renderReconSection(title, hint, section, depositField, depositLabel, extraHtml) {
@@ -1510,9 +1521,16 @@
                     <div class="books-cash-recon-totals">
                         <span><em>Received</em> <strong>${money(section.receivedTotal)}</strong></span>
                         ${
-                            section.expectedGross != null &&
-                            Math.abs(section.expectedGross - section.expectedDeposit) > 0.005
-                                ? `<span><em>Register cash</em> <strong>${money(section.expectedGross)}</strong></span>`
+                            section.expectedNetCash != null
+                                ? `<span><em>Cash sales</em> <strong>${money(section.expectedGross)}</strong></span>`
+                                : section.expectedGross != null &&
+                                    Math.abs(section.expectedGross - section.expectedDeposit) > 0.005
+                                  ? `<span><em>Register cash</em> <strong>${money(section.expectedGross)}</strong></span>`
+                                  : ""
+                        }
+                        ${
+                            section.expectedNetCash != null
+                                ? `<span><em>Expected cash (net)</em> <strong>${money(section.expectedNetCash)}</strong></span>`
                                 : ""
                         }
                         ${
@@ -1527,11 +1545,11 @@
                         }
                         ${
                             section.payOutTotal > 0
-                                ? `<span><em>Pay out (reconciliation)</em> <strong>− ${money(section.payOutTotal)}</strong></span>`
+                                ? `<span><em>Pay out (reconciliation)</em> <strong>${money(section.payOutTotal)}</strong></span>`
                                 : ""
                         }
                         ${
-                            section.payOutTotal > 0
+                            section.payOutTotal > 0 && section.expectedNetCash == null
                                 ? `<span><em>Total received</em> <strong>${money(section.countedTotal)}</strong></span>`
                                 : ""
                         }
@@ -1553,8 +1571,10 @@
                             <tr>
                                 <th>${escapeHtml(title.includes("Register") ? "Register" : title.split(" ")[0])}</th>
                                 <th>${rows[0]?.kind === "pulltab" ? "Ticket" : rows[0]?.kind === "wind" || rows[0]?.kind === "keno" ? "Type" : "Shift"}</th>
+                                <th class="home-cc-num">Expected</th>
                                 <th class="home-cc-num">Received</th>
                                 <th class="home-cc-num">Pay out</th>
+                                <th class="home-cc-num">Variance</th>
                                 <th>Status</th>
                                 <th>Note</th>
                             </tr>
@@ -1563,8 +1583,10 @@
                         <tfoot>
                             <tr class="books-cash-recon-total-row">
                                 <td colspan="2"><strong>Day total</strong></td>
+                                <td class="home-cc-num"><strong>${money(section.expectedTotal)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(section.receivedTotal)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(section.payOutTotal)}</strong></td>
+                                <td class="home-cc-num"><strong class="${Math.abs(section.variance) < 0.005 ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(section.variance)}</strong></td>
                                 <td colspan="2"></td>
                             </tr>
                         </tfoot>
@@ -1582,6 +1604,24 @@
                         : ""
                 }
             </section>`;
+    }
+
+    function dailyRegisterPayoutLines(day) {
+        const d = M().normalizeDayDoc(day);
+        const lines = [];
+        if (M().num(d.inHouseAccount) !== 0) {
+            lines.push({ label: "In house account", amount: d.inHouseAccount });
+        }
+        if (M().num(d.lotteryPayOut) !== 0) {
+            lines.push({ label: "Lottery pay out", amount: d.lotteryPayOut });
+        }
+        if (M().num(d.pullTabPayout) !== 0) {
+            lines.push({ label: "Pull tab payout", amount: d.pullTabPayout });
+        }
+        if (M().num(d.otherCashPayOut) !== 0) {
+            lines.push({ label: "Other cash pay out", amount: d.otherCashPayOut });
+        }
+        return lines;
     }
 
     function renderCashReconciliation() {
@@ -1621,13 +1661,32 @@
                         )
                         .join("")}
                    </ul>`;
-        const registerExtra =
-            reg.cashExpensesTotal > 0
-                ? `<div class="books-cash-recon-expenses">
-                    <h4 class="books-subtitle books-subtitle--sm">Register cash expenses (from Daily sheet)</h4>
+        const payoutLines = dailyRegisterPayoutLines(state.day);
+        const payoutList =
+            payoutLines.length === 0
+                ? ""
+                : `<ul class="books-cash-recon-expense-list">
+                    ${payoutLines
+                        .map(
+                            (row) =>
+                                `<li><span>${escapeHtml(row.label)}</span> <strong>${money(M().num(row.amount))}</strong></li>`
+                        )
+                        .join("")}
+                   </ul>`;
+        const registerExtraParts = [];
+        if (reg.cashExpensesTotal > 0) {
+            registerExtraParts.push(`<div class="books-cash-recon-expenses">
+                    <h4 class="books-subtitle books-subtitle--sm">Cash expenses (Daily sheet — lowers expected cash)</h4>
                     ${cashExpenseList}
-                   </div>`
-                : "";
+                   </div>`);
+        }
+        if (payoutLines.length > 0) {
+            registerExtraParts.push(`<div class="books-cash-recon-expenses">
+                    <h4 class="books-subtitle books-subtitle--sm">Register payouts (Daily sheet — lowers expected cash)</h4>
+                    ${payoutList}
+                   </div>`);
+        }
+        const registerExtra = registerExtraParts.join("");
 
         return `
             <div class="books-panel data-input-form">
@@ -1639,7 +1698,7 @@
                     <p class="books-cash-recon-summary-title">${escapeHtml(matchLabel)}</p>
                 </div>
 
-                <p class="books-hint">Only shifts and machines with data on the <strong>Daily sheet</strong> appear here. Enter <strong>received</strong> amounts and add one or more <strong>pay outs</strong> (with description) per row, verify each row, then the <strong>received / deposited</strong> total for that section. Cash variance is shown in the summary above each table.</p>
+                <p class="books-hint">Per shift: <strong>Expected</strong> = cash sale from the Daily sheet. <strong>Received + pay out</strong> should equal Expected for that shift. <strong>Cash expenses</strong> and <strong>register payouts</strong> on the Daily sheet lower expected cash for the day — they are listed below and included in <strong>Expected cash (net)</strong>. Enter <strong>Received</strong> as cash counted; use <strong>Pay out</strong> on each row for cash removed from that shift. Check <strong>Verified</strong> on each row, then enter <strong>Received / deposited</strong>.</p>
 
                 ${
                     sections.length === 0
@@ -1650,7 +1709,7 @@
                 ${showField("registers")
                     ? renderReconSection(
                           "Register cash",
-                          "Expected deposit = register cash sales − cash expenses − register payouts (Daily sheet and reconciliation). Received + pay out per shift should match register cash for that shift.",
+                          "Expected deposit = cash sales − cash expenses − register payouts (Daily sheet). Per shift: received + pay out = cash sale. Reconciliation pay outs explain cash removed from each shift — not subtracted again from the deposit.",
                           reg,
                           "cr_day_deposit",
                           "Register received / deposited ($)",

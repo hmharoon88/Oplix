@@ -1425,14 +1425,52 @@
         );
     }
 
-    /** Expected register cash for one shift (from daily sheet). */
+    /** Expected register cash for one shift — cash sale from the Daily sheet. */
     function expectedRegisterCash(day, regKey, shiftKey) {
-        const unit = day?.[regKey];
-        return num(unit?.[shiftKey]?.cashSale);
+        const sh = day?.[regKey]?.[shiftKey] || {};
+        return num(sh.cashSale);
     }
 
     function expectedLotteryCash(day, shiftKey) {
         return num(day?.lottery?.[shiftKey]?.cash);
+    }
+
+    function expectedPulltabCash(pt) {
+        return num(pt.cash);
+    }
+
+    /**
+     * Register recon: cash sales are gross expected; daily cash expenses and register payouts
+     * reduce net expected. Reconciliation pay outs per shift explain cash removed (received + pay out = cash sale).
+     * Net deposit = gross cash sales − daily expenses − daily register payouts (recon pay outs are not subtracted again).
+     */
+    function finalizeRegisterReconSection(section, grossCash, cashExpensesTotal, dailyRegisterPayouts) {
+        const expectedNet = grossCash - cashExpensesTotal - dailyRegisterPayouts;
+        section.expectedGross = grossCash;
+        section.expectedNetCash = expectedNet;
+        section.dailyRegisterPayouts = dailyRegisterPayouts;
+        section.expectedDeposit = expectedNet;
+
+        const deposit = section.deposit;
+        section.depositVariance = deposit == null ? 0 : deposit - expectedNet;
+        section.depositMatch = deposit == null || Math.abs(section.depositVariance) < 0.005;
+
+        const netVariance = section.receivedTotal - expectedNet;
+        section.netVariance = netVariance;
+        section.rowTotalsMatch = section.totalsMatch;
+
+        if (deposit == null) {
+            section.variance = netVariance;
+        }
+
+        section.matched =
+            section.applicable &&
+            section.allVerified &&
+            (deposit != null
+                ? section.depositMatch
+                : Math.abs(netVariance) < 0.005);
+
+        return section;
     }
 
     /** True when Daily sheet has register shift data worth reconciling. */
@@ -1593,7 +1631,7 @@
 
         const pulltabRowsAll = normalized.pulltabs.map((pt, idx) => {
             const entry = recon.pulltabs[pt.id] || emptyCashReconShift();
-            const expected = num(pt.cash);
+            const expected = expectedPulltabCash(pt);
             const counted = num(entry.countedCash);
             const payOuts = entry.payOuts || [];
             const payOut = sumPayOuts(payOuts);
@@ -1675,25 +1713,24 @@
         const cashExpensesTotal = dayCashExpensesTotal(normalized);
         const dailyRegisterPayouts = dayRegisterPayoutsTotal(normalized);
         const registerCashExpected = registerRows.reduce((s, r) => s + r.expected, 0);
-        const registerReconPayOuts = registerRows.reduce((s, r) => s + sumPayOuts(r.payOuts), 0);
-        const registerExpectedDeposit =
+        const registerExpectedNet =
             registerRows.length > 0
-                ? registerCashExpected -
-                  cashExpensesTotal -
-                  dailyRegisterPayouts -
-                  registerReconPayOuts
+                ? registerCashExpected - cashExpensesTotal - dailyRegisterPayouts
                 : 0;
         const registerExpenses =
             registerRows.length > 0 ? cashExpensesTotal : 0;
 
-        const register = summarizeReconSection(
-            registerRows,
-            registerRows.length > 0 ? recon.dayDeposit : null,
-            registerExpectedDeposit,
-            registerExpenses
+        const register = finalizeRegisterReconSection(
+            summarizeReconSection(
+                registerRows,
+                registerRows.length > 0 ? recon.dayDeposit : null,
+                registerExpectedNet,
+                registerExpenses
+            ),
+            registerCashExpected,
+            cashExpensesTotal,
+            dailyRegisterPayouts
         );
-        register.expectedGross = registerCashExpected;
-        register.dailyRegisterPayouts = dailyRegisterPayouts;
         const lotteryExpected = lotteryRows.reduce((s, r) => s + r.expected, 0);
         const lottery = summarizeReconSection(
             lotteryRows,
@@ -1904,6 +1941,8 @@
         defaultCashReconciliation,
         normalizeCashReconciliation,
         expectedRegisterCash,
+        expectedPulltabCash,
+        finalizeRegisterReconSection,
         cashReconciliationSummary,
         cashReconciliationDayStatus,
         sumPayOuts,
