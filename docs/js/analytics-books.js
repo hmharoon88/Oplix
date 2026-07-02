@@ -47,6 +47,23 @@
         return money(value);
     }
 
+    function dailyTableCell(value, prevValue, row, opts) {
+        if (!row.hasData) return `<td class="home-cc-num">—</td>`;
+        const formatted =
+            opts?.format === "number"
+                ? formatMetricValue({ format: "number" }, value)
+                : money(value);
+        const cellClass = opts?.cellClass || "";
+        if (prevValue == null || !Charts()?.renderCellTrend) {
+            return `<td class="home-cc-num${cellClass ? ` ${cellClass}` : ""}">${formatted}</td>`;
+        }
+        const trend = Charts().renderCellTrend(value, prevValue, {
+            invert: opts?.trendInvert,
+            format: opts?.format,
+        });
+        return Charts().renderTableValueCell(formatted, trend, cellClass);
+    }
+
     function locName(id) {
         return locations.find((l) => l.id === id)?.name || "Facility";
     }
@@ -412,31 +429,32 @@
             : "Sales = register card + cash for each day.";
 
         const tableRows = rows
-            .map((row) => {
+            .map((row, rowIndex) => {
                 const dayLabel = formatDayId(row.dayId);
                 const emptyCls = row.hasData ? "" : " an-daily-row--empty";
-                const cell = (v) => (row.hasData ? money(v) : "—");
-                const numCell = (v) =>
-                    row.hasData ? formatMetricValue({ format: "number" }, v) : "—";
+                const prev = rowIndex > 0 ? rows[rowIndex - 1] : null;
+                const prevVal = (field) => (prev?.hasData ? prev[field] : null);
                 const extraGas = hasGas
-                    ? `<td class="home-cc-num">${cell(row.merchSale)}</td>
-                       <td class="home-cc-num">${numCell(row.fuelGallons)}</td>
-                       <td class="home-cc-num">${cell(row.fuelDollars)}</td>
-                       <td class="home-cc-num">${cell(row.creditCard)}</td>`
+                    ? `${dailyTableCell(row.merchSale, prevVal("merchSale"), row, {})}
+                       ${dailyTableCell(row.fuelGallons, prevVal("fuelGallons"), row, { format: "number" })}
+                       ${dailyTableCell(row.fuelDollars, prevVal("fuelDollars"), row, {})}
+                       ${dailyTableCell(row.creditCard, prevVal("creditCard"), row, {})}`
                     : "";
                 const salesCell = hasGas
                     ? ""
-                    : `<td class="home-cc-num">${cell(row.sales)}</td>`;
+                    : dailyTableCell(row.sales, prevVal("sales"), row, {});
                 return `
                     <tr class="an-daily-row${emptyCls}">
                         <td class="an-daily-day-col">${escapeHtml(dayLabel)}</td>
                         ${extraGas}
                         ${salesCell}
-                        <td class="home-cc-num">${cell(row.cashExpense)}</td>
-                        <td class="home-cc-num">${cell(row.checksAch)}</td>
-                        <td class="home-cc-num">${cell(row.otherExpense)}</td>
-                        <td class="home-cc-num">${cell(row.expenses)}</td>
-                        <td class="home-cc-num an-daily-net${row.net >= 0 ? " pos" : " neg"}">${cell(row.net)}</td>
+                        ${dailyTableCell(row.cashExpense, prevVal("cashExpense"), row, { trendInvert: true })}
+                        ${dailyTableCell(row.checksAch, prevVal("checksAch"), row, { trendInvert: true })}
+                        ${dailyTableCell(row.otherExpense, prevVal("otherExpense"), row, { trendInvert: true })}
+                        ${dailyTableCell(row.expenses, prevVal("expenses"), row, { trendInvert: true })}
+                        ${dailyTableCell(row.net, prevVal("net"), row, {
+                            cellClass: `an-daily-net${row.net >= 0 ? " pos" : " neg"}`,
+                        })}
                     </tr>`;
             })
             .join("");
@@ -473,7 +491,7 @@
                 <div class="bs-panel-head">
                     <div class="bs-panel-head-text">
                         <h3 class="bs-panel-title">Daily sales &amp; expenses</h3>
-                        <p class="bs-panel-sub">${escapeHtml(monthLabel(pack.monthId))} · ${totals.daysWithData} of ${rows.length} days with entries. ${escapeHtml(salesHint)}</p>
+                        <p class="bs-panel-sub">${escapeHtml(monthLabel(pack.monthId))} · ${totals.daysWithData} of ${rows.length} days with entries. ${escapeHtml(salesHint)} Green ▲ / red ▼ vs prior day (amount on the line; hover for %).</p>
                     </div>
                 </div>
                 <div class="books-cash-recon-totals an-daily-month-totals">

@@ -349,6 +349,58 @@
         return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(num(v));
     }
 
+    function renderCellTrend(current, previous, options) {
+        const invert = options?.invert === true;
+        const cur = num(current);
+        const prev = num(previous);
+        if (cur === 0 && prev === 0) return "";
+        let pct;
+        let isUp;
+        if (prev === 0) {
+            if (cur === 0) return "";
+            pct = 100;
+            isUp = true;
+        } else {
+            pct = ((cur - prev) / Math.abs(prev)) * 100;
+            if (Math.abs(pct) < 0.5) {
+                return `<span class="home-mtd-trend home-trend home-trend--flat">— 0%</span>`;
+            }
+            isUp = pct >= 0;
+        }
+        const visualUp = invert ? !isUp : isUp;
+        const cls = visualUp ? "home-trend--up" : "home-trend--down";
+        const arrow = isUp ? "▲" : "▼";
+        const diff = cur - prev;
+        const sign = diff >= 0 ? "+" : "−";
+        const fmt = options?.format === "number" ? formatNumber : money;
+        const changeLabel = `${sign}${fmt(Math.abs(diff))}`;
+        const pctLabel = `${diff >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(0)}%`;
+        return `<span class="home-mtd-trend home-trend ${cls}" title="${escapeHtml(pctLabel)} vs prior">${arrow} ${escapeHtml(changeLabel)}</span>`;
+    }
+
+    function renderTableValueCell(formattedValue, trendHtml, cellClass) {
+        const cls = ["home-cc-num", cellClass].filter(Boolean).join(" ");
+        if (!trendHtml) {
+            return `<td class="${cls}">${formattedValue}</td>`;
+        }
+        return `<td class="${cls} home-cc-num--mtd">
+                <span class="home-mtd-value">${formattedValue}</span>
+                ${trendHtml}
+            </td>`;
+    }
+
+    function renderHistoryCell(col, raw, prevRaw) {
+        const formatted = formatHistoryValue(col, raw);
+        if (prevRaw == null) {
+            return renderTableValueCell(formatted, "");
+        }
+        const trend = renderCellTrend(raw, prevRaw, {
+            invert: col.trendInvert,
+            format: col.format,
+        });
+        return renderTableValueCell(formatted, trend);
+    }
+
     function keyMetricCell(label, value, opts) {
         const drillable = opts?.drill && opts?.drillable !== false;
         const tag = drillable ? "button" : "div";
@@ -437,20 +489,20 @@
         }
 
         cols.push(
-            { label: "Cash expense", get: (a) => a.cashExpense },
-            { label: "Checks / ACH", get: (a) => a.checksAch },
-            { label: "Other expense", get: (a) => a.otherExpense },
-            { label: "Sales tax", get: (a) => a.salesTax },
-            { label: "Accountant", get: (a) => a.accountant },
-            { label: "Payroll · Week 1", get: (a) => a.payroll?.week1 },
-            { label: "Payroll · Week 2", get: (a) => a.payroll?.week2 },
-            { label: "Payroll · Week 3", get: (a) => a.payroll?.week3 },
-            { label: "Payroll · Week 4", get: (a) => a.payroll?.week4 },
+            { label: "Cash expense", get: (a) => a.cashExpense, trendInvert: true },
+            { label: "Checks / ACH", get: (a) => a.checksAch, trendInvert: true },
+            { label: "Other expense", get: (a) => a.otherExpense, trendInvert: true },
+            { label: "Sales tax", get: (a) => a.salesTax, trendInvert: true },
+            { label: "Accountant", get: (a) => a.accountant, trendInvert: true },
+            { label: "Payroll · Week 1", get: (a) => a.payroll?.week1, trendInvert: true },
+            { label: "Payroll · Week 2", get: (a) => a.payroll?.week2, trendInvert: true },
+            { label: "Payroll · Week 3", get: (a) => a.payroll?.week3, trendInvert: true },
+            { label: "Payroll · Week 4", get: (a) => a.payroll?.week4, trendInvert: true },
             { label: "Receivables", get: (a) => a.receivablesTotal },
-            { label: "Over / short", get: (a) => a.totalOverShort },
-            { label: "Register O/S", get: (a) => a.registerOverShort },
-            { label: "Lottery O/S", get: (a) => a.lotteryOverShort },
-            { label: "Pulltab O/S", get: (a) => a.pulltabOverShort }
+            { label: "Over / short", get: (a) => a.totalOverShort, trendInvert: true },
+            { label: "Register O/S", get: (a) => a.registerOverShort, trendInvert: true },
+            { label: "Lottery O/S", get: (a) => a.lotteryOverShort, trendInvert: true },
+            { label: "Pulltab O/S", get: (a) => a.pulltabOverShort, trendInvert: true }
         );
 
         const utilityKeys = new Set();
@@ -465,6 +517,7 @@
                 cols.push({
                     label: M.labelForUtilityKey(key, []),
                     get: (a) => num(a.utilities?.[key]),
+                    trendInvert: true,
                 });
             });
 
@@ -494,7 +547,7 @@
                 <section class="an-key-metrics-history">
                     <header class="an-key-metrics-history-head">
                         <h3 class="an-key-metrics-history-title">Monthly detail · past 12 months · ${escapeHtml(locationName)}</h3>
-                        <p class="an-key-metrics-history-lead">Expense, sales source, and utility breakdowns — not shown in the summary above.</p>
+                        <p class="an-key-metrics-history-lead">Expense, sales source, and utility breakdowns — not shown in the summary above. Green ▲ / red ▼ show change vs the prior month (amount on the line; hover for %).</p>
                     </header>
                     <p class="an-key-metrics-empty books-hint">No breakdown lines recorded for the past 12 months.</p>
                 </section>`;
@@ -504,7 +557,7 @@
             <section class="an-key-metrics-history">
                 <header class="an-key-metrics-history-head">
                     <h3 class="an-key-metrics-history-title">Monthly detail · past 12 months · ${escapeHtml(locationName)}</h3>
-                    <p class="an-key-metrics-history-lead">Expense, sales source, and utility breakdowns — not shown in the summary above.</p>
+                    <p class="an-key-metrics-history-lead">Expense, sales source, and utility breakdowns — not shown in the summary above. Green ▲ / red ▼ show change vs the prior month (amount on the line; hover for %).</p>
                 </header>
                 <div class="home-card an-key-metrics-table-wrap">
                     <table class="home-cc-table an-key-metrics-table">
@@ -518,14 +571,16 @@
                         </thead>
                         <tbody>
                             ${sorted
-                                .map((p) => {
+                                .map((p, rowIndex) => {
                                     const agg = p.aggregate;
+                                    const prevAgg = sorted[rowIndex + 1]?.aggregate;
                                     return `<tr>
                                         <th scope="row" class="an-key-metrics-table-month">${escapeHtml(monthLabelFn(p.monthId))}</th>
                                         ${cols
                                             .map((c) => {
                                                 const raw = c.get(agg);
-                                                return `<td class="home-cc-num">${formatHistoryValue(c, raw)}</td>`;
+                                                const prevRaw = prevAgg ? c.get(prevAgg) : null;
+                                                return renderHistoryCell(c, raw, prevRaw);
                                             })
                                             .join("")}
                                     </tr>`;
@@ -1200,5 +1255,7 @@
         renderPieBarPair,
         cardCashSlices,
         money,
+        renderCellTrend,
+        renderTableValueCell,
     };
 })();

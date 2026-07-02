@@ -6014,12 +6014,24 @@
     color: var(--dash-muted, #94a3b8);
 }
 
+.an-daily-net.pos .home-mtd-value,
 .an-daily-net.pos {
     color: #16a34a;
 }
 
+.an-daily-net.neg .home-mtd-value,
 .an-daily-net.neg {
     color: #dc2626;
+}
+
+.an-key-metrics-table td.home-cc-num--mtd,
+.an-daily-table td.home-cc-num--mtd {
+    min-width: 5.5rem;
+}
+
+.an-key-metrics-table .home-mtd-value,
+.an-daily-table .home-mtd-value {
+    color: inherit;
 }
 
 .an-daily-month-totals {
