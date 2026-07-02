@@ -78,6 +78,52 @@
         return Number.isFinite(n) ? n : 0;
     }
 
+    function prevMonthIdFrom(monthId) {
+        const M = window.OplixBooksModel;
+        if (!M || !monthId) return "";
+        const d = M.parseMonthId(monthId);
+        return M.monthIdFromDate(new Date(d.getFullYear(), d.getMonth() - 1, 1));
+    }
+
+    function allLocationsRowFromAggregate(aggregate) {
+        const a = aggregate || {};
+        return {
+            sales: a.sales,
+            registerCard: a.registerCard,
+            registerCash: a.registerCash,
+            creditCard: a.creditCard,
+            fuel: a.fuelDollars,
+            fuelGallons: a.fuelGallons,
+            expenses: a.expenses,
+            net: a.net,
+        };
+    }
+
+    function sumAllLocationsRows(rows) {
+        return (rows || []).reduce(
+            (t, r) => ({
+                sales: t.sales + num(r.sales),
+                registerCard: t.registerCard + num(r.registerCard),
+                registerCash: t.registerCash + num(r.registerCash),
+                creditCard: t.creditCard + num(r.creditCard),
+                fuel: t.fuel + num(r.fuel),
+                fuelGallons: t.fuelGallons + num(r.fuelGallons),
+                expenses: t.expenses + num(r.expenses),
+                net: t.net + num(r.net),
+            }),
+            {
+                sales: 0,
+                registerCard: 0,
+                registerCash: 0,
+                creditCard: 0,
+                fuel: 0,
+                fuelGallons: 0,
+                expenses: 0,
+                net: 0,
+            }
+        );
+    }
+
     function toDate(v) {
         if (!v) return null;
         if (v instanceof Date) return v;
@@ -258,11 +304,16 @@
         };
     }
 
-    function buildAllLocationsBooksReport(packs, meta) {
+    function buildAllLocationsBooksReport(packs, meta, prevPacks) {
         const M = window.OplixBooksModel;
+        const prevByLocId = {};
+        (prevPacks || []).forEach((p) => {
+            prevByLocId[p.locationId] = allLocationsRowFromAggregate(p.aggregate);
+        });
         const tableRows = packs.map((p) => {
             const a = p.aggregate;
             return {
+                locationId: p.locationId,
                 location: p.locationName,
                 hasGas: a.hasGasStation,
                 sales: a.sales,
@@ -273,29 +324,12 @@
                 fuelGallons: a.fuelGallons,
                 expenses: a.expenses,
                 net: a.net,
+                prev: prevByLocId[p.locationId] || null,
             };
         });
-        const totals = tableRows.reduce(
-            (t, r) => ({
-                sales: t.sales + r.sales,
-                registerCard: t.registerCard + r.registerCard,
-                registerCash: t.registerCash + r.registerCash,
-                creditCard: t.creditCard + r.creditCard,
-                fuel: t.fuel + r.fuel,
-                fuelGallons: t.fuelGallons + r.fuelGallons,
-                expenses: t.expenses + r.expenses,
-                net: t.net + r.net,
-            }),
-            {
-                sales: 0,
-                registerCard: 0,
-                registerCash: 0,
-                creditCard: 0,
-                fuel: 0,
-                fuelGallons: 0,
-                expenses: 0,
-                net: 0,
-            }
+        const totals = sumAllLocationsRows(tableRows);
+        const prevTotals = sumAllLocationsRows(
+            (prevPacks || []).map((p) => allLocationsRowFromAggregate(p.aggregate))
         );
         const anyGas = tableRows.some((r) => r.hasGas);
         const salesHeader = anyGas ? "Merch / sales" : "Sales";
@@ -324,6 +358,8 @@
             ],
             tableRows,
             totals,
+            prevTotals: prevPacks?.length ? prevTotals : null,
+            prevMonthLabel: meta.prevMonthLabel || null,
             anyGas,
             salesHeader,
             csvRows: [
@@ -841,5 +877,6 @@
         buildLotteryReport,
         buildPayrollReport,
         buildRegisterReport,
+        prevMonthIdFrom,
     };
 })();

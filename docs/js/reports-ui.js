@@ -5,6 +5,7 @@
     const RM = () => window.OplixReportsModel;
     const RS = () => window.OplixReportsStore;
     const BM = () => window.OplixBooksModel;
+    const Charts = () => window.OplixBooksSummaryCharts;
 
     let userId = null;
     let locations = [];
@@ -43,6 +44,20 @@
             return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(RM().num(v));
         }
         return money(v);
+    }
+
+    function reportCellWithTrend(value, prevValue, opts) {
+        const formatted =
+            opts?.format === "number" ? formatValue(value, "number") : money(value);
+        const cellClass = opts?.cellClass || "";
+        if (prevValue == null || !Charts()?.renderCellTrend) {
+            return `<td class="home-cc-num${cellClass ? ` ${cellClass}` : ""}">${formatted}</td>`;
+        }
+        const trend = Charts().renderCellTrend(value, prevValue, {
+            invert: opts?.invert,
+            format: opts?.format,
+        });
+        return Charts().renderTableValueCell(formatted, trend, cellClass);
     }
 
     function monthLabel(monthId) {
@@ -271,22 +286,31 @@
 
     function renderAllLocationsBody(report) {
         const salesHeader = report.salesHeader || (report.anyGas ? "Merch / sales" : "Sales");
-        const detailRow = (r) => `
+        const prevHint = report.prevMonthLabel
+            ? ` Green ▲ / red ▼ show change vs ${escapeHtml(report.prevMonthLabel)} (amount on the line; hover for %).`
+            : "";
+        const detailRow = (r) => {
+            const p = r.prev;
+            return `
                         <tr>
                             <td>${escapeHtml(r.location)}</td>
-                            <td class="home-cc-num">${money(r.sales)}</td>
-                            <td class="home-cc-num">${money(r.registerCard)}</td>
-                            <td class="home-cc-num">${money(r.registerCash)}</td>
-                            <td class="home-cc-num">${money(r.creditCard)}</td>
-                            <td class="home-cc-num">${money(r.fuel)}</td>
-                            <td class="home-cc-num">${formatValue(r.fuelGallons, "number")}</td>
-                            <td class="home-cc-num">${money(r.expenses)}</td>
-                            <td class="home-cc-num">${money(r.net)}</td>
+                            ${reportCellWithTrend(r.sales, p?.sales)}
+                            ${reportCellWithTrend(r.registerCard, p?.registerCard)}
+                            ${reportCellWithTrend(r.registerCash, p?.registerCash)}
+                            ${reportCellWithTrend(r.creditCard, p?.creditCard)}
+                            ${reportCellWithTrend(r.fuel, p?.fuel)}
+                            ${reportCellWithTrend(r.fuelGallons, p?.fuelGallons, { format: "number" })}
+                            ${reportCellWithTrend(r.expenses, p?.expenses, { invert: true })}
+                            ${reportCellWithTrend(r.net, p?.net, {
+                                cellClass: r.net >= 0 ? "rpt-net pos" : "rpt-net neg",
+                            })}
                         </tr>`;
+        };
         const t = report.totals;
+        const pt = report.prevTotals;
         return `
-            <p class="books-hint rpt-all-locs-hint"><strong>${escapeHtml(salesHeader)}</strong> and <strong>Net</strong> use the official books totals. Register card, cash sale, credit card, fuel, and gallons are shown for reference — they are not added again to ${escapeHtml(salesHeader.toLowerCase())}.</p>
-            <table class="home-cc-table rpt-table">
+            <p class="books-hint rpt-all-locs-hint"><strong>${escapeHtml(salesHeader)}</strong> and <strong>Net</strong> use the official books totals. Register card, cash sale, credit card, fuel, and gallons are shown for reference — they are not added again to ${escapeHtml(salesHeader.toLowerCase())}.${prevHint}</p>
+            <table class="home-cc-table rpt-table rpt-table--trends">
                 <thead>
                     <tr>
                         <th>Facility</th>
@@ -304,14 +328,16 @@
                     ${report.tableRows.map(detailRow).join("")}
                     <tr class="an-total-row">
                         <td><strong>Total</strong></td>
-                        <td class="home-cc-num"><strong>${money(t.sales)}</strong></td>
-                        <td class="home-cc-num"><strong>${money(t.registerCard)}</strong></td>
-                        <td class="home-cc-num"><strong>${money(t.registerCash)}</strong></td>
-                        <td class="home-cc-num"><strong>${money(t.creditCard)}</strong></td>
-                        <td class="home-cc-num"><strong>${money(t.fuel)}</strong></td>
-                        <td class="home-cc-num"><strong>${formatValue(t.fuelGallons, "number")}</strong></td>
-                        <td class="home-cc-num"><strong>${money(t.expenses)}</strong></td>
-                        <td class="home-cc-num"><strong>${money(t.net)}</strong></td>
+                        ${reportCellWithTrend(t.sales, pt?.sales)}
+                        ${reportCellWithTrend(t.registerCard, pt?.registerCard)}
+                        ${reportCellWithTrend(t.registerCash, pt?.registerCash)}
+                        ${reportCellWithTrend(t.creditCard, pt?.creditCard)}
+                        ${reportCellWithTrend(t.fuel, pt?.fuel)}
+                        ${reportCellWithTrend(t.fuelGallons, pt?.fuelGallons, { format: "number" })}
+                        ${reportCellWithTrend(t.expenses, pt?.expenses, { invert: true })}
+                        ${reportCellWithTrend(t.net, pt?.net, {
+                            cellClass: t.net >= 0 ? "rpt-net pos" : "rpt-net neg",
+                        })}
                     </tr>
                 </tbody>
             </table>`;
@@ -638,11 +664,18 @@
                     monthId: state.monthId,
                 });
             } else if (state.reportType === "all_locations_books") {
-                const packs = await RS().loadAllLocationsBooks(userId, locations, state.monthId);
+                const prevMonthId = RM().prevMonthIdFrom(state.monthId);
+                const [packs, prevPacks] = await Promise.all([
+                    RS().loadAllLocationsBooks(userId, locations, state.monthId),
+                    prevMonthId
+                        ? RS().loadAllLocationsBooks(userId, locations, prevMonthId)
+                        : Promise.resolve([]),
+                ]);
                 report = RM().buildAllLocationsBooksReport(packs, {
                     monthLabel: monthLabel(state.monthId),
                     monthId: state.monthId,
-                });
+                    prevMonthLabel: prevMonthId ? monthLabel(prevMonthId) : null,
+                }, prevPacks);
             } else if (state.reportType === "all_locations_detail") {
                 const packs = await RS().loadAllLocationsBooksDetail(
                     userId,

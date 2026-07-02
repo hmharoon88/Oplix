@@ -3606,6 +3606,28 @@
     width: 100%;
 }
 
+.rpt-table--trends td.home-cc-num--mtd {
+    min-width: 5.5rem;
+}
+
+.rpt-table--trends .home-mtd-value {
+    font-weight: 600;
+}
+
+.rpt-table--trends .an-total-row .home-mtd-value {
+    font-weight: 700;
+}
+
+.rpt-net.pos .home-mtd-value,
+.rpt-net.pos {
+    color: #16a34a;
+}
+
+.rpt-net.neg .home-mtd-value,
+.rpt-net.neg {
+    color: #dc2626;
+}
+
 .rpt-section-row td {
     height: 8px;
     padding: 0;
