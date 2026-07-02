@@ -417,6 +417,7 @@
                 const entry = reconEntryFromPrefix(payoutAdd.dataset.crPayoutAdd);
                 if (entry) {
                     if (!entry.payOuts) entry.payOuts = [];
+                    entry.payOuts = M().pruneEmptyPayOuts(entry.payOuts);
                     entry.payOuts.push({ id: lineId(), description: "", amount: 0 });
                     render();
                 }
@@ -467,28 +468,26 @@
             }
             syncFromForm();
             state.dirty = true;
-            if (state.tab === "cash-recon") {
-                const n = e.target.name || "";
-                if (n.includes("_payOut_") || n === "cr_day_deposit") {
-                    render();
-                }
+            if (state.tab === "cash-recon" && e.target.name === "cr_day_deposit") {
+                render();
             }
         });
 
         panel.addEventListener(
             "blur",
             (e) => {
-                if (!e.target.classList.contains("books-input-amount")) return;
-                if (!e.target.closest(".data-input-form, [data-pay-section]")) return;
-                normalizeAmountField(e.target);
+                const name = e.target?.name || "";
+                const inForm = e.target.closest(".data-input-form, [data-pay-section]");
+                if (!inForm) return;
+
+                if (e.target.classList.contains("books-input-amount")) {
+                    normalizeAmountField(e.target);
+                }
+
                 if (e.target.closest(".data-input-form")) {
                     syncFromForm();
                     state.dirty = true;
-                    if (
-                        state.tab === "cash-recon" &&
-                        e.target.name &&
-                        String(e.target.name).startsWith("cr_")
-                    ) {
+                    if (state.tab === "cash-recon" && name.startsWith("cr_")) {
                         render();
                     }
                 }
@@ -603,6 +602,21 @@
             });
         });
         entry.payOuts = updated;
+    }
+
+    function pruneAllReconPayOuts() {
+        const cr = state.day?.cashReconciliation;
+        if (!cr) return;
+        const prune = (entry) => {
+            if (entry?.payOuts) entry.payOuts = M().pruneEmptyPayOuts(entry.payOuts);
+        };
+        ["register1", "register2"].forEach((regKey) => {
+            ["shift1", "shift2"].forEach((sh) => prune(cr[regKey]?.[sh]));
+        });
+        ["shift1", "shift2"].forEach((sh) => prune(cr.lottery?.[sh]));
+        Object.values(cr.pulltabs || {}).forEach(prune);
+        Object.values(cr.windStations || {}).forEach(prune);
+        Object.values(cr.kenoStations || {}).forEach(prune);
     }
 
     function syncReconShiftFromDom(prefix, entry) {
@@ -875,6 +889,7 @@
     async function saveDay() {
         normalizeAllAmountFields();
         syncFromForm();
+        pruneAllReconPayOuts();
         $("di-status").textContent = "Saving…";
         await Promise.all([
             Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day),
@@ -885,6 +900,7 @@
         rememberExpenseDescriptionsFromDay(state.day);
         state.dirty = false;
         $("di-status").textContent = "Day saved.";
+        if (state.tab === "cash-recon") render();
         setTimeout(() => {
             if ($("di-status").textContent === "Day saved.") $("di-status").textContent = "";
         }, 2000);

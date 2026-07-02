@@ -1298,20 +1298,28 @@
     }
 
     function normalizePayOuts(raw, legacyPayOut) {
+        let lines;
         if (Array.isArray(raw)) {
-            return raw
+            lines = raw
                 .map((line) => ({
                     id: String(line?.id || ""),
                     description: String(line?.description || ""),
                     amount: num(line?.amount),
                 }))
                 .filter((line) => line.id);
+        } else {
+            const legacy = num(legacyPayOut);
+            lines = legacy !== 0 ? [{ id: "legacy", description: "", amount: legacy }] : [];
         }
-        const legacy = num(legacyPayOut);
-        if (legacy !== 0) {
-            return [{ id: "legacy", description: "", amount: legacy }];
-        }
-        return [];
+        return lines.filter(
+            (line) => num(line.amount) !== 0 || String(line.description || "").trim() !== ""
+        );
+    }
+
+    function pruneEmptyPayOuts(payOuts) {
+        return (payOuts || []).filter(
+            (line) => num(line.amount) !== 0 || String(line.description || "").trim() !== ""
+        );
     }
 
     function sumPayOuts(payOuts) {
@@ -1897,6 +1905,7 @@
         cashReconciliationSummary,
         cashReconciliationDayStatus,
         sumPayOuts,
+        pruneEmptyPayOuts,
         emptyCashReconShift,
         aggregateCashReconciliation,
         enrichAggregateWithLotteryForms,
