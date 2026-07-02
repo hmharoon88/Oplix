@@ -154,8 +154,10 @@
         initializedPanels.add(panelId);
     }
 
-    function panelOnShow(panelId) {
-        if (panelId === "facilities" && window.OplixFacilities) {
+    async function panelOnShow(panelId) {
+        if (panelId === "facilities" && window.OplixFacilities?.onShow) {
+            await OplixFacilities.onShow();
+        } else if (panelId === "facilities" && window.OplixFacilities) {
             OplixFacilities.ensureLoaded();
         }
         if (panelId === "data-input" && window.OplixDataInput) {
@@ -203,7 +205,7 @@
         });
 
         await ensurePanelInitialized(panelId);
-        panelOnShow(panelId);
+        await panelOnShow(panelId);
 
         activePanelId = panelId;
         savePanel(panelId);

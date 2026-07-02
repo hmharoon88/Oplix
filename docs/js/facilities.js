@@ -1273,6 +1273,16 @@
             if (!listRendered && userId) renderList();
         },
 
+        /** Reload locations from Firebase (e.g. after adding on iPhone). */
+        async onShow() {
+            if (!userId) return;
+            if (window.OplixDashboard?.reloadLocations) {
+                locations = await OplixDashboard.reloadLocations();
+            }
+            listRendered = false;
+            renderList();
+        },
+
         async openCustomize(locationId, options) {
             if (!locationId) return;
             await openLocation(locationId, {

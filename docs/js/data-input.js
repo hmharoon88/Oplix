@@ -309,6 +309,16 @@
         return M().formatAmountForInput(v);
     }
 
+    /** Grade breakdown fields — blank when zero so total gallons stays editable. */
+    function gradeAmountValue(v) {
+        if (v == null || v === "" || M().num(v) === 0) return "";
+        return M().formatAmountForInput(v);
+    }
+
+    function gradeAmountInputAttrs(name, value) {
+        return `type="text" inputmode="decimal" autocomplete="off" class="books-input books-input-amount" name="${name}" value="${escapeHtml(gradeAmountValue(value))}"`;
+    }
+
     function normalizeAllAmountFields() {
         const root = $("data-input-root");
         if (!root) return;
@@ -593,8 +603,6 @@
         const fuelDiesel = root.querySelector('[name="fuel_diesel"]');
         const fuelG = root.querySelector('[name="fuel_gallons"]');
         const gradeFields = [fuelRegular, fuelMidGrade, fuelPremium, fuelDiesel];
-        const hasGradeEntry = gradeFields.some((el) => String(el?.value ?? "").trim() !== "");
-
         let regular = 0;
         let midGrade = 0;
         let premium = 0;
@@ -603,14 +611,15 @@
         if (fuelMidGrade) midGrade = M().num(fuelMidGrade.value);
         if (fuelPremium) premium = M().num(fuelPremium.value);
         if (fuelDiesel) diesel = M().num(fuelDiesel.value);
+        const gradeSum = regular + midGrade + premium + diesel;
+        const gradesActive = gradeSum > 0;
 
         state.day.fuelSale.regular = regular;
         state.day.fuelSale.midGrade = midGrade;
         state.day.fuelSale.premium = premium;
         state.day.fuelSale.diesel = diesel;
 
-        if (hasGradeEntry) {
-            const gradeSum = regular + midGrade + premium + diesel;
+        if (gradesActive) {
             state.day.fuelSale.gallons = gradeSum;
             if (fuelG) {
                 fuelG.value = M().formatAmountForInput(gradeSum);
@@ -621,7 +630,7 @@
             fuelG.readOnly = false;
             fuelG.removeAttribute("aria-readonly");
         }
-        return hasGradeEntry;
+        return gradesActive;
     }
 
     function syncFromForm() {
@@ -773,6 +782,7 @@
 
     function syncLinesFromDom(listKey, fields, isMonth) {
         const root = $("data-input-root");
+        if (!root?.querySelector(`[data-di-list="${listKey}"]`)) return;
         const target = isMonth ? state.month[listKey] : state.day[listKey];
         const rows = root.querySelectorAll(`[data-di-list="${listKey}"] [data-di-row]`);
         const updated = [];
@@ -1209,6 +1219,7 @@
             parts.push(`<div class="books-grid-2">
                 <label class="books-label">Gallons sold
                     <input ${amountInputAttrs("fuel_gallons", fuel.gallons)}${gradesActive ? ' readonly aria-readonly="true"' : ""}>
+                    ${gradesActive ? '<span class="books-field-hint">Total from grade breakdown below — clear all grades to type a single total</span>' : ""}
                 </label>
                 <label class="books-label">Fuel amount ($)
                     <input ${amountInputAttrs("fuel_dollars", fuel.dollars)}>
@@ -1218,16 +1229,16 @@
             <p class="books-hint books-fuel-grade-hint">Optional — gallons by grade (total updates Gallons sold automatically)</p>
             <div class="books-grid-4 books-fuel-grades">
                 <label class="books-label">Regular (gal)
-                    <input ${amountInputAttrs("fuel_regular", fuel.regular)}>
+                    <input ${gradeAmountInputAttrs("fuel_regular", fuel.regular)}>
                 </label>
                 <label class="books-label">Mid grade (gal)
-                    <input ${amountInputAttrs("fuel_mid_grade", fuel.midGrade)}>
+                    <input ${gradeAmountInputAttrs("fuel_mid_grade", fuel.midGrade)}>
                 </label>
                 <label class="books-label">Premium (gal)
-                    <input ${amountInputAttrs("fuel_premium", fuel.premium)}>
+                    <input ${gradeAmountInputAttrs("fuel_premium", fuel.premium)}>
                 </label>
                 <label class="books-label">Diesel (gal)
-                    <input ${amountInputAttrs("fuel_diesel", fuel.diesel)}>
+                    <input ${gradeAmountInputAttrs("fuel_diesel", fuel.diesel)}>
                 </label>
             </div>`);
         }
