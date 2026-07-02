@@ -360,7 +360,6 @@
         return report.locationSections
             .map((section) => {
                 const hasGas = section.hasGas;
-                const salesHeader = hasGas ? "Revenue" : "Sales";
                 const monthlyTable = `
                     <table class="home-cc-table rpt-table rpt-detail-monthly">
                         <thead><tr><th>Line item</th><th class="home-cc-num">Amount</th></tr></thead>
@@ -375,10 +374,23 @@
 
                 const dailyTotals = section.dailyTotals;
                 const daysWithData = dailyTotals.daysWithData;
+                const monthTotals = hasGas
+                    ? `<span><em>Merch</em> <strong>${money(dailyTotals.merchSale)}</strong></span>
+                       <span><em>Fuel (gal)</em> <strong>${formatValue(dailyTotals.fuelGallons, "number")}</strong></span>
+                       <span><em>Fuel ($)</em> <strong>${money(dailyTotals.fuelDollars)}</strong></span>
+                       <span><em>Credit card</em> <strong>${money(dailyTotals.creditCard)}</strong></span>`
+                    : `<span><em>Sales</em> <strong>${money(dailyTotals.sales)}</strong></span>`;
+                const gasHead = hasGas
+                    ? `<th class="home-cc-num">Merch</th>
+                       <th class="home-cc-num">Fuel (gal)</th>
+                       <th class="home-cc-num">Fuel ($)</th>
+                       <th class="home-cc-num">Credit card</th>`
+                    : "";
+                const salesColHead = hasGas ? "" : `<th class="home-cc-num">Sales</th>`;
                 const dailyBlock = daysWithData
                     ? `
                     <div class="books-cash-recon-totals an-daily-month-totals rpt-detail-daily-totals">
-                        <span><em>${escapeHtml(salesHeader)}</em> <strong>${money(hasGas ? dailyTotals.totalRevenue : dailyTotals.sales)}</strong></span>
+                        ${monthTotals}
                         <span><em>Expenses</em> <strong>${money(dailyTotals.expenses)}</strong></span>
                         <span><em>Net</em> <strong class="${dailyTotals.net >= 0 ? "pos" : "neg"}">${money(dailyTotals.net)}</strong></span>
                     </div>
@@ -387,14 +399,8 @@
                             <thead>
                                 <tr>
                                     <th class="an-daily-day-col">Day / date</th>
-                                    ${
-                                        hasGas
-                                            ? `<th class="home-cc-num">Merch</th>
-                                               <th class="home-cc-num">Fuel ($)</th>
-                                               <th class="home-cc-num">Pump credit</th>`
-                                            : ""
-                                    }
-                                    <th class="home-cc-num">${escapeHtml(salesHeader)}</th>
+                                    ${gasHead}
+                                    ${salesColHead}
                                     <th class="home-cc-num">Cash exp.</th>
                                     <th class="home-cc-num">Check Exp</th>
                                     <th class="home-cc-num">Other</th>
@@ -407,16 +413,22 @@
                                     .map((row) => {
                                         const emptyCls = row.hasData ? "" : " an-daily-row--empty";
                                         const cell = (v) => (row.hasData ? money(v) : "—");
+                                        const numCell = (v) =>
+                                            row.hasData ? formatValue(v, "number") : "—";
                                         const extraGas = hasGas
                                             ? `<td class="home-cc-num">${cell(row.merchSale)}</td>
+                                               <td class="home-cc-num">${numCell(row.fuelGallons)}</td>
                                                <td class="home-cc-num">${cell(row.fuelDollars)}</td>
                                                <td class="home-cc-num">${cell(row.creditCard)}</td>`
                                             : "";
+                                        const salesCell = hasGas
+                                            ? ""
+                                            : `<td class="home-cc-num">${cell(row.sales)}</td>`;
                                         return `
                                         <tr class="an-daily-row${emptyCls}">
                                             <td class="an-daily-day-col">${escapeHtml(formatDayId(row.dayId))}</td>
                                             ${extraGas}
-                                            <td class="home-cc-num">${cell(hasGas ? row.totalRevenue : row.sales)}</td>
+                                            ${salesCell}
                                             <td class="home-cc-num">${cell(row.cashExpense)}</td>
                                             <td class="home-cc-num">${cell(row.checksAch)}</td>
                                             <td class="home-cc-num">${cell(row.otherExpense)}</td>

@@ -331,7 +331,7 @@
             lines.push({ label: "Merch sale", get: (a) => a.merchSale, group: "sales" });
             lines.push({ label: "Register — card", get: (a) => a.registerCard, group: "sales" });
             lines.push({ label: "Register — cash", get: (a) => a.registerCash, group: "sales" });
-            lines.push({ label: "Credit card (pump)", get: (a) => a.creditCard, group: "sales" });
+            lines.push({ label: "Credit card", get: (a) => a.creditCard, group: "sales" });
             lines.push({ label: "Fuel ($)", get: (a) => a.fuelDollars, group: "sales" });
             lines.push({ label: "Pulltab", get: (a) => a.pulltabCash, group: "sales" });
         } else {
@@ -503,9 +503,9 @@
                 "Facility",
                 "Day",
                 "Merch",
+                "Fuel (gal)",
                 "Fuel ($)",
-                "Pump credit",
-                "Revenue",
+                "Credit card",
                 "Cash exp.",
                 "Check Exp",
                 "Other",
@@ -519,9 +519,9 @@
                         s.locationName,
                         row.dayId,
                         s.hasGas ? row.merchSale : "",
+                        s.hasGas ? row.fuelGallons : "",
                         s.hasGas ? row.fuelDollars : "",
                         s.hasGas ? row.creditCard : "",
-                        s.hasGas ? row.totalRevenue : row.sales,
                         row.cashExpense,
                         row.checksAch,
                         row.otherExpense,

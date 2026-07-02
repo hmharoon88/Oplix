@@ -20,7 +20,7 @@
     /** @type {{ id: string, label: string, group: string, gasOnly?: boolean, defaultCategory: string }[]} */
     const BOOKS_FIELDS = [
         { id: "merchSale", label: "Merch sale", group: "daily", gasOnly: true, defaultCategory: "sales" },
-        { id: "creditCard", label: "Pump credit card", group: "daily", gasOnly: true, defaultCategory: "sales" },
+        { id: "creditCard", label: "Credit card", group: "daily", gasOnly: true, defaultCategory: "sales" },
         { id: "fuel", label: "Fuel (gallons & $)", group: "daily", gasOnly: true, defaultCategory: "sales" },
         { id: "registers", label: "Registers", group: "daily", defaultCategory: "reconciliation" },
         { id: "waynePass", label: "Wayne Pass", group: "daily", gasOnly: true, defaultCategory: "sales" },

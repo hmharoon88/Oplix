@@ -45,9 +45,8 @@
         const s = String(label || "");
         const map = {
             "Merch sale (store)": "Merch",
-            "Credit card (pump)": "Pump credit",
+            "Credit card (pump)": "Credit card",
             "Register card": "Reg card",
-            "Pump credit": "Pump credit",
             "Credit card": "Credit card",
             "Fuel sales ($)": "Fuel",
             "Register — card": "Reg card",
@@ -170,7 +169,7 @@
 
     function cardCashHint(agg) {
         if (agg && agg.hasGasStation) {
-            return "Merch sale, pump credit card, and fuel ($) are tracked separately — not combined into each other.";
+            return "Merch sale, credit card, and fuel ($) are tracked separately — not combined into each other.";
         }
         return "Total sales from register card and cash (both registers, both shifts). Lottery and pulltab are tracked separately.";
     }
@@ -591,7 +590,7 @@
             <div class="bs-legend-chips" aria-hidden="true">
                 <span class="bs-chip"><i class="bs-chip-dot" style="background:${COLOR_CARD}"></i>Merch</span>
                 <span class="bs-chip"><i class="bs-chip-dot" style="background:#6366f1"></i>Register card</span>
-                <span class="bs-chip"><i class="bs-chip-dot" style="background:#8b5cf6"></i>Pump credit</span>
+                <span class="bs-chip"><i class="bs-chip-dot" style="background:#8b5cf6"></i>Credit card</span>
                 <span class="bs-chip"><i class="bs-chip-dot" style="background:${COLOR_FUEL}"></i>Fuel</span>
             </div>`;
         }
@@ -727,7 +726,7 @@
                   cardCashSlices(agg, M),
                   "No merch sales recorded this period.",
                   {
-                      subtitle: "Merch, register card, pump credit, and fuel tracked separately",
+                      subtitle: "Merch, register card, credit card, and fuel tracked separately",
                       footnote: cardCashHint(agg),
                       total: agg.sales,
                       registerCard: agg.registerCard,
@@ -803,7 +802,7 @@
             label: e.label,
             merch: num(e.Merch),
             regCard: num(e["Register card"]),
-            pumpCredit: num(e["Pump credit"]),
+            pumpCredit: num(e["Credit card"]),
             fuel: num(e.Fuel),
         }));
         const hasData = rows.some(
@@ -823,7 +822,7 @@
                 <div class="bs-panel-head">
                     <div class="bs-panel-head-text">
                         <h3 class="bs-panel-title">${escapeHtml(title)}</h3>
-                        <p class="bs-panel-sub">Merch, register card, pump credit, and fuel for each period.</p>
+                        <p class="bs-panel-sub">Merch, register card, credit card, and fuel for each period.</p>
                     </div>
                 </div>
                 <div class="bs-pie-bar-pair bs-pie-bar-pair--bars-only">
@@ -850,7 +849,7 @@
         const gap = 3;
         const colors = [COLOR_CARD, "#6366f1", "#8b5cf6", COLOR_FUEL];
         const keys = ["merch", "regCard", "pumpCredit", "fuel"];
-        const labels = ["Merch", "Reg card", "Pump", "Fuel"];
+        const labels = ["Merch", "Reg card", "Credit card", "Fuel"];
 
         const yAxis = Array.from({ length: ticks + 1 }, (_, i) => {
             const t = i / ticks;
@@ -919,7 +918,7 @@
             <div class="bs-page">
                 <header class="bs-page-header">
                     <h2 class="bs-page-title">${escapeHtml(title)}</h2>
-                    <p class="bs-page-lead">Merch, register card, pump credit, and fuel by facility for the selected month.</p>
+                    <p class="bs-page-lead">Merch, register card, credit card, and fuel by facility for the selected month.</p>
                 </header>
                 ${renderGroupedGasSalesComparison(entries, "Sales by facility", "No sales data for these locations.")}
             </div>`;

@@ -407,9 +407,8 @@
                 </section>`;
         }
 
-        const salesHeader = hasGas ? "Revenue" : "Sales";
         const salesHint = hasGas
-            ? "Merch, pump credit, and fuel ($) are separate columns. Net uses merch + pulltab minus daily expenses — pump credit and fuel are not included in net."
+            ? "Merch, credit card, and fuel are separate columns. Net uses merch + pulltab minus daily expenses — credit card and fuel are not included in net."
             : "Sales = register card + cash for each day.";
 
         const tableRows = rows
@@ -417,16 +416,22 @@
                 const dayLabel = formatDayId(row.dayId);
                 const emptyCls = row.hasData ? "" : " an-daily-row--empty";
                 const cell = (v) => (row.hasData ? money(v) : "—");
+                const numCell = (v) =>
+                    row.hasData ? formatMetricValue({ format: "number" }, v) : "—";
                 const extraGas = hasGas
                     ? `<td class="home-cc-num">${cell(row.merchSale)}</td>
+                       <td class="home-cc-num">${numCell(row.fuelGallons)}</td>
                        <td class="home-cc-num">${cell(row.fuelDollars)}</td>
                        <td class="home-cc-num">${cell(row.creditCard)}</td>`
                     : "";
+                const salesCell = hasGas
+                    ? ""
+                    : `<td class="home-cc-num">${cell(row.sales)}</td>`;
                 return `
                     <tr class="an-daily-row${emptyCls}">
                         <td class="an-daily-day-col">${escapeHtml(dayLabel)}</td>
                         ${extraGas}
-                        <td class="home-cc-num">${cell(hasGas ? row.totalRevenue : row.sales)}</td>
+                        ${salesCell}
                         <td class="home-cc-num">${cell(row.cashExpense)}</td>
                         <td class="home-cc-num">${cell(row.checksAch)}</td>
                         <td class="home-cc-num">${cell(row.otherExpense)}</td>
@@ -438,9 +443,30 @@
 
         const gasHead = hasGas
             ? `<th class="home-cc-num">Merch</th>
+               <th class="home-cc-num">Fuel (gal)</th>
                <th class="home-cc-num">Fuel ($)</th>
-               <th class="home-cc-num">Pump credit</th>`
+               <th class="home-cc-num">Credit card</th>`
             : "";
+
+        const monthTotals = hasGas
+            ? `<span><em>Merch</em> <strong>${money(totals.merchSale)}</strong></span>
+               <span><em>Fuel (gal)</em> <strong>${formatMetricValue({ format: "number" }, totals.fuelGallons)}</strong></span>
+               <span><em>Fuel ($)</em> <strong>${money(totals.fuelDollars)}</strong></span>
+               <span><em>Credit card</em> <strong>${money(totals.creditCard)}</strong></span>`
+            : `<span><em>Sales</em> <strong>${money(totals.sales)}</strong></span>`;
+
+        const salesColHead = hasGas ? "" : `<th class="home-cc-num">Sales</th>`;
+
+        const gasFoot = hasGas
+            ? `<td class="home-cc-num"><strong>${money(totals.merchSale)}</strong></td>
+               <td class="home-cc-num"><strong>${formatMetricValue({ format: "number" }, totals.fuelGallons)}</strong></td>
+               <td class="home-cc-num"><strong>${money(totals.fuelDollars)}</strong></td>
+               <td class="home-cc-num"><strong>${money(totals.creditCard)}</strong></td>`
+            : "";
+
+        const salesFoot = hasGas
+            ? ""
+            : `<td class="home-cc-num"><strong>${money(totals.sales)}</strong></td>`;
 
         return `
             <section class="bs-panel bs-panel--daily-sales">
@@ -451,7 +477,7 @@
                     </div>
                 </div>
                 <div class="books-cash-recon-totals an-daily-month-totals">
-                    <span><em>${escapeHtml(salesHeader)}</em> <strong>${money(hasGas ? totals.totalRevenue : totals.sales)}</strong></span>
+                    ${monthTotals}
                     <span><em>Expenses</em> <strong>${money(totals.expenses)}</strong></span>
                     <span><em>Net</em> <strong class="${totals.net >= 0 ? "pos" : "neg"}">${money(totals.net)}</strong></span>
                 </div>
@@ -461,7 +487,7 @@
                             <tr>
                                 <th class="an-daily-day-col">Day / date</th>
                                 ${gasHead}
-                                <th class="home-cc-num">${escapeHtml(salesHeader)}</th>
+                                ${salesColHead}
                                 <th class="home-cc-num">Cash exp.</th>
                                 <th class="home-cc-num">Check Exp</th>
                                 <th class="home-cc-num">Other</th>
@@ -473,8 +499,8 @@
                         <tfoot>
                             <tr class="an-total-row">
                                 <td><strong>Month (days entered)</strong></td>
-                                ${hasGas ? `<td class="home-cc-num"><strong>${money(totals.merchSale)}</strong></td><td class="home-cc-num"><strong>${money(totals.fuelDollars)}</strong></td><td class="home-cc-num"><strong>${money(totals.creditCard)}</strong></td>` : ""}
-                                <td class="home-cc-num"><strong>${money(hasGas ? totals.totalRevenue : totals.sales)}</strong></td>
+                                ${gasFoot}
+                                ${salesFoot}
                                 <td class="home-cc-num"><strong>${money(totals.cashExpense)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(totals.checksAch)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(totals.otherExpense)}</strong></td>
@@ -486,7 +512,7 @@
                 </div>
                 <p class="books-hint an-daily-footnote">Daily expenses are from the Daily sheet only. Monthly utilities, payroll, sales tax, and accountant fees are included in the month totals above, not in this table.${
                     hasGas
-                        ? " For gas stations, <strong>Net</strong> uses merch and pulltab only — pump credit and fuel ($) are not counted toward net."
+                        ? " For gas stations, <strong>Net</strong> uses merch and pulltab only — credit card and fuel are not counted toward net."
                         : ""
                 }</p>
             </section>`;

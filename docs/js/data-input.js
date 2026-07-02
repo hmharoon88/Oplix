@@ -1242,13 +1242,13 @@
 
         const parts = [
             `<h3 class="books-subtitle">Daily sales</h3>`,
-            `<p class="books-hint">Merch, pump credit, and fuel are separate — none are combined into each other.</p>`,
+            `<p class="books-hint">Merch, credit card, and fuel are separate — none are combined into each other.</p>`,
         ];
         if (showMerch) parts.push(renderDailyMerchEntry());
         if (showCredit) {
-            parts.push(`<label class="books-label">Pump credit card ($)
+            parts.push(`<label class="books-label">Credit card ($)
                 <input ${amountInputAttrs("credit_card", state.day.creditCard)}>
-                <span class="books-field-hint">Outdoor / pump card sales only — separate from merch sale and fuel ($)</span>
+                <span class="books-field-hint">Credit card sales — separate from merch sale and fuel ($)</span>
             </label>`);
         }
         if (showFuel) {
@@ -1294,7 +1294,7 @@
         if (!showField("registerPayouts")) return "";
         return `
             <h3 class="books-subtitle">Register payouts</h3>
-            <p class="books-hint">Cash paid out from the register — not added to merch, pump credit, or fuel.</p>
+            <p class="books-hint">Cash paid out from the register — not added to merch, credit card, or fuel.</p>
             <div class="books-grid-2">
                 <label class="books-label">In house account ($)
                     <input ${amountInputAttrs("in_house_account", state.day.inHouseAccount)}>
@@ -1347,7 +1347,7 @@
                 renderRegisterUnit("Register 1", "register1", state.day.register1),
                 renderRegisterUnit("Register 2", "register2", state.day.register2),
                 `<p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash</p>
-            <p class="books-hint">Register card/cash on the detail sheet is for shift reconciliation only — not added to merch, pump credit, or fuel.</p>`
+            <p class="books-hint">Register card/cash on the detail sheet is for shift reconciliation only — not added to merch, credit card, or fuel.</p>`
             );
         }
         const wayne = renderRegisterWaynePass();

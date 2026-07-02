@@ -539,7 +539,7 @@
             { fieldId: "merchSale", label: "Merch sale", amount: num(agg.merchSale) },
             { fieldId: "registers", label: "Register — card", amount: num(agg.registerCard) },
             { fieldId: "registers", label: "Register — cash", amount: num(agg.registerCash) },
-            { fieldId: "creditCard", label: "Credit card (pump)", amount: num(agg.creditCard) },
+            { fieldId: "creditCard", label: "Credit card", amount: num(agg.creditCard) },
             { fieldId: "waynePass", label: "Wayne Pass", amount: num(agg.waynePass) },
             { fieldId: "fuel", label: "Fuel gallons", amount: num(agg.fuelGallons), format: "number" },
             ...(num(agg.fuelRegular) !== 0
@@ -633,7 +633,7 @@
         return [
             { label: "Merch", amount: num(agg.merchSale) },
             { label: "Register card", amount: num(agg.registerCard) },
-            { label: "Pump credit", amount: num(agg.creditCard) },
+            { label: "Credit card", amount: num(agg.creditCard) },
             { label: "Fuel", amount: num(agg.fuelDollars) },
         ];
     }
@@ -1024,6 +1024,7 @@
                 acc.checksAch += row.checksAch;
                 acc.otherExpense += row.otherExpense;
                 acc.fuelDollars += row.fuelDollars;
+                acc.fuelGallons += row.fuelGallons;
                 acc.merchSale += row.merchSale;
                 acc.creditCard += row.creditCard;
                 return acc;
@@ -1038,6 +1039,7 @@
                 checksAch: 0,
                 otherExpense: 0,
                 fuelDollars: 0,
+                fuelGallons: 0,
                 merchSale: 0,
                 creditCard: 0,
             }
@@ -1247,7 +1249,7 @@
             { key: "fuelGallons", label: "Fuel gallons", format: "number" },
             { key: "merchSale", label: "Merch sale (store)" },
             { key: "registerCard", label: "Register — card" },
-            { key: "creditCard", label: "Credit card (pump)" },
+            { key: "creditCard", label: "Credit card" },
             { key: "expenses", label: "Total expenses" },
             { key: "net", label: "Net" },
             { key: "receivablesTotal", label: "Receivables" },
