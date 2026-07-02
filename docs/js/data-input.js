@@ -306,17 +306,8 @@
 
     function amountValue(v) {
         if (v == null || v === "") return "";
+        if (M().num(v) === 0) return "";
         return M().formatAmountForInput(v);
-    }
-
-    /** Grade breakdown fields — blank when zero so total gallons stays editable. */
-    function gradeAmountValue(v) {
-        if (v == null || v === "" || M().num(v) === 0) return "";
-        return M().formatAmountForInput(v);
-    }
-
-    function gradeAmountInputAttrs(name, value) {
-        return `type="text" inputmode="decimal" autocomplete="off" class="books-input books-input-amount" name="${name}" value="${escapeHtml(gradeAmountValue(value))}"`;
     }
 
     function normalizeAllAmountFields() {
@@ -332,9 +323,14 @@
     function normalizeAmountField(el) {
         if (!el || !el.classList.contains("books-input-amount")) return;
         const raw = String(el.value ?? "").trim();
-        if (raw === "") return;
+        if (raw === "") {
+            el.value = "";
+            return;
+        }
         const n = M().parseAmountExpression(raw);
-        if (Number.isFinite(n)) el.value = M().formatAmountForInput(n);
+        if (Number.isFinite(n)) {
+            el.value = n === 0 ? "" : M().formatAmountForInput(n);
+        }
     }
 
     function bindShell() {
@@ -445,6 +441,13 @@
             const listKey = input.closest("[data-di-list]")?.dataset?.diList;
             if (!listKey || !EXPENSE_DESC_LISTS.has(listKey)) return;
             addExpenseDescription(input.value);
+        });
+
+        panel.addEventListener("focusin", (e) => {
+            const el = e.target;
+            if (!el.classList?.contains("books-input-amount")) return;
+            if (!el.closest(".data-input-form, [data-pay-section]")) return;
+            if (String(el.value ?? "").trim() === "0") el.value = "";
         });
 
         panel.addEventListener("input", (e) => {
@@ -1246,16 +1249,16 @@
             <p class="books-hint books-fuel-grade-hint">Optional — gallons by grade (total updates Gallons sold automatically)</p>
             <div class="books-grid-4 books-fuel-grades">
                 <label class="books-label">Regular (gal)
-                    <input ${gradeAmountInputAttrs("fuel_regular", fuel.regular)}>
+                    <input ${amountInputAttrs("fuel_regular", fuel.regular)}>
                 </label>
                 <label class="books-label">Mid grade (gal)
-                    <input ${gradeAmountInputAttrs("fuel_mid_grade", fuel.midGrade)}>
+                    <input ${amountInputAttrs("fuel_mid_grade", fuel.midGrade)}>
                 </label>
                 <label class="books-label">Premium (gal)
-                    <input ${gradeAmountInputAttrs("fuel_premium", fuel.premium)}>
+                    <input ${amountInputAttrs("fuel_premium", fuel.premium)}>
                 </label>
                 <label class="books-label">Diesel (gal)
-                    <input ${gradeAmountInputAttrs("fuel_diesel", fuel.diesel)}>
+                    <input ${amountInputAttrs("fuel_diesel", fuel.diesel)}>
                 </label>
             </div>`);
         }
@@ -1475,7 +1478,7 @@
                 (section.deposit == null || section.depositMatch)
               ? "books-cash-recon-summary books-cash-recon-summary--pending"
               : "books-cash-recon-summary books-cash-recon-summary--variance";
-        const depositVal = section.deposit == null ? "" : M().formatAmountForInput(section.deposit);
+        const depositVal = section.deposit == null ? "" : amountValue(section.deposit);
         const depositVarCls =
             section.deposit == null
                 ? ""
