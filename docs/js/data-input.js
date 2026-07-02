@@ -1460,10 +1460,7 @@
             .map((row) => {
                 const prefix = row.namePrefix;
                 const rowVariance = num(row.counted) + num(row.payOut) - num(row.expected);
-                const varCls =
-                    Math.abs(rowVariance) < 0.005
-                        ? "books-cash-recon-var--ok"
-                        : "books-cash-recon-var--bad";
+                const varCls = varianceColorClass(rowVariance);
                 return `
                     <tr>
                         <td>${escapeHtml(row[col1] || row.rowLabel)}</td>
@@ -1494,24 +1491,35 @@
         return M().num(v);
     }
 
+    /** Zero = green; negative = red; positive = default text (no warning color). */
+    function varianceColorClass(value) {
+        const v = num(value);
+        if (Math.abs(v) < 0.005) return "books-cash-recon-var--ok";
+        if (v < 0) return "books-cash-recon-var--bad";
+        return "";
+    }
+
+    function reconSummaryClass(section) {
+        if (section.matched) return "books-cash-recon-summary books-cash-recon-summary--matched";
+        const v =
+            section.deposit != null ? num(section.depositVariance) : num(section.variance);
+        const pending =
+            Math.abs(v) < 0.005 &&
+            section.countedTotal > 0 &&
+            !section.allVerified &&
+            (section.deposit == null || section.depositMatch);
+        if (pending) return "books-cash-recon-summary books-cash-recon-summary--pending";
+        if (v < -0.005) return "books-cash-recon-summary books-cash-recon-summary--variance";
+        return "books-cash-recon-summary";
+    }
+
     function renderReconSection(title, hint, section, depositField, depositLabel, extraHtml) {
         if (!section.applicable) return "";
         const rows = section.rows || [];
-        const summaryCls = section.matched
-            ? "books-cash-recon-summary books-cash-recon-summary--matched"
-            : Math.abs(section.variance) < 0.005 &&
-                section.countedTotal > 0 &&
-                !section.allVerified &&
-                (section.deposit == null || section.depositMatch)
-              ? "books-cash-recon-summary books-cash-recon-summary--pending"
-              : "books-cash-recon-summary books-cash-recon-summary--variance";
+        const summaryCls = reconSummaryClass(section);
         const depositVal = section.deposit == null ? "" : amountValue(section.deposit);
         const depositVarCls =
-            section.deposit == null
-                ? ""
-                : section.depositMatch
-                  ? "books-cash-recon-var--ok"
-                  : "books-cash-recon-var--bad";
+            section.deposit == null ? "" : varianceColorClass(section.depositVariance);
 
         return `
             <section class="books-cash-recon-block">
@@ -1557,8 +1565,8 @@
                         ${
                             section.deposit != null
                                 ? `<span><em>Received / deposited</em> <strong>${money(section.deposit)}</strong></span>
-                                   <span><em>Cash variance</em> <strong class="${section.depositMatch ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(section.depositVariance)}</strong></span>`
-                                : `<span><em>Cash variance</em> <strong class="${Math.abs(section.variance) < 0.005 ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(section.variance)}</strong></span>`
+                                   <span><em>Cash variance</em> <strong class="${varianceColorClass(section.depositVariance)}">${money(section.depositVariance)}</strong></span>`
+                                : `<span><em>Cash variance</em> <strong class="${varianceColorClass(section.variance)}">${money(section.variance)}</strong></span>`
                         }
                         <span><em>Verified</em> <strong>${section.verifiedCount} / ${section.shiftCount}</strong></span>
                     </div>
@@ -1586,7 +1594,7 @@
                                 <td class="home-cc-num"><strong>${money(section.expectedTotal)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(section.receivedTotal)}</strong></td>
                                 <td class="home-cc-num"><strong>${money(section.payOutTotal)}</strong></td>
-                                <td class="home-cc-num"><strong class="${Math.abs(section.variance) < 0.005 ? "books-cash-recon-var--ok" : "books-cash-recon-var--bad"}">${money(section.variance)}</strong></td>
+                                <td class="home-cc-num"><strong class="${varianceColorClass(section.variance)}">${money(section.variance)}</strong></td>
                                 <td colspan="2"></td>
                             </tr>
                         </tfoot>
