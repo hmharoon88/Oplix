@@ -449,8 +449,27 @@
 
         panel.addEventListener("input", (e) => {
             if (!e.target.closest(".data-input-form")) return;
+            if (e.target.name === "fuel_gallons") {
+                const root = $("data-input-root");
+                ["fuel_regular", "fuel_mid_grade", "fuel_premium", "fuel_diesel"].forEach((name) => {
+                    const el = root?.querySelector(`[name="${name}"]`);
+                    if (el) el.value = "";
+                });
+                if (state.day.fuelSale) {
+                    state.day.fuelSale.regular = 0;
+                    state.day.fuelSale.midGrade = 0;
+                    state.day.fuelSale.premium = 0;
+                    state.day.fuelSale.diesel = 0;
+                }
+            }
             syncFromForm();
             state.dirty = true;
+            if (state.tab === "cash-recon") {
+                const n = e.target.name || "";
+                if (n.includes("_payOut_") || n === "cr_day_deposit") {
+                    render();
+                }
+            }
         });
 
         panel.addEventListener(
@@ -602,7 +621,6 @@
         const fuelPremium = root.querySelector('[name="fuel_premium"]');
         const fuelDiesel = root.querySelector('[name="fuel_diesel"]');
         const fuelG = root.querySelector('[name="fuel_gallons"]');
-        const gradeFields = [fuelRegular, fuelMidGrade, fuelPremium, fuelDiesel];
         let regular = 0;
         let midGrade = 0;
         let premium = 0;
@@ -621,13 +639,12 @@
 
         if (gradesActive) {
             state.day.fuelSale.gallons = gradeSum;
-            if (fuelG) {
+            if (fuelG && document.activeElement !== fuelG) {
                 fuelG.value = M().formatAmountForInput(gradeSum);
-                fuelG.readOnly = true;
-                fuelG.setAttribute("aria-readonly", "true");
             }
         } else if (fuelG) {
             fuelG.readOnly = false;
+            fuelG.removeAttribute("readonly");
             fuelG.removeAttribute("aria-readonly");
         }
         return gradesActive;
@@ -1218,8 +1235,8 @@
         if (showFuel) {
             parts.push(`<div class="books-grid-2">
                 <label class="books-label">Gallons sold
-                    <input ${amountInputAttrs("fuel_gallons", fuel.gallons)}${gradesActive ? ' readonly aria-readonly="true"' : ""}>
-                    ${gradesActive ? '<span class="books-field-hint">Total from grade breakdown below — clear all grades to type a single total</span>' : ""}
+                    <input ${amountInputAttrs("fuel_gallons", fuel.gallons)}>
+                    ${gradesActive ? '<span class="books-field-hint">Filled from grade breakdown below — clear all grades to enter a single total here</span>' : ""}
                 </label>
                 <label class="books-label">Fuel amount ($)
                     <input ${amountInputAttrs("fuel_dollars", fuel.dollars)}>
@@ -1474,8 +1491,24 @@
                     <div class="books-cash-recon-totals">
                         <span><em>Received</em> <strong>${money(section.receivedTotal)}</strong></span>
                         ${
+                            section.expectedGross != null &&
+                            Math.abs(section.expectedGross - section.expectedDeposit) > 0.005
+                                ? `<span><em>Register cash</em> <strong>${money(section.expectedGross)}</strong></span>`
+                                : ""
+                        }
+                        ${
+                            section.cashExpensesTotal > 0
+                                ? `<span><em>Cash expenses</em> <strong>− ${money(section.cashExpensesTotal)}</strong></span>`
+                                : ""
+                        }
+                        ${
+                            section.dailyRegisterPayouts > 0
+                                ? `<span><em>Register payouts (Daily sheet)</em> <strong>− ${money(section.dailyRegisterPayouts)}</strong></span>`
+                                : ""
+                        }
+                        ${
                             section.payOutTotal > 0
-                                ? `<span><em>Pay out</em> <strong>${money(section.payOutTotal)}</strong></span>`
+                                ? `<span><em>Pay out (reconciliation)</em> <strong>− ${money(section.payOutTotal)}</strong></span>`
                                 : ""
                         }
                         ${
@@ -1483,12 +1516,7 @@
                                 ? `<span><em>Total received</em> <strong>${money(section.countedTotal)}</strong></span>`
                                 : ""
                         }
-                        ${
-                            section.cashExpensesTotal > 0
-                                ? `<span><em>Cash expenses</em> <strong>${money(section.cashExpensesTotal)}</strong></span>`
-                                : ""
-                        }
-                        <span><em>Expected</em> <strong>${money(section.expectedDeposit)}</strong></span>
+                        <span><em>Expected deposit</em> <strong>${money(section.expectedDeposit)}</strong></span>
                         ${
                             section.deposit != null
                                 ? `<span><em>Received / deposited</em> <strong>${money(section.deposit)}</strong></span>
@@ -1603,7 +1631,7 @@
                 ${showField("registers")
                     ? renderReconSection(
                           "Register cash",
-                          "Register cash minus cash expenses (Daily sheet) = expected deposit.",
+                          "Expected deposit = register cash sales − cash expenses − register payouts (Daily sheet and reconciliation). Received + pay out per shift should match register cash for that shift.",
                           reg,
                           "cr_day_deposit",
                           "Register received / deposited ($)",

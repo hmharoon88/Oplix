@@ -1404,6 +1404,17 @@
         return sumLines(normalizeDayDoc(day).cashExpenses, "amount");
     }
 
+    /** Register payout lines on the Daily sheet (in house, lottery pay out, etc.). */
+    function dayRegisterPayoutsTotal(day) {
+        const d = normalizeDayDoc(day);
+        return (
+            num(d.inHouseAccount) +
+            num(d.lotteryPayOut) +
+            num(d.pullTabPayout) +
+            num(d.otherCashPayOut)
+        );
+    }
+
     /** Expected register cash for one shift (from daily sheet). */
     function expectedRegisterCash(day, regKey, shiftKey) {
         const unit = day?.[regKey];
@@ -1652,9 +1663,16 @@
         });
 
         const cashExpensesTotal = dayCashExpensesTotal(normalized);
+        const dailyRegisterPayouts = dayRegisterPayoutsTotal(normalized);
         const registerCashExpected = registerRows.reduce((s, r) => s + r.expected, 0);
+        const registerReconPayOuts = registerRows.reduce((s, r) => s + sumPayOuts(r.payOuts), 0);
         const registerExpectedDeposit =
-            registerRows.length > 0 ? registerCashExpected - cashExpensesTotal : 0;
+            registerRows.length > 0
+                ? registerCashExpected -
+                  cashExpensesTotal -
+                  dailyRegisterPayouts -
+                  registerReconPayOuts
+                : 0;
         const registerExpenses =
             registerRows.length > 0 ? cashExpensesTotal : 0;
 
@@ -1664,6 +1682,8 @@
             registerExpectedDeposit,
             registerExpenses
         );
+        register.expectedGross = registerCashExpected;
+        register.dailyRegisterPayouts = dailyRegisterPayouts;
         const lotteryExpected = lotteryRows.reduce((s, r) => s + r.expected, 0);
         const lottery = summarizeReconSection(
             lotteryRows,
@@ -1870,6 +1890,7 @@
         aggregateMonth,
         compareAggregates,
         dayCashExpensesTotal,
+        dayRegisterPayoutsTotal,
         defaultCashReconciliation,
         normalizeCashReconciliation,
         expectedRegisterCash,
