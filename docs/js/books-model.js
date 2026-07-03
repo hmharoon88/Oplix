@@ -364,6 +364,30 @@
         return ids;
     }
 
+    /** Month entry status for health strip / dashboards. */
+    function booksHealthSummary(monthId, daysById, month, options) {
+        const hasGasStation = !!(options && options.hasGasStation);
+        const rows = dailySalesExpenseRows(monthId, daysById, { hasGasStation });
+        const closedIds = new Set(listClosedDayIds(monthId, daysById));
+        let daysWithData = 0;
+        let unclosedWithData = 0;
+        rows.forEach((row) => {
+            if (!row.hasData) return;
+            daysWithData += 1;
+            if (!closedIds.has(row.dayId)) unclosedWithData += 1;
+        });
+        const receivables = (month && month.receivables) || [];
+        return {
+            daysInMonth: rows.length,
+            daysWithData,
+            daysClosed: closedIds.size,
+            unclosedWithData,
+            monthReceivablesLines: receivables.length,
+            linkedReceivables: receivables.filter((r) => r.linkedReceivableId).length,
+            manualReceivables: receivables.filter((r) => !r.linkedReceivableId).length,
+        };
+    }
+
     function monthIdFromDate(d) {
         const y = d.getFullYear();
         const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -2031,5 +2055,6 @@
         dayHasEntryData,
         defaultEntryDayId,
         listClosedDayIds,
+        booksHealthSummary,
     };
 })();

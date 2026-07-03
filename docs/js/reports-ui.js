@@ -21,7 +21,7 @@
         generated: null,
         loading: false,
         error: "",
-        embeddedLocationId: null,
+        contextFromFacility: "",
     };
 
     function $(sel, root) {
@@ -58,6 +58,7 @@
         const trend = Charts().renderCellTrend(value, prevValue, {
             invert: opts?.invert,
             format: opts?.format,
+            compareMode: opts?.compareMode || "month",
         });
         return Charts().renderTableValueCell(formatted, trend, cellClass);
     }
@@ -105,8 +106,13 @@
     }
 
     function effectiveLocationId() {
-        if (state.embeddedLocationId) return state.embeddedLocationId;
+        if (state.locationScope === "all") return "";
         return state.locationId;
+    }
+
+    function renderContextBanner() {
+        if (!state.contextFromFacility) return "";
+        return `<p class="books-hint rpt-context-banner">Opened from facility: <strong>${escapeHtml(locName(state.contextFromFacility))}</strong>. Change facility or scope below to run reports for another location.</p>`;
     }
 
     function renderControls() {
@@ -119,7 +125,7 @@
             .join("");
 
         const locField =
-            type.needsLocation && !state.embeddedLocationId
+            type.needsLocation
                 ? type.locationAllOption
                     ? `
                 <label class="books-label">Facility
@@ -292,9 +298,12 @@
 
     function renderAllLocationsBody(report) {
         const salesHeader = report.salesHeader || (report.anyGas ? "Merch / sales" : "Sales");
-        const prevHint = report.prevMonthLabel
-            ? ` Green ▲ / red ▼ show change vs ${escapeHtml(report.prevMonthLabel)} (amount on the line; hover for %).`
-            : "";
+        const prevLegendBlock =
+            report.prevMonthLabel && window.OplixBooksTrendLegend
+                ? OplixBooksTrendLegend.legendHtml("month")
+                : report.prevMonthLabel
+                  ? `<p class="books-hint rpt-trend-hint">Green ▲ / red ▼ show change vs ${escapeHtml(report.prevMonthLabel)} (amount on the line; hover for %).</p>`
+                  : "";
         const detailRow = (r) => {
             const p = r.prev;
             return `
@@ -315,7 +324,8 @@
         const t = report.totals;
         const pt = report.prevTotals;
         return `
-            <p class="books-hint rpt-all-locs-hint"><strong>${escapeHtml(salesHeader)}</strong> and <strong>Net</strong> use the official books totals. Register card, cash sale, credit card, fuel, and gallons are shown for reference — they are not added again to ${escapeHtml(salesHeader.toLowerCase())}.${prevHint}</p>
+            <p class="books-hint rpt-all-locs-hint"><strong>${escapeHtml(salesHeader)}</strong> and <strong>Net</strong> use the official books totals. Register card, cash sale, credit card, fuel, and gallons are shown for reference — they are not added again to ${escapeHtml(salesHeader.toLowerCase())}.</p>
+            ${prevLegendBlock}
             <table class="home-cc-table rpt-table rpt-table--trends">
                 <thead>
                     <tr>
@@ -641,6 +651,7 @@
 
         root.innerHTML = `
             <div class="rpt-panel" data-rpt-panel>
+                ${renderContextBanner()}
                 ${renderControls()}
                 ${renderPreview()}
             </div>`;
@@ -653,6 +664,10 @@
         if (scopeEl) state.locationScope = scopeEl.value;
         const locEl = $("#rpt-location", root);
         if (locEl) state.locationId = locEl.value;
+        if (scopeEl && scopeEl.value === "all") state.contextFromFacility = "";
+        else if (locEl && state.contextFromFacility && locEl.value !== state.contextFromFacility) {
+            state.contextFromFacility = "";
+        }
         const monthEl = $("#rpt-month", root);
         if (monthEl) state.monthId = monthEl.value;
         const presetEl = $("#rpt-preset", root);
@@ -725,7 +740,7 @@
                 });
             } else if (state.reportType === "payables_receivables") {
                 const all =
-                    state.locationScope === "all" && !state.embeddedLocationId;
+                    state.locationScope === "all";
                 const packs = all
                     ? await RS().loadAllLocationsPayablesReceivables(userId, locations)
                     : [
@@ -742,7 +757,7 @@
                 });
             } else if (state.reportType === "books_payroll_payouts") {
                 const all =
-                    state.locationScope === "all" && !state.embeddedLocationId;
+                    state.locationScope === "all";
                 const locs = all ? locations : locations.filter((l) => l.id === locId);
                 if (!locs.length) throw new Error("Select a location.");
                 const packs = await RS().loadAllLocationsBooks(userId, locs, state.monthId);
@@ -754,7 +769,7 @@
                 });
             } else if (state.reportType === "compliance") {
                 const all =
-                    state.locationScope === "all" && !state.embeddedLocationId;
+                    state.locationScope === "all";
                 const items = all
                     ? await RS().loadComplianceAll(userId, locations)
                     : await RS().loadCompliance(userId, locId);
@@ -886,38 +901,34 @@
         });
     }
 
-    function init(uid, locs, options) {
+    function init(uid, locs) {
         userId = uid;
         locations = locs || [];
-        state.embeddedLocationId = options?.embeddedLocationId || null;
         if (locations.length && !state.locationId) state.locationId = locations[0].id;
-        if (state.embeddedLocationId) state.locationId = state.embeddedLocationId;
-        const rootId = options?.rootId || "reports-root";
-        const root = document.getElementById(rootId);
-        render(rootId);
+        const root = document.getElementById("reports-root");
+        render("reports-root");
         if (root) {
             root.dataset.rptBound = "";
             bind(root);
         }
     }
 
-    function renderEmbedded(ctx) {
-        return `
-            <h2 class="loc-section-heading">Reports</h2>
-            <p class="books-hint dir-hint">Generate exportable reports for <strong>${escapeHtml(ctx.locationName || "this facility")}</strong>.</p>
-            <div id="rpt-embedded-root" data-rpt-embedded></div>`;
-    }
-
-    function bindEmbedded(container, ctx) {
-        const slot = container.querySelector("#rpt-embedded-root");
-        if (!slot) return;
-        slot.dataset.rptEmbeddedBound = "1";
-        slot.innerHTML = "";
-        const locs = ctx.locations || locations;
-        init(ctx.userId, locs, {
-            rootId: "rpt-embedded-root",
-            embeddedLocationId: ctx.locationId,
-        });
+    async function openForLocation(opts = {}) {
+        const { locationId, monthId, reportType } = opts;
+        if (locationId) {
+            state.locationId = locationId;
+            state.locationScope = "one";
+            state.contextFromFacility = locationId;
+        }
+        if (monthId) state.monthId = monthId;
+        if (reportType) state.reportType = reportType;
+        state.generated = null;
+        state.error = "";
+        state.loading = false;
+        if (window.showDashboardPanel) {
+            await showDashboardPanel("reports");
+        }
+        render("reports-root");
     }
 
     window.OplixReports = {
@@ -929,9 +940,9 @@
             state.generated = null;
             state.error = "";
             state.loading = false;
+            state.contextFromFacility = "";
             render();
         },
-        renderEmbedded,
-        bindEmbedded,
+        openForLocation,
     };
 })();

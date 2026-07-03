@@ -117,7 +117,7 @@
         const total = M().openTotal(ctx.payables);
 
         return renderShell({
-            hint: "Bills and vendors you owe — saved to the same payables list as the Oplix app for this facility.",
+            hint: "Bills you owe — same list as Facilities → Payables. Mark paid here or link from Checks/ACH on the daily sheet.",
             totalLabel: "Open payables",
             total,
             openCount: open.length,
@@ -274,6 +274,17 @@
                 if (!item) return;
                 setStatus("Updating…");
                 try {
+                    if (ctx.onRecordCheckPayment) {
+                        const record = window.confirm(
+                            `Mark "${item.payTo || "payable"}" paid and add a Checks/ACH line on today's daily sheet?`
+                        );
+                        if (record) {
+                            await ctx.onRecordCheckPayment(item);
+                            setStatus("Marked paid and recorded on daily sheet.");
+                            await ctx.onRefresh();
+                            return;
+                        }
+                    }
                     await Store().markPaid(ctx.userId, ctx.locationId, item);
                     setStatus("Marked paid.");
                     await ctx.onRefresh();

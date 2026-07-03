@@ -13,11 +13,41 @@
     let drillPack = null;
     let activeDrill = null;
     let lastRenderedKey = null;
+    let currentRootId = "analytics-root";
+    let embeddedLocationId = null;
     let state = {
         locationId: "",
         monthId: "",
         showCompare: false,
     };
+
+    function isEmbedded() {
+        return !!embeddedLocationId;
+    }
+
+    function scopeRoot() {
+        return document.getElementById(currentRootId);
+    }
+
+    function idFor(base) {
+        return isEmbedded() ? `${currentRootId}-${base}` : base;
+    }
+
+    function elById(base) {
+        return document.getElementById(idFor(base));
+    }
+
+    function monthControlId() {
+        return idFor("an-month");
+    }
+
+    function locControlId() {
+        return idFor("an-loc");
+    }
+
+    function compareControlId() {
+        return idFor("an-compare-toggle");
+    }
 
     function defaultMonthId() {
         return M()?.monthIdFromDate(new Date()) || "";
@@ -63,6 +93,7 @@
         const trend = Charts().renderCellTrend(value, prevValue, {
             invert: opts?.trendInvert,
             format: opts?.format,
+            compareMode: "day",
         });
         return Charts().renderTableValueCell(formatted, trend, cellClass);
     }
@@ -191,21 +222,23 @@
     }
 
     function syncMonthSelect() {
-        const monthEl = $("an-month");
+        const root = scopeRoot();
+        if (!root) return;
+        const monthEl = root.querySelector(`#${monthControlId()}`);
         if (monthEl) monthEl.value = state.monthId;
-        const locEl = $("an-loc");
+        const locEl = root.querySelector(`#${locControlId()}`);
         if (locEl) locEl.value = state.locationId;
     }
 
     function renderPreviousMonthsMount(html) {
-        const mount = $("an-previous-mount");
+        const mount = elById("an-previous-mount");
         if (!mount) return;
         mount.innerHTML = html || "";
         mount.hidden = !html;
     }
 
     function renderKeyMetricsMount(html) {
-        const mount = $("an-key-metrics-mount");
+        const mount = elById("an-key-metrics-mount");
         if (!mount) return;
         mount.innerHTML = html || "";
         mount.hidden = !html;
@@ -375,8 +408,8 @@
 
     function openDrill(type) {
         activeDrill = type;
-        const panel = $("an-drill-mount");
-        const overview = $("an-overview-mount");
+        const panel = elById("an-drill-mount");
+        const overview = elById("an-overview-mount");
         if (panel) {
             panel.innerHTML = renderDrillPanel(type);
             panel.hidden = false;
@@ -387,8 +420,8 @@
 
     function closeDrill() {
         activeDrill = null;
-        const panel = $("an-drill-mount");
-        const overview = $("an-overview-mount");
+        const panel = elById("an-drill-mount");
+        const overview = elById("an-overview-mount");
         if (panel) {
             panel.innerHTML = "";
             panel.hidden = true;
@@ -494,7 +527,8 @@
                 <div class="bs-panel-head">
                     <div class="bs-panel-head-text">
                         <h3 class="bs-panel-title">Daily sales &amp; expenses</h3>
-                        <p class="bs-panel-sub">${escapeHtml(monthLabel(pack.monthId))} · ${totals.daysWithData} of ${rows.length} days with entries. ${escapeHtml(salesHint)} Green ▲ / red ▼ vs prior day (amount on the line; hover for %).</p>
+                        <p class="bs-panel-sub">${escapeHtml(monthLabel(pack.monthId))} · ${totals.daysWithData} of ${rows.length} days with entries. ${escapeHtml(salesHint)}</p>
+                        ${window.OplixBooksTrendLegend ? OplixBooksTrendLegend.legendHtml("day") : ""}
                     </div>
                 </div>
                 <div class="books-cash-recon-totals an-daily-month-totals">
@@ -763,7 +797,10 @@
                     `<option value="${l.id}"${l.id === state.locationId ? " selected" : ""}>${escapeHtml(l.name)}</option>`
             )
             .join("");
-        const showFacility = locations.length > 1;
+        const showFacility = locations.length > 1 && !isEmbedded();
+        const monthId = monthControlId();
+        const locId = locControlId();
+        const compareId = compareControlId();
 
         return `
             <div class="bs-toolbar an-month-toolbar">
@@ -771,17 +808,18 @@
                     ${
                         showFacility
                             ? `<label class="books-label">Facility
-                        <select id="an-loc" class="books-select">${locOpts}</select>
+                        <select id="${locId}" class="books-select">${locOpts}</select>
                     </label>`
                             : ""
                     }
                     <label class="books-label">Month
-                        <select id="an-month" class="books-select">${monthOptions(state.monthId)}</select>
+                        <select id="${monthId}" class="books-select">${monthOptions(state.monthId)}</select>
                     </label>
-                    <button type="button" class="btn btn-nav-outline an-compare-toggle" id="an-compare-toggle">
+                    <button type="button" class="btn btn-nav-outline an-compare-toggle" id="${compareId}">
                         ${state.showCompare ? "Hide month compare" : "Compare to previous month"}
                     </button>
                 </div>
+                ${state.showCompare && window.OplixBooksTrendLegend ? OplixBooksTrendLegend.legendHtml("month") : ""}
             </div>`;
     }
 
@@ -832,11 +870,11 @@
             overviewHtml = `<p class="app-error">${escapeHtml(err.message || "Could not render summary.")}</p>`;
         }
 
-        const out = $("analytics-output");
+        const out = elById("analytics-output");
         if (!out) return;
         out.innerHTML = `
-            <div id="an-drill-mount" class="an-drill-mount" hidden></div>
-            <div id="an-overview-mount" class="an-overview-mount bs-overview">${overviewHtml}</div>`;
+            <div id="${idFor("an-drill-mount")}" class="an-drill-mount" hidden></div>
+            <div id="${idFor("an-overview-mount")}" class="an-overview-mount bs-overview">${overviewHtml}</div>`;
     }
 
     function renderHistorySections(accumulated, primaryPack, keyAtStart, loaded, total) {
@@ -858,7 +896,8 @@
                 progressText
             )
         );
-        $("an-previous-mount").hidden = !previousPacks.length && !progressText;
+        const prevMount = elById("an-previous-mount");
+        if (prevMount) prevMount.hidden = !previousPacks.length && !progressText;
 
         const historyPacks = [primaryPack, ...previousPacks].sort((a, b) =>
             b.monthId.localeCompare(a.monthId)
@@ -876,7 +915,8 @@
                 ? metricsHtml
                 : `${metricsHtml}<p class="books-hint an-history-progress">Loading monthly detail… ${loaded} of ${total}</p>`
         );
-        $("an-key-metrics-mount").hidden = !metricsHtml && !historyComplete;
+        const keyMount = elById("an-key-metrics-mount");
+        if (keyMount) keyMount.hidden = !metricsHtml && !historyComplete;
     }
 
     async function loadHistorySections(keyAtStart, primaryPack, lotteryForms) {
@@ -930,7 +970,7 @@
     async function runAnalysis() {
         ensureStateMonth();
         const keyAtStart = analysisKey();
-        const out = $("analytics-output");
+        const out = elById("analytics-output");
         if (!out) return;
 
         try {
@@ -979,19 +1019,21 @@
     }
 
     function readControls() {
-        const locEl = $("an-loc");
+        const root = scopeRoot();
+        if (!root) return;
+        const locEl = root.querySelector(`#${locControlId()}`);
         if (locEl) state.locationId = locEl.value;
-        const monthEl = $("an-month");
+        const monthEl = root.querySelector(`#${monthControlId()}`);
         if (monthEl) state.monthId = monthEl.value;
     }
 
-    function bindControls() {
-        const panel = $("panel-analytics");
+    function bindControls(panelEl) {
+        const panel = panelEl || $("panel-analytics");
         if (!panel || panel.dataset.anBound) return;
         panel.dataset.anBound = "1";
 
         panel.addEventListener("click", (e) => {
-            if (e.target.id === "an-compare-toggle") {
+            if (e.target.id === compareControlId()) {
                 state.showCompare = !state.showCompare;
                 render();
                 runAnalysis();
@@ -1025,10 +1067,14 @@
                 }
                 return;
             }
+            if (e.target.closest("[data-sales-open-summary]")) {
+                openForLocation(state.locationId, state.monthId);
+                return;
+            }
         });
 
         panel.addEventListener("change", (e) => {
-            if (e.target.id === "an-loc" || e.target.id === "an-month") {
+            if (e.target.id === locControlId() || e.target.id === monthControlId()) {
                 readControls();
                 runAnalysis();
             }
@@ -1036,30 +1082,74 @@
     }
 
     function render() {
-        const root = $("analytics-root");
+        const root = scopeRoot();
         if (!root) return;
         if (!locations.length) {
             root.innerHTML =
                 '<p class="data-list-empty">Add a facility and enter data in Daily books first.</p>';
             return;
         }
-        if (!state.locationId) state.locationId = locations[0].id;
+        if (!state.locationId) state.locationId = embeddedLocationId || locations[0].id;
         ensureStateMonth();
 
-        root.innerHTML = `${renderMonthPicker()}<div id="analytics-output" class="an-output"></div><div id="an-previous-mount" class="an-previous-mount" hidden></div><div id="an-key-metrics-mount" class="an-key-metrics-mount" hidden></div>`;
+        root.innerHTML = `${renderMonthPicker()}<div id="${idFor("analytics-output")}" class="an-output"></div><div id="${idFor("an-previous-mount")}" class="an-previous-mount" hidden></div><div id="${idFor("an-key-metrics-mount")}" class="an-key-metrics-mount" hidden></div>`;
+    }
+
+    function renderEmbedded(ctx) {
+        return `
+            <h2 class="loc-section-heading">Sales</h2>
+            <p class="books-hint dir-hint">Monthly books totals from Daily books for <strong>${escapeHtml(ctx.locationName || "this facility")}</strong> — same data as sidebar <strong>Summary</strong>.</p>
+            <p class="books-hint"><button type="button" class="books-link-btn" data-sales-open-summary>Open full Summary</button></p>
+            <div id="sales-embedded-root" class="an-embedded-root"></div>`;
+    }
+
+    function bindEmbedded(container, ctx) {
+        const slot = container.querySelector("#sales-embedded-root");
+        if (!slot) return;
+        slot.dataset.anBound = "";
+        slot.innerHTML = "";
+        init(ctx.userId, ctx.locations || locations, {
+            rootId: "sales-embedded-root",
+            embeddedLocationId: ctx.locationId,
+            bindTarget: slot,
+        });
+        runAnalysis();
+    }
+
+    function openForLocation(locationId, monthId) {
+        embeddedLocationId = null;
+        currentRootId = "analytics-root";
+        if (locationId) state.locationId = locationId;
+        if (monthId) state.monthId = monthId;
+        if (window.showDashboardPanel) {
+            showDashboardPanel("analytics");
+        }
+        render();
+        runAnalysis();
     }
 
     window.OplixAnalytics = {
-        init(uid, locs) {
+        init(uid, locs, options) {
             userId = uid;
             locations = locs || [];
-            bindControls();
+            currentRootId = options?.rootId || "analytics-root";
+            embeddedLocationId = options?.embeddedLocationId || null;
+            if (embeddedLocationId) state.locationId = embeddedLocationId;
+            else if (locations.length && !state.locationId) state.locationId = locations[0].id;
+            const bindTarget = options?.bindTarget || $("panel-analytics");
+            if (bindTarget) {
+                bindTarget.dataset.anBound = "";
+                bindControls(bindTarget);
+            }
             render();
         },
         onShow() {
             readControls();
             if (!userId || !locations.length) return;
-            if (lastRenderedKey === analysisKey() && $("analytics-output")?.querySelector(".bs-report")) {
+            if (
+                lastRenderedKey === analysisKey() &&
+                elById("analytics-output")?.querySelector(".bs-report")
+            ) {
                 return;
             }
             runAnalysis();
@@ -1070,5 +1160,8 @@
         resetToRoot() {
             closeDrill();
         },
+        renderEmbedded,
+        bindEmbedded,
+        openForLocation,
     };
 })();

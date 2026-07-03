@@ -20,6 +20,7 @@
         daysById: {},
         utilityProviders: [],
         payables: [],
+        receivables: [],
         dirty: false,
         expenseDescriptions: [],
         entryDayId: M().dayIdFromDate(new Date()),
@@ -64,26 +65,28 @@
         return true;
     }
 
-    async function closeCurrentDay() {
+    async function closeCurrentDay(options = {}) {
         if (isViewingClosedDay()) return;
         if (state.dirty) {
             normalizeAllAmountFields();
             syncFromForm();
         }
         const hasData = M().dayHasEntryData({ ...state.day, _dayId: state.dayId }, { hasGasStation: hasGasStation() });
-        if (!hasData) {
-            const ok = window.confirm(
-                "This day has no entry data yet. Close it anyway? You can reopen later to enter numbers."
-            );
-            if (!ok) return;
-        } else if (
-            !window.confirm(
-                "Close this day? It will be read-only until you reopen it. Use this after entry is complete."
-            )
-        ) {
-            return;
+        if (!options.skipConfirm) {
+            if (!hasData) {
+                const ok = window.confirm(
+                    "This day has no entry data yet. Close it anyway? You can reopen later to enter numbers."
+                );
+                if (!ok) return;
+            } else if (
+                !window.confirm(
+                    "Close this day? It will be read-only until you reopen it. Use this after entry is complete."
+                )
+            ) {
+                return;
+            }
         }
-        if (state.dirty) await saveDay({ silent: true });
+        if (state.dirty) await saveDay({ silent: true, skipClosePrompt: true });
         state.day.closed = true;
         state.day.closedAt = new Date().toISOString();
         state.day.closedBy = currentUserLabel();
@@ -371,6 +374,156 @@
         state.payables = await OplixPayablesStore.list(userId, state.locationId);
     }
 
+    async function loadReceivables() {
+        if (!state.locationId || !window.OplixReceivablesStore) {
+            state.receivables = [];
+            return;
+        }
+        state.receivables = await OplixReceivablesStore.list(userId, state.locationId);
+    }
+
+    async function syncMonthFromReceivable(receivable) {
+        if (!window.OplixBooksLinks?.persistReceivableBooksSync) return;
+        const result = await OplixBooksLinks.persistReceivableBooksSync(
+            userId,
+            state.locationId,
+            receivable,
+            state.monthId
+        );
+        if (result && result.monthId === state.monthId) state.month = result.month;
+    }
+
+    function renderBooksHealthStrip() {
+        const h = M().booksHealthSummary(state.monthId, state.daysById, state.month, {
+            hasGasStation: hasGasStation(),
+        });
+        const openPay = (state.payables || []).filter((p) => !p.isPaid).length;
+        const warn =
+            h.unclosedWithData > 0
+                ? `<span class="books-health-warn">${h.unclosedWithData} day${h.unclosedWithData === 1 ? "" : "s"} with entry not closed</span>`
+                : "";
+        return `<div class="books-health-strip" role="status">
+            <span><strong>${h.daysWithData}</strong> / ${h.daysInMonth} days with entry</span>
+            <span><strong>${h.daysClosed}</strong> closed</span>
+            <span><strong>${openPay}</strong> open payables</span>
+            <span><strong>${h.monthReceivablesLines}</strong> month credits (Net)</span>
+            ${warn}
+        </div>`;
+    }
+
+    function renderLegacyMonthReceivables() {
+        const manual = (state.month.receivables || []).filter((r) => !r.linkedReceivableId);
+        if (!manual.length) return "";
+        return `
+            <div class="books-panel books-legacy-receivables data-input-form">
+                <h3 class="books-subtitle">Legacy month credits</h3>
+                <p class="books-hint">Older lines entered only on the month doc. New items should use <strong>Add receivable</strong> above — marking received syncs to Books Net automatically.</p>
+                ${renderLineList(
+                    "receivables",
+                    [
+                        { name: "description", label: "Description" },
+                        { name: "amount", label: "Amount", type: "number" },
+                    ],
+                    null,
+                    true
+                )}
+                <button type="button" class="btn books-save" id="di-save-month">Save legacy credits</button>
+            </div>`;
+    }
+
+    function renderChecksAchList() {
+        const list = state.day.checksAch || [];
+        const openPayables = window.OplixBooksLinks
+            ? OplixBooksLinks.openPayablesForPick(state.payables)
+            : (state.payables || []).filter((p) => !p.isPaid);
+        const payableOptions = (selectedId) => {
+            const opts = ['<option value="">— Payable —</option>'];
+            openPayables.forEach((p) => {
+                const label = window.OplixBooksLinks
+                    ? OplixBooksLinks.payablePickLabel(p)
+                    : `${p.payTo} — ${money(p.amount)}`;
+                opts.push(
+                    `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? " selected" : ""}>${escapeHtml(label)}</option>`
+                );
+            });
+            (state.payables || [])
+                .filter((p) => p.isPaid && p.id === selectedId)
+                .forEach((p) => {
+                    opts.push(
+                        `<option value="${escapeHtml(p.id)}" selected>${escapeHtml(p.payTo || "Paid")} (paid)</option>`
+                    );
+                });
+            return opts.join("");
+        };
+        return `
+            <h3 class="books-subtitle">Checks / ACH</h3>
+            <p class="books-hint">Link a line to an open payable to mark it paid when you save this day.</p>
+            <div class="books-lines books-lines--checks" data-di-list="checksAch">
+                <div class="books-lines-head books-lines-head--checks">
+                    <span>Payable</span>
+                    <span>Description</span>
+                    <span>Check #</span>
+                    <span>Amount</span>
+                    <span></span>
+                </div>
+                ${list
+                    .map((row) => {
+                        const pid = row.payableId || "";
+                        return `
+                    <div class="books-lines-row books-lines-row--checks" data-di-row="${escapeHtml(row.id)}">
+                        <select class="books-select" name="payableId" data-di-payable-pick="${escapeHtml(row.id)}">${payableOptions(pid)}</select>
+                        <input type="text" class="books-input" name="description" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(row.description || "")}" placeholder="Description">
+                        <input type="text" class="books-input" name="checkNo" value="${escapeHtml(row.checkNo || "")}">
+                        <input ${amountInputAttrs("amount", row.amount)}>
+                        <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="checksAch">×</button>
+                    </div>`;
+                    })
+                    .join("")}
+                <button type="button" class="books-add-line" data-di-add="checksAch">+ Add check / ACH</button>
+            </div>`;
+    }
+
+    async function recordCheckFromPayable(payable) {
+        if (isViewingClosedDay()) {
+            window.alert("This day is closed. Reopen it or choose another day to record the check.");
+            return;
+        }
+        normalizeAllAmountFields();
+        syncFromForm();
+        state.day.checksAch = state.day.checksAch || [];
+        state.day.checksAch.push({
+            id: lineId(),
+            date: state.dayId,
+            description: payable.payTo || "",
+            checkNo: "",
+            amount: M().num(payable.amount),
+            payableId: payable.id,
+        });
+        state.dirty = true;
+        await saveDay({ silent: true, skipClosePrompt: true });
+        await loadPayables();
+        if (state.tab !== "daily") {
+            state.tab = "daily";
+            render();
+        }
+    }
+
+    async function syncPayablesFromChecks() {
+        if (!window.OplixPayablesStore) return;
+        for (const row of state.day.checksAch || []) {
+            if (!row.payableId) continue;
+            const p = state.payables.find((x) => x.id === row.payableId);
+            if (!p || p.isPaid) continue;
+            if (M().num(row.amount) <= 0) continue;
+            await OplixPayablesStore.markPaid(userId, state.locationId, {
+                ...p,
+                payTo: String(row.description || p.payTo).trim() || p.payTo,
+                amount: M().num(row.amount) || p.amount,
+            });
+        }
+        await loadPayables();
+    }
+
     async function loadUtilityProviders() {
         if (!state.locationId || !DirStore()) {
             state.utilityProviders = [];
@@ -511,6 +664,11 @@
             if (e.target.id === "di-month") state.monthId = e.target.value;
             if (e.target.id === "di-day") {
                 if (!switchDay(e.target.value)) e.target.value = state.dayId;
+                return;
+            }
+            if (e.target.matches("[name='payableId']")) {
+                const rowId = e.target.dataset.diPayablePick;
+                if (rowId && e.target.value) applyPayablePick(rowId, e.target.value);
                 return;
             }
             if (
@@ -690,6 +848,7 @@
                 description: "",
                 checkNo: "",
                 amount: 0,
+                payableId: null,
             });
         } else if (list === "otherExpenses") {
             state.day.otherExpenses.push({ id: lineId(), description: "", amount: 0 });
@@ -932,11 +1091,7 @@
         }
 
         syncLinesFromDom("cashExpenses", ["description", "amount", "overShort"]);
-        syncLinesFromDom("checksAch", ["description", "checkNo", "amount"]);
-        state.day.checksAch = (state.day.checksAch || []).map((row) => ({
-            ...row,
-            date: state.dayId,
-        }));
+        syncChecksAchFromDom();
         syncLinesFromDom("otherExpenses", ["description", "amount"]);
         syncLinesFromDom("receivables", ["description", "amount"], true);
         syncCustomAmountsFromDom(root, state.day, "daily");
@@ -1029,6 +1184,45 @@
         else state.day[listKey] = updated;
     }
 
+    function syncChecksAchFromDom() {
+        const root = $("data-input-root");
+        if (!root?.querySelector('[data-di-list="checksAch"]')) return;
+        const rows = root.querySelectorAll('[data-di-list="checksAch"] [data-di-row]');
+        const updated = [];
+        rows.forEach((row) => {
+            const id = row.dataset.diRow;
+            const existing = (state.day.checksAch || []).find((r) => r.id === id) || { id };
+            const payableEl = row.querySelector('[name="payableId"]');
+            const desc = row.querySelector('[name="description"]');
+            const checkNo = row.querySelector('[name="checkNo"]');
+            const amt = row.querySelector('[name="amount"]');
+            updated.push({
+                ...existing,
+                id,
+                date: state.dayId,
+                payableId: payableEl?.value || null,
+                description: desc ? desc.value : "",
+                checkNo: checkNo ? checkNo.value : "",
+                amount: amt ? M().num(amt.value) : 0,
+            });
+        });
+        state.day.checksAch = updated;
+    }
+
+    function applyPayablePick(rowId, payableId) {
+        if (!payableId) return;
+        const p = (state.payables || []).find((x) => x.id === payableId);
+        if (!p) return;
+        const row = state.day.checksAch?.find((r) => r.id === rowId);
+        if (row) {
+            row.payableId = payableId;
+            row.description = p.payTo || row.description;
+            row.amount = M().num(p.amount) || row.amount;
+        }
+        state.dirty = true;
+        render();
+    }
+
     async function loadCurrent() {
         if (!state.locationId) return;
         const statusEl = $("di-status");
@@ -1039,7 +1233,7 @@
                 state.locationId,
                 state.monthId
             );
-            await Promise.all([loadUtilityProviders(), loadPayables()]);
+            await Promise.all([loadUtilityProviders(), loadPayables(), loadReceivables()]);
             state.month = month;
             state.month.utilities = M().normalizeMonthUtilities(
                 state.month.utilities,
@@ -1086,6 +1280,7 @@
         normalizeAllAmountFields();
         syncFromForm();
         pruneAllReconPayOuts();
+        await syncPayablesFromChecks();
         if (!options.silent) $("di-status").textContent = "Saving…";
         await Promise.all([
             Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day),
@@ -1101,6 +1296,22 @@
             setTimeout(() => {
                 if ($("di-status").textContent === "Day saved.") $("di-status").textContent = "";
             }, 2000);
+        }
+        if (
+            !options.silent &&
+            !options.skipClosePrompt &&
+            !M().isDayClosed(state.day) &&
+            M().dayHasEntryData({ ...state.day, _dayId: state.dayId }, { hasGasStation: hasGasStation() })
+        ) {
+            setTimeout(() => {
+                if (
+                    window.confirm(
+                        "Entry saved. Close this day now to lock it from accidental changes?"
+                    )
+                ) {
+                    closeCurrentDay({ skipConfirm: true });
+                }
+            }, 50);
         }
     }
 
@@ -1527,12 +1738,7 @@
                     ])}`);
         }
         if (showField("checksAch")) {
-            parts.push(`<h3 class="books-subtitle">Checks / ACH</h3>
-                    ${renderLineList("checksAch", [
-                        { name: "description", label: "Description" },
-                        { name: "checkNo", label: "Check #" },
-                        { name: "amount", label: "Amount", type: "number" },
-                    ])}`);
+            parts.push(renderChecksAchList());
         }
         if (showField("otherExpenses")) {
             parts.push(`<h3 class="books-subtitle">Other expense</h3>
@@ -2002,22 +2208,17 @@
             </div>`;
     }
 
-    function renderReceivables() {
-        return `
-            <div class="books-panel data-input-form">
-                <h3 class="books-subtitle">Receivables / checks received</h3>
-                <p class="books-hint">Credits and deposits (Uber, DoorDash, ATM, vendor rebates, etc.)</p>
-                ${renderLineList(
-                    "receivables",
-                    [
-                        { name: "description", label: "Description" },
-                        { name: "amount", label: "Amount", type: "number" },
-                    ],
-                    null,
-                    true
-                )}
-                <button type="button" class="btn books-save" id="di-save-month">Save receivables</button>
-            </div>`;
+    function renderBooksReceivablesTab() {
+        const main = window.OplixReceivablesUI
+            ? OplixReceivablesUI.renderTab({
+                  userId,
+                  locationId: state.locationId,
+                  monthId: state.monthId,
+                  month: state.month,
+                  receivables: state.receivables,
+              })
+            : '<p class="data-list-empty">Receivables unavailable.</p>';
+        return `${main}${renderLegacyMonthReceivables()}`;
     }
 
     function render() {
@@ -2067,7 +2268,7 @@
         } else if (state.tab === "cash-recon") body = renderCashReconciliation();
         else {
             body = tabVisible("receivables")
-                ? renderReceivables()
+                ? renderBooksReceivablesTab()
                 : '<p class="data-list-empty">Receivables is turned off for this facility.</p>';
         }
 
@@ -2089,6 +2290,7 @@
                 <button type="button" class="btn btn-nav-outline" id="di-reload">Load</button>
                 <span class="books-status" id="di-status"></span>
             </div>
+            ${renderBooksHealthStrip()}
             ${customizeHint}
             <p class="books-hint books-amount-tip">Amount fields: use <strong>+</strong> or <strong>−</strong> to add/subtract (e.g. <code>100+50-25</code>). Tab out of the field to total.</p>
             <nav class="books-tabs">
@@ -2107,8 +2309,27 @@
                     locationId: state.locationId,
                     monthId: state.monthId,
                     payables: state.payables,
+                    onRecordCheckPayment: recordCheckFromPayable,
                     onRefresh: async () => {
                         await loadPayables();
+                        render();
+                    },
+                });
+            }
+        }
+        if (state.tab === "receivables" && window.OplixReceivablesUI) {
+            const recRoot = root.querySelector("[data-rec-section]");
+            if (recRoot) {
+                recRoot.dataset.recBound = "";
+                OplixReceivablesUI.bind(recRoot, {
+                    userId,
+                    locationId: state.locationId,
+                    monthId: state.monthId,
+                    month: state.month,
+                    receivables: state.receivables,
+                    onSyncBooks: syncMonthFromReceivable,
+                    onRefresh: async () => {
+                        await loadReceivables();
                         render();
                     },
                 });

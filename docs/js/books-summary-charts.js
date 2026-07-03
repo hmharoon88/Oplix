@@ -375,7 +375,10 @@
         const fmt = options?.format === "number" ? formatNumber : money;
         const changeLabel = `${sign}${fmt(Math.abs(diff))}`;
         const pctLabel = `${diff >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(0)}%`;
-        return `<span class="home-mtd-trend home-trend ${cls}" title="${escapeHtml(pctLabel)} vs prior">${arrow} ${escapeHtml(changeLabel)}</span>`;
+        const vsLabel =
+            (options?.compareMode && window.OplixBooksTrendLegend?.compareTitle(options.compareMode)) ||
+            (options?.compareTitle ? String(options.compareTitle) : "vs prior");
+        return `<span class="home-mtd-trend home-trend ${cls}" title="${escapeHtml(pctLabel)} ${escapeHtml(vsLabel)}">${arrow} ${escapeHtml(changeLabel)}</span>`;
     }
 
     function renderTableValueCell(formattedValue, trendHtml, cellClass) {
@@ -397,6 +400,7 @@
         const trend = renderCellTrend(raw, prevRaw, {
             invert: col.trendInvert,
             format: col.format,
+            compareMode: "month",
         });
         return renderTableValueCell(formatted, trend);
     }
@@ -547,7 +551,7 @@
                 <section class="an-key-metrics-history">
                     <header class="an-key-metrics-history-head">
                         <h3 class="an-key-metrics-history-title">Monthly detail · past 12 months · ${escapeHtml(locationName)}</h3>
-                        <p class="an-key-metrics-history-lead">Expense, sales source, and utility breakdowns — not shown in the summary above. Green ▲ / red ▼ show change vs the prior month (amount on the line; hover for %).</p>
+                        ${window.OplixBooksTrendLegend ? OplixBooksTrendLegend.legendHtml("month") : '<p class="an-key-metrics-history-lead">Expense, sales source, and utility breakdowns — month-over-month trends.</p>'}
                     </header>
                     <p class="an-key-metrics-empty books-hint">No breakdown lines recorded for the past 12 months.</p>
                 </section>`;
@@ -557,7 +561,7 @@
             <section class="an-key-metrics-history">
                 <header class="an-key-metrics-history-head">
                     <h3 class="an-key-metrics-history-title">Monthly detail · past 12 months · ${escapeHtml(locationName)}</h3>
-                    <p class="an-key-metrics-history-lead">Expense, sales source, and utility breakdowns — not shown in the summary above. Green ▲ / red ▼ show change vs the prior month (amount on the line; hover for %).</p>
+                    ${window.OplixBooksTrendLegend ? OplixBooksTrendLegend.legendHtml("month") : '<p class="an-key-metrics-history-lead">Expense, sales source, and utility breakdowns — month-over-month trends.</p>'}
                 </header>
                 <div class="home-card an-key-metrics-table-wrap">
                     <table class="home-cc-table an-key-metrics-table">

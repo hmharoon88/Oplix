@@ -1459,7 +1459,8 @@
         return `
             <div class="home-cc-block home-cc-full">
                 <h2 class="home-cc-heading">Month to date</h2>
-                <p class="books-hint home-mtd-hint">Compared to the same days last month. Store sales — merch for gas; register card + cash for C Store. Expenses — Daily books daily sheet when entered there; otherwise shift register payouts.</p>
+                ${window.OplixBooksTrendLegend ? OplixBooksTrendLegend.legendHtml("mtd") : '<p class="books-hint home-mtd-hint">Compared to the same days last month.</p>'}
+                <p class="books-hint home-mtd-detail-hint">Store sales — merch for gas; register card + cash for C Store. Expenses — Daily books daily sheet when entered there; otherwise shift register payouts.</p>
                 <div class="home-card home-cc-table-wrap">
                     <table class="home-cc-table home-cc-table--mtd">
                         <thead>

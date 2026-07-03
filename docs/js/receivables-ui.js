@@ -111,20 +111,25 @@
         );
     }
 
-    function renderFacilitySection(ctx) {
-        const all = ctx.receivables || [];
-        const open = M().openReceivables(all);
-        const paid = M().sortReceivables(all.filter((r) => r.isReceived)).slice(0, 50);
-        const total = M().openTotal(all);
-
+    function renderShell(opts) {
+        const {
+            hint,
+            totalLabel,
+            total,
+            openCount,
+            open,
+            received,
+            receivedHeading,
+            receivedEmpty,
+        } = opts;
         return `
-            <div class="books-panel pay-section pay-section--facility" data-rec-section>
+            <div class="books-panel pay-section${opts.facility ? " pay-section--facility" : " data-input-form"}" data-rec-section>
                 <h2 class="loc-section-heading">Receivables</h2>
-                <p class="books-hint">Money owed to this facility — same data as the Oplix app for this location.</p>
+                <p class="books-hint">${hint}</p>
                 <div class="loc-total-banner pay-total-banner">
-                    <span>Open receivables</span>
+                    <span>${totalLabel}</span>
                     <strong>${money(total)}</strong>
-                    <span class="data-list-meta">${open.length} open</span>
+                    <span class="data-list-meta">${openCount} open</span>
                 </div>
                 <div class="dir-toolbar">
                     <button type="button" class="btn" data-rec-add>Add receivable</button>
@@ -139,13 +144,55 @@
                         : `<p class="data-list-empty">No open receivables.</p>`
                 }
 
-                <h3 class="loc-subheading">Received (${paid.length}${all.filter((r) => r.isReceived).length > paid.length ? "+ shown" : ""})</h3>
+                <h3 class="loc-subheading">${receivedHeading}</h3>
                 ${
-                    paid.length
-                        ? `<ul class="loc-row-list dir-list">${paid.map(renderRow).join("")}</ul>`
-                        : `<p class="data-list-empty">No received receivables yet.</p>`
+                    received.length
+                        ? `<ul class="loc-row-list dir-list">${received.map(renderRow).join("")}</ul>`
+                        : `<p class="data-list-empty">${receivedEmpty}</p>`
                 }
             </div>`;
+    }
+
+    async function afterReceivableChange(ctx, receivable) {
+        if (ctx.onSyncBooks) await ctx.onSyncBooks(receivable);
+    }
+
+    function renderTab(ctx) {
+        const open = M().openReceivables(ctx.receivables);
+        const received = M().receivedReceivablesForMonth(ctx.receivables, ctx.monthId);
+        const total = M().openTotal(ctx.receivables);
+
+        return renderShell({
+            hint: "Open receivables for this facility. When you mark one <strong>received</strong>, it is added to this month’s Books total (Net). Same list as Facilities → Receivables.",
+            totalLabel: "Open receivables",
+            total,
+            openCount: open.length,
+            open,
+            received,
+            receivedHeading: `Received this month (${received.length}) — counts in Books Net`,
+            receivedEmpty: "Nothing marked received this month yet.",
+            ctx,
+            books: true,
+        });
+    }
+
+    function renderFacilitySection(ctx) {
+        const all = ctx.receivables || [];
+        const open = M().openReceivables(all);
+        const paid = M().sortReceivables(all.filter((r) => r.isReceived)).slice(0, 50);
+        const total = M().openTotal(all);
+
+        return renderShell({
+            hint: "Money owed to this facility — when marked received, syncs to Daily books Net for that month. Same list as Daily books → Receivables.",
+            totalLabel: "Open receivables",
+            total,
+            openCount: open.length,
+            open,
+            received: paid,
+            receivedHeading: `Received (${paid.length}${all.filter((r) => r.isReceived).length > paid.length ? "+ shown" : ""})`,
+            receivedEmpty: "No received receivables yet.",
+            facility: true,
+        });
     }
 
     function bind(container, ctx) {
@@ -185,6 +232,7 @@
                 if (st) st.textContent = "Deleting…";
                 try {
                     await Store().remove(ctx.userId, ctx.locationId, id);
+                    await afterReceivableChange(ctx, { id, isReceived: false });
                     closeForm();
                     await ctx.onRefresh();
                 } catch (err) {
@@ -214,6 +262,7 @@
                         payload.receivedAt = firebase.firestore.FieldValue.serverTimestamp();
                     } else payload.receivedAt = existing.receivedAt;
                     await Store().save(ctx.userId, ctx.locationId, payload);
+                    await afterReceivableChange(ctx, payload);
                     closeForm();
                     setStatus("Saved.");
                     await ctx.onRefresh();
@@ -241,7 +290,8 @@
                 setStatus("Updating…");
                 try {
                     await Store().markReceived(ctx.userId, ctx.locationId, item);
-                    setStatus("Marked received.");
+                    await afterReceivableChange(ctx, { ...item, isReceived: true, receivedAt: new Date() });
+                    setStatus("Marked received — added to Books Net for this month.");
                     await ctx.onRefresh();
                 } catch (err) {
                     setStatus(err.message || "Update failed.");
@@ -251,6 +301,7 @@
     }
 
     window.OplixReceivablesUI = {
+        renderTab,
         renderFacilitySection,
         bind,
         isReceivablesSection(sectionId) {

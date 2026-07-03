@@ -321,7 +321,8 @@
 }
 
 .dashboard-panel--home {
-    max-width: 1120px;
+    max-width: none;
+    width: 100%;
 }
 
 .dashboard-panel--facilities {
@@ -759,7 +760,13 @@
 }
 
 .fac-customize-screen {
-    max-width: 960px;
+    max-width: none;
+    width: 100%;
+}
+
+.location-detail-view {
+    max-width: none;
+    width: 100%;
 }
 
 .fac-customize-form {
@@ -1070,7 +1077,8 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
     gap: 12px;
-    max-width: 880px;
+    max-width: none;
+    width: 100%;
 }
 
 .fac-section-tile {
@@ -1383,6 +1391,63 @@
     border-color: #c9a227;
     background: #fef3c7;
     box-shadow: 0 0 0 1px #c9a227;
+}
+
+.books-trend-legend {
+    margin: 6px 0 0;
+    font-size: 0.8125rem;
+    color: var(--dash-muted);
+}
+
+.rpt-context-banner {
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--dash-border);
+    background: var(--dash-bg, #f8fafc);
+}
+
+.an-embedded-root {
+    margin-top: 8px;
+}
+
+.books-health-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin: 0 0 14px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--dash-border);
+    background: var(--dash-bg, #f8fafc);
+    font-size: 0.85rem;
+    color: var(--dash-muted);
+}
+
+.books-health-strip strong {
+    color: var(--dash-text);
+}
+
+.books-health-warn {
+    color: #b45309;
+    font-weight: 600;
+}
+
+.books-lines-head--checks,
+.books-lines-row--checks {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.2fr) 1.5fr 100px 120px 32px;
+    gap: 8px;
+    align-items: center;
+}
+
+.books-lines--checks .books-lines-head {
+    display: grid;
+}
+
+.books-legacy-receivables {
+    margin-top: 16px;
 }
 
 .payroll-books-table {
@@ -4241,7 +4306,8 @@
 
 /* Settings */
 .settings-panel {
-    max-width: 640px;
+    max-width: none;
+    width: 100%;
 }
 
 .settings-section {

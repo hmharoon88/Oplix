@@ -267,7 +267,9 @@
         const utilHint =
             sectionId === "utility-providers"
                 ? `<p class="books-hint dir-hint">Default types match <strong>Daily books</strong> (Internet, Water, Electric, Trash, Gas, Alarm, Rent). Custom utilities you add here also appear in Daily books for this facility.</p>`
-                : `<p class="books-hint dir-hint">Saved for this facility in Firestore.</p>`;
+                : sectionId === "vendors"
+                  ? `<p class="books-hint dir-hint">Suppliers for this facility only. View all locations in sidebar <strong>Vendors</strong> — same data, filtered by facility.</p>`
+                  : `<p class="books-hint dir-hint">Saved for this facility in Firestore.</p>`;
 
         const toolbarBtn =
             sectionId === "utility-providers"

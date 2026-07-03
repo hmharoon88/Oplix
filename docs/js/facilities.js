@@ -716,11 +716,7 @@
                       })
                     : renderComingSoonSection("Customize facility");
             case "reports":
-                return window.OplixReports
-                    ? OplixReports.renderEmbedded({
-                          locationName: data.location.name,
-                      })
-                    : renderComingSoonSection(title);
+                return renderComingSoonSection("Reports — use sidebar Reports");
             case "payroll":
                 return window.OplixPayrollUI
                     ? OplixPayrollUI.renderEmbedded({
@@ -728,7 +724,11 @@
                       })
                     : renderComingSoonSection(title);
             case "sales":
-                return renderComingSoonSection(title);
+                return window.OplixAnalytics
+                    ? OplixAnalytics.renderEmbedded({
+                          locationName: data.location.name,
+                      })
+                    : renderComingSoonSection(title);
             default:
                 return renderComingSoonSection(title);
         }
@@ -930,6 +930,12 @@
 
     async function openSection(sectionId, options) {
         if (!currentDetail) return;
+        if (sectionId === "reports" && window.OplixReports?.openForLocation) {
+            await OplixReports.openForLocation({
+                locationId: currentDetail.location.id,
+            });
+            return;
+        }
         currentSectionId = sectionId === "books-config" ? "facility-customize" : sectionId;
         const focusBooks = options?.focusBooks === true || sectionId === "books-config";
         $("location-detail-main").hidden = true;
@@ -1016,6 +1022,16 @@
                 userId,
                 locationId: currentDetail.location.id,
                 receivables: currentDetail.receivables,
+                onSyncBooks: async (receivable) => {
+                    if (window.OplixBooksLinks?.persistReceivableBooksSync) {
+                        await OplixBooksLinks.persistReceivableBooksSync(
+                            userId,
+                            currentDetail.location.id,
+                            receivable,
+                            null
+                        );
+                    }
+                },
                 onRefresh: async () => {
                     currentDetail = await loadLocationDetail(currentDetail.location.id);
                     openSection(sectionId);
@@ -1042,9 +1058,8 @@
                 },
             });
         }
-        if (sectionId === "reports" && window.OplixReports) {
-            content.querySelector("#rpt-embedded-root")?.removeAttribute("data-rpt-embedded-bound");
-            OplixReports.bindEmbedded(content, {
+        if (sectionId === "sales" && window.OplixAnalytics) {
+            OplixAnalytics.bindEmbedded(content, {
                 userId,
                 locationId: currentDetail.location.id,
                 locationName: currentDetail.location.name,

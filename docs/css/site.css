@@ -833,7 +833,8 @@ a {
 }
 
 .dashboard-panel {
-    max-width: 900px;
+    max-width: none;
+    width: 100%;
 }
 
 .dashboard-panel--wide {
@@ -1644,7 +1645,8 @@ a {
 .fac-gradient-7 { background: linear-gradient(135deg, #ff3333, #ff8033, #ffcc33); }
 
 .location-detail-view {
-    max-width: 640px;
+    max-width: none;
+    width: 100%;
 }
 
 .fac-detail-back {
