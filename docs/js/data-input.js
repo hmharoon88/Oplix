@@ -1922,11 +1922,15 @@
             .map((reg) => {
                 const unit = state.day[reg.key] || M().defaultRegisterUnit();
                 const total = M().registerBlockTotal(unit);
-                const canRemoveReg = M().countEnabledRegisterShifts({ registers: layout }) > reg.shifts.length;
+                const editingLayout = !closed && state.showLayoutCustomize;
+                const canRemoveReg =
+                    editingLayout &&
+                    M().countEnabledRegisterShifts({ registers: layout }) > reg.shifts.length;
                 const shifts = reg.shifts
                     .map((sh) => {
                         const label = sh === "shift2" ? "Shift 2" : "Shift 1";
                         const canRemoveShift =
+                            editingLayout &&
                             M().countEnabledRegisterShifts({ registers: layout }) > 1;
                         return renderRegisterShiftBlock(
                             label,
@@ -1934,7 +1938,7 @@
                             unit[sh],
                             reg.key,
                             sh,
-                            { canRemove: !closed && canRemoveShift }
+                            { canRemove: canRemoveShift }
                         );
                     })
                     .join("");
@@ -1944,7 +1948,7 @@
                     <h4 class="books-register-group-title">${escapeHtml(reg.label)}</h4>
                     <span class="books-register-group-total">${money(total.card + total.cash)}</span>
                     ${
-                        !closed && canRemoveReg
+                        canRemoveReg
                             ? `<button type="button" class="books-rm" data-layout-rm-reg="${escapeHtml(reg.key)}" title="Remove register from layout">×</button>`
                             : ""
                     }
@@ -2564,53 +2568,77 @@
             </section>`;
     }
 
-    function renderRegisterWaynePass() {
-        if (!showField("waynePass")) return "";
+    function renderDayLevelFieldGroup(title, totalHtml, cardTitle, inputHtml, hint) {
         return `
             <div class="books-register-group">
                 <div class="books-register-group-head">
-                    <h4 class="books-register-group-title">Wayne Pass</h4>
+                    <h4 class="books-register-group-title">${escapeHtml(title)}</h4>
+                    ${totalHtml || ""}
                 </div>
                 <div class="books-station-cards">
                     <div class="books-station-card">
-                        <label class="books-label">Amount ($)
-                            <input ${amountInputAttrs("wayne_pass", state.day.waynePass)}>
-                        </label>
-                        <p class="books-hint books-register-payout-hint">Sales — not a payout</p>
+                        <div class="books-station-card-head"><strong>${escapeHtml(cardTitle)}</strong></div>
+                        ${inputHtml}
+                        ${hint ? `<p class="books-hint books-register-payout-hint">${hint}</p>` : ""}
                     </div>
                 </div>
             </div>`;
     }
 
+    function renderRegisterWaynePass() {
+        if (!showField("waynePass")) return "";
+        return renderDayLevelFieldGroup(
+            "Wayne Pass",
+            `<span class="books-register-group-total">${money(state.day.waynePass)}</span>`,
+            "Amount",
+            `<label class="books-label">Amount ($)
+                <input ${amountInputAttrs("wayne_pass", state.day.waynePass)}>
+            </label>`,
+            "Sales — not a payout"
+        );
+    }
+
     function renderRegisterPayoutFields() {
         if (!showField("registerPayouts")) return "";
         const fields = [
-            { name: "in_house_account", label: "In house", value: state.day.inHouseAccount, hint: "Track only" },
-            { name: "lottery_pay_out", label: "Lottery pay out", value: state.day.lotteryPayOut, hint: "Track only" },
-            { name: "pull_tab_payout", label: "Pull tab payout", value: state.day.pullTabPayout, hint: "Track only" },
-            { name: "other_cash_pay_out", label: "Other cash pay out", value: state.day.otherCashPayOut, hint: "Lowers deposit" },
+            {
+                name: "in_house_account",
+                title: "In house",
+                value: state.day.inHouseAccount,
+                hint: "Track only",
+            },
+            {
+                name: "lottery_pay_out",
+                title: "Lottery pay out",
+                value: state.day.lotteryPayOut,
+                hint: "Track only",
+            },
+            {
+                name: "pull_tab_payout",
+                title: "Pull tab payout",
+                value: state.day.pullTabPayout,
+                hint: "Track only",
+            },
+            {
+                name: "other_cash_pay_out",
+                title: "Other cash pay out",
+                value: state.day.otherCashPayOut,
+                hint: "Lowers deposit",
+            },
         ];
-        return `
-            <div class="books-register-group books-register-group--wide">
-                <div class="books-register-group-head">
-                    <h4 class="books-register-group-title">Day-level register payouts</h4>
-                </div>
-                <p class="books-hint">Gas day totals. Prefer shift <strong>Cash pay out</strong> for drawer cash.</p>
-                <div class="books-station-cards books-station-cards--shifts">
-                    ${fields
-                        .map(
-                            (f) => `
-                    <div class="books-station-card">
-                        <div class="books-station-card-head"><strong>${escapeHtml(f.label)}</strong></div>
-                        <label class="books-label">Amount ($)
-                            <input ${amountInputAttrs(f.name, f.value)}>
-                        </label>
-                        <p class="books-hint books-register-payout-hint">${escapeHtml(f.hint)}</p>
-                    </div>`
-                        )
-                        .join("")}
-                </div>
-            </div>`;
+        return fields
+            .map((f) =>
+                renderDayLevelFieldGroup(
+                    f.title,
+                    `<span class="books-register-group-total">${money(f.value)}</span>`,
+                    "Amount",
+                    `<label class="books-label">Amount ($)
+                        <input ${amountInputAttrs(f.name, f.value)}>
+                    </label>`,
+                    f.hint
+                )
+            )
+            .join("\n");
     }
 
     function renderExpenseGroupCards(listKey, title, columns, addLabel, hint) {
@@ -2779,7 +2807,7 @@
             const gasExtras = [renderRegisterWaynePass(), renderRegisterPayoutFields()].filter(Boolean);
             if (gasExtras.length) {
                 parts.push(
-                    `<div class="books-register-groups books-register-groups--gaming">${gasExtras.join("\n")}</div>`
+                    `<div class="books-register-groups books-register-groups--daylevel">${gasExtras.join("\n")}</div>`
                 );
             }
         }
