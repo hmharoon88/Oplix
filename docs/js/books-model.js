@@ -857,16 +857,18 @@
         const FC = window.OplixBooksFieldConfig;
         const config = agg?.booksFieldConfig;
         const hasGas = !!agg?.hasGasStation;
+        // Pull Tab winners (per terminal) and day-level pull tab payout are the same amount —
+        // show one line only (prefer terminal winners; fall back to day-level payout).
+        const pullTabWinners = num(agg?.pulltabWinner) || num(agg?.pullTabPayout);
         const lines = [
             { fieldId: "pulltabs", label: "Pulltab cash", amount: num(agg?.pulltabCash) },
-            { fieldId: "pulltabs", label: "Pulltab winners", amount: num(agg?.pulltabWinner) },
             { fieldId: "lottery", label: "Lottery", amount: num(agg?.lotteryCash) },
+            { fieldId: "pulltabs", label: "Pull Tab winners", amount: pullTabWinners },
             { fieldId: "windStations", label: "Wind station", amount: num(agg?.windStationCash) },
             { fieldId: "kenoStations", label: "Keno station", amount: num(agg?.kenoStationCash) },
             { fieldId: "waynePass", label: "Wayne Pass", amount: num(agg?.waynePass) },
             { fieldId: "registerPayouts", label: "In house account", amount: num(agg?.inHouseAccount) },
             { fieldId: "registerPayouts", label: "Lottery pay out", amount: num(agg?.lotteryPayOut) },
-            { fieldId: "registerPayouts", label: "Pull tab payout", amount: num(agg?.pullTabPayout) },
             { fieldId: "registerPayouts", label: "Other cash pay out", amount: num(agg?.otherCashPayOut) },
         ].filter((r) => num(r.amount) !== 0);
         return FC && config ? FC.filterBreakdownLines(lines, config, hasGas) : lines;

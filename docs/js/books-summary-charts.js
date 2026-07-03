@@ -462,12 +462,13 @@
                 : []),
         ];
 
+        const pullTabWinners = M.num(agg.pulltabWinner) || M.num(agg.pullTabPayout);
         const trackRows = [
             ...(M.num(agg.pulltabCash) ? [keyMetricCell("Pulltab cash (track)", money(agg.pulltabCash), opt)] : []),
-            ...(M.num(agg.pulltabWinner)
-                ? [keyMetricCell("Pulltab winners (track)", money(agg.pulltabWinner), opt)]
-                : []),
             ...(M.num(agg.lotteryCash) ? [keyMetricCell("Lottery (track)", money(agg.lotteryCash), opt)] : []),
+            ...(pullTabWinners
+                ? [keyMetricCell("Pull Tab winners (track)", money(pullTabWinners), opt)]
+                : []),
             ...(M.num(agg.windStationCash)
                 ? [keyMetricCell("Wind station (track)", money(agg.windStationCash), opt)]
                 : []),
@@ -480,9 +481,6 @@
                 : []),
             ...(M.num(agg.lotteryPayOut)
                 ? [keyMetricCell("Lottery pay out (track)", money(agg.lotteryPayOut), opt)]
-                : []),
-            ...(M.num(agg.pullTabPayout)
-                ? [keyMetricCell("Pull tab payout (track)", money(agg.pullTabPayout), opt)]
                 : []),
         ];
 
@@ -511,15 +509,17 @@
         const cols = [
             { label: "Register — card", get: (a) => a.registerCard },
             { label: "Register — cash", get: (a) => a.registerCash },
-            { label: "Lottery (track only)", get: (a) => a.lotteryCash },
             { label: "Pulltab cash (track only)", get: (a) => a.pulltabCash },
-            { label: "Pulltab winners (track only)", get: (a) => a.pulltabWinner },
+            { label: "Lottery (track only)", get: (a) => a.lotteryCash },
+            {
+                label: "Pull Tab winners (track only)",
+                get: (a) => num(a.pulltabWinner) || num(a.pullTabPayout),
+            },
             { label: "Wind station (track only)", get: (a) => a.windStationCash },
             { label: "Keno station (track only)", get: (a) => a.kenoStationCash },
             { label: "Wayne Pass (track only)", get: (a) => a.waynePass },
             { label: "In house (track only)", get: (a) => a.inHouseAccount },
             { label: "Lottery pay out (track only)", get: (a) => a.lotteryPayOut },
-            { label: "Pull tab payout (track only)", get: (a) => a.pullTabPayout },
             { label: "Credit card (pump)", get: (a) => a.creditCard },
             { label: "Fuel ($)", get: (a) => a.fuelDollars },
             { label: "Fuel (gal.)", get: (a) => a.fuelGallons, format: "number" },

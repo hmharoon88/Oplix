@@ -194,7 +194,7 @@
         return [
             { label: "In house account", amount: num(agg?.inHouseAccount), trackOnly: true },
             { label: "Lottery pay out", amount: num(agg?.lotteryPayOut), trackOnly: true },
-            { label: "Pull tab payout", amount: num(agg?.pullTabPayout), trackOnly: true },
+            // Pull tab payout is the same as Pull Tab winners — shown once in track-only breakdown.
             { label: "Other cash pay out", amount: num(agg?.otherCashPayOut), trackOnly: false },
         ].filter((r) => r.amount !== 0);
     }
