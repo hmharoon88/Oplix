@@ -1256,17 +1256,29 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     align-items: stretch;
+    min-width: 0;
 }
 
 .books-register-shift {
     margin: 0;
     height: 100%;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 0;
     padding: 12px;
     border-radius: 10px;
     background: var(--dash-bg, #f8fafc);
+    overflow: hidden;
+}
+
+.books-register-shift .books-input,
+.books-register-shift .books-select,
+.books-register-shift input {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .books-register-shift legend {
@@ -1409,16 +1421,28 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     margin-bottom: 12px;
+    min-width: 0;
 }
 
 .books-recon-card {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-width: 0;
     padding: 12px;
     border: 1px solid var(--dash-border, #e2e8f0);
     border-radius: 10px;
     background: var(--dash-bg, #f8fafc);
+    overflow: hidden;
+}
+
+.books-recon-card .books-input,
+.books-recon-card .books-select,
+.books-recon-card input {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .books-recon-card--readonly {
@@ -1905,10 +1929,12 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .books-util-payroll-panel {
+    min-width: 0;
     padding: 14px 16px;
     border: 1px solid var(--dash-border, #e2e8f0);
     border-radius: 12px;
     background: #fff;
+    overflow: hidden;
 }
 
 .books-util-payroll-panel--other {
@@ -1935,6 +1961,19 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
     margin: 10px 0 12px;
+    min-width: 0;
+}
+
+.books-util-card .books-input,
+.books-util-card .books-select,
+.books-util-card input,
+.books-payroll-card .books-input,
+.books-payroll-card .books-select,
+.books-payroll-card input {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .books-payroll-cards--other {
@@ -1946,10 +1985,12 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-width: 0;
     padding: 12px;
     border: 1px solid var(--dash-border, #e2e8f0);
     border-radius: 10px;
     background: var(--dash-bg, #f8fafc);
+    overflow: hidden;
 }
 
 .books-util-card-head {
@@ -2052,17 +2093,19 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
 
 .books-gaming-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
     margin: 0 0 16px;
     align-items: start;
 }
 
 .books-gaming-panel {
+    min-width: 0;
     padding: 14px 16px;
     border: 1px solid var(--dash-border, #e2e8f0);
     border-radius: 12px;
     background: #fff;
+    overflow: hidden;
 }
 
 .books-gaming-panel-head {
@@ -2079,11 +2122,16 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     margin: 0;
 }
 
+.books-gaming-panel-head .books-total-line {
+    flex-shrink: 0;
+}
+
 .books-station-cards {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
     margin: 10px 0 0;
+    min-width: 0;
 }
 
 .books-station-cards--shifts {
@@ -2091,7 +2139,6 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .books-station-cards .books-add-line {
-    grid-column: 1 / -1;
     justify-self: start;
 }
 
@@ -2099,10 +2146,12 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-width: 0;
     padding: 12px;
     border: 1px solid var(--dash-border, #e2e8f0);
     border-radius: 10px;
     background: var(--dash-bg, #f8fafc);
+    overflow: hidden;
 }
 
 .books-station-card-head {
@@ -2110,40 +2159,63 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    min-width: 0;
 }
 
 .books-station-card-head strong {
     font-size: 0.875rem;
     color: #0f172a;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .books-station-card-fields {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+    min-width: 0;
 }
 
 .books-station-card-fields--2 {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .books-station-card-fields .books-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
     margin: 0;
+    min-width: 0;
+}
+
+.books-station-card .books-input,
+.books-station-card .books-select,
+.books-station-card input {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 @media (max-width: 900px) {
     .books-util-payroll-grid,
     .books-gaming-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
 @media (max-width: 520px) {
     .books-util-cards,
     .books-payroll-cards,
-    .books-station-cards,
     .books-station-cards--shifts {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .books-station-card-fields,
+    .books-station-card-fields--2 {
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
