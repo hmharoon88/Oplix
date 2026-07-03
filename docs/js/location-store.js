@@ -135,6 +135,12 @@
         return snap.exists ? { id: locationId, ...snap.data() } : null;
     }
 
+    async function updateBooksStationLayout(userId, locationId, booksStationLayout) {
+        await locRef(userId, locationId).set({ booksStationLayout }, { merge: true });
+        const snap = await locRef(userId, locationId).get();
+        return snap.exists ? { id: locationId, ...snap.data() } : null;
+    }
+
     async function deleteLocation(userId, locationId) {
         await deleteLocationEmployees(userId, locationId);
         await deleteManagerTasksForLocation(userId, locationId);
@@ -166,6 +172,7 @@
         updateFacilityCustomization,
         setProfileDocumentId,
         updateBooksFieldConfig,
+        updateBooksStationLayout,
         deleteLocation,
         newId,
     };

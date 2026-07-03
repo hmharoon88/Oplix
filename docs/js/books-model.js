@@ -139,6 +139,89 @@
         return [normalizeKenoStationEntry({ station: "1" }, "ks_0", 0)];
     }
 
+    /** Per-location template for pulltab / wind / keno slots (ids + labels only). */
+    function defaultStationLayout() {
+        return {
+            pulltabs: [{ id: "pt_0" }],
+            windStations: [{ id: "ws_0", station: "1" }],
+            kenoStations: [{ id: "ks_0", station: "1" }],
+        };
+    }
+
+    function normalizeStationLayout(raw) {
+        const base = defaultStationLayout();
+        if (!raw || typeof raw !== "object") return base;
+        const pulltabs = Array.isArray(raw.pulltabs)
+            ? raw.pulltabs
+                  .map((row, i) => ({
+                      id: String(row?.id || `pt_${i}`).trim() || `pt_${i}`,
+                      lastSequence: String(row?.lastSequence ?? "").trim(),
+                  }))
+                  .filter((row) => row.id)
+            : base.pulltabs;
+        const windStations = Array.isArray(raw.windStations)
+            ? raw.windStations
+                  .slice(0, 3)
+                  .map((row, i) => ({
+                      id: String(row?.id || `ws_${i}`).trim() || `ws_${i}`,
+                      station: String(row?.station ?? String(i + 1)),
+                  }))
+                  .filter((row) => row.id)
+            : base.windStations;
+        const kenoStations = Array.isArray(raw.kenoStations)
+            ? raw.kenoStations
+                  .slice(0, 3)
+                  .map((row, i) => ({
+                      id: String(row?.id || `ks_${i}`).trim() || `ks_${i}`,
+                      station: String(row?.station ?? String(i + 1)),
+                  }))
+                  .filter((row) => row.id)
+            : base.kenoStations;
+        return { pulltabs, windStations, kenoStations };
+    }
+
+    /**
+     * Snapshot layout from a day (no amounts).
+     * Pulltab lastSequence is today's sequence when entered, otherwise keeps previous.
+     */
+    function stationLayoutFromDay(day, previousLayout) {
+        const d = normalizeDayDoc(day);
+        const prev = normalizeStationLayout(previousLayout);
+        const prevPullById = Object.fromEntries(prev.pulltabs.map((p) => [p.id, p]));
+        return {
+            pulltabs: (d.pulltabs || []).map((p, i) => {
+                const id = p.id || `pt_${i}`;
+                const todaySeq = String(p.ticketNumber ?? "").trim();
+                const lastSequence = todaySeq || prevPullById[id]?.lastSequence || "";
+                return { id, lastSequence };
+            }),
+            windStations: (d.windStations || []).slice(0, 3).map((w, i) => ({
+                id: w.id || `ws_${i}`,
+                station: String(w.station ?? String(i + 1)),
+            })),
+            kenoStations: (d.kenoStations || []).slice(0, 3).map((k, i) => ({
+                id: k.id || `ks_${i}`,
+                station: String(k.station ?? String(i + 1)),
+            })),
+        };
+    }
+
+    /** Apply location layout to a day (empty amounts). Used for days with no saved entry yet. */
+    function applyStationLayoutToDay(day, layout) {
+        const d = normalizeDayDoc(day);
+        const L = normalizeStationLayout(layout);
+        d.pulltabs = L.pulltabs.map((t, i) =>
+            normalizePulltabEntry({ id: t.id }, t.id || `pt_${i}`)
+        );
+        d.windStations = L.windStations.map((t, i) =>
+            normalizeWindStationEntry({ id: t.id, station: t.station }, t.id || `ws_${i}`, i)
+        );
+        d.kenoStations = L.kenoStations.map((t, i) =>
+            normalizeKenoStationEntry({ id: t.id, station: t.station }, t.id || `ks_${i}`, i)
+        );
+        return d;
+    }
+
     function normalizeFuelSale(raw) {
         const f = raw || {};
         const regular = num(f.regular);
@@ -2150,6 +2233,10 @@
         pulltabDayTotal,
         windStationDayTotal,
         kenoStationDayTotal,
+        defaultStationLayout,
+        normalizeStationLayout,
+        stationLayoutFromDay,
+        applyStationLayoutToDay,
         lotteryDayTotal,
         daySalesForAggregate,
         cardCashBreakdownFromAggregate,

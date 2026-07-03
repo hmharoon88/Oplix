@@ -125,11 +125,45 @@
         return window.confirm("You have unsaved changes on this day. Discard them?");
     }
 
+    function getStationLayout() {
+        const loc = currentLocation();
+        return M().normalizeStationLayout(loc?.booksStationLayout);
+    }
+
+    function dayDocForId(dayId) {
+        const saved = state.daysById[dayId];
+        const day = M().normalizeDayDoc(saved);
+        if (saved) return day;
+        return M().applyStationLayoutToDay(day, getStationLayout());
+    }
+
+    async function persistStationLayout() {
+        if (!userId || !state.locationId || !window.OplixLocationStore?.updateBooksStationLayout) {
+            return;
+        }
+        const layout = M().stationLayoutFromDay(state.day, getStationLayout());
+        const loc = currentLocation();
+        if (loc) loc.booksStationLayout = layout;
+        try {
+            const updated = await OplixLocationStore.updateBooksStationLayout(
+                userId,
+                state.locationId,
+                layout
+            );
+            if (updated) {
+                const idx = locations.findIndex((l) => l.id === state.locationId);
+                if (idx >= 0) locations[idx] = { ...locations[idx], ...updated };
+            }
+        } catch (err) {
+            console.warn("[Oplix] Could not save station layout:", err);
+        }
+    }
+
     function switchDay(dayId) {
         if (dayId === state.dayId) return true;
         if (!confirmDiscardDirty()) return false;
         state.dayId = dayId;
-        state.day = M().normalizeDayDoc(state.daysById[state.dayId]);
+        state.day = dayDocForId(state.dayId);
         state.dirty = false;
         render();
         return true;
@@ -1049,14 +1083,28 @@
             const add = e.target.closest("[data-di-add]");
             if (add) {
                 if (isViewingClosedDay() || isViewingClosedMonth()) return;
-                addLine(add.dataset.diAdd);
+                const listKey = add.dataset.diAdd;
+                if (["pulltabs", "windStations", "kenoStations"].includes(listKey)) {
+                    syncFromForm();
+                }
+                addLine(listKey);
+                if (["pulltabs", "windStations", "kenoStations"].includes(listKey)) {
+                    persistStationLayout();
+                }
                 render();
                 return;
             }
             const rm = e.target.closest("[data-di-rm]");
             if (rm) {
                 if (isViewingClosedDay() || isViewingClosedMonth()) return;
-                removeLine(rm.dataset.diList, rm.dataset.diRm);
+                const listKey = rm.dataset.diList;
+                if (["pulltabs", "windStations", "kenoStations"].includes(listKey)) {
+                    syncFromForm();
+                }
+                removeLine(listKey, rm.dataset.diRm);
+                if (["pulltabs", "windStations", "kenoStations"].includes(listKey)) {
+                    persistStationLayout();
+                }
                 render();
                 return;
             }
@@ -1612,7 +1660,7 @@
             if (!String(state.dayId).startsWith(`${state.monthId}-`)) {
                 state.dayId = state.entryDayId;
             }
-            state.day = M().normalizeDayDoc(daysById[state.dayId]);
+            state.day = dayDocForId(state.dayId);
             refreshExpenseDescriptions();
             state.dirty = false;
             setBooksStatus("");
@@ -1663,6 +1711,7 @@
         await Promise.all([
             Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day),
             Store().saveMonth(userId, state.locationId, state.monthId, state.month),
+            persistStationLayout(),
         ]);
         window.OplixAnalytics?.invalidateCache?.();
         state.daysById[state.dayId] = { ...state.day, _dayId: state.dayId };
@@ -1955,10 +2004,13 @@
             </div>`;
     }
 
-    function renderStationCards(listKey, columns, addLabel, itemLabel) {
+    function renderStationCards(listKey, columns, addLabel, itemLabel, options = {}) {
         const list = state.day[listKey] || [];
+        const metaById = options.metaById || {};
         const cards = list
             .map((row, index) => {
+                const meta = metaById[row.id] || {};
+                const lastSequence = String(meta.lastSequence || "").trim();
                 const fields = columns
                     .map((c) => {
                         const type = c.type || "text";
@@ -1968,8 +2020,17 @@
                                 <input ${amountInputAttrs(c.name, val)}>
                             </label>`;
                         }
+                        const hint =
+                            c.name === "ticketNumber" && lastSequence
+                                ? `<span class="books-field-hint">Last: ${escapeHtml(lastSequence)}</span>`
+                                : "";
                         return `<label class="books-label">${escapeHtml(c.label)}
-                            <input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}">
+                            <input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}"${
+                            c.name === "ticketNumber" && lastSequence
+                                ? ` placeholder="${escapeHtml(lastSequence)}"`
+                                : ""
+                        }>
+                            ${hint}
                         </label>`;
                     })
                     .join("");
@@ -1977,6 +2038,11 @@
                 <div class="books-station-card" data-di-row="${escapeHtml(row.id)}">
                     <div class="books-station-card-head">
                         <strong>${escapeHtml(itemLabel || "Item")} ${index + 1}</strong>
+                        ${
+                            lastSequence
+                                ? `<span class="books-station-last-seq" title="Last sequence number entered">Last ${escapeHtml(lastSequence)}</span>`
+                                : ""
+                        }
                         <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="${listKey}" title="Remove">×</button>
                     </div>
                     <div class="books-station-card-fields">${fields}</div>
@@ -2024,6 +2090,8 @@
 
     function renderPulltabs() {
         const total = M().pulltabDayTotal(state.day);
+        const layout = getStationLayout();
+        const metaById = Object.fromEntries((layout.pulltabs || []).map((p) => [p.id, p]));
         return `
             <div class="books-register-group">
                 <div class="books-register-group-head">
@@ -2033,13 +2101,14 @@
                 ${renderStationCards(
                     "pulltabs",
                     [
-                        { name: "ticketNumber", label: "Ticket #" },
+                        { name: "ticketNumber", label: "Sequence number" },
                         { name: "cash", label: "Cash", type: "number" },
                         { name: "winner", label: "Winners", type: "number" },
                         { name: "overShort", label: "O/S", type: "number" },
                     ],
                     "+ Add terminal",
-                    "Terminal"
+                    "Terminal",
+                    { metaById }
                 )}
             </div>`;
     }
