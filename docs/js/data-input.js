@@ -2061,18 +2061,22 @@
 
     function renderUtilitiesPayroll() {
         const utilityKeys = mergedUtilityKeys();
-        const utilRows = utilityKeys
+        const utilCards = utilityKeys
             .map((u) => {
                 const deletable = canDeleteUtility(u.key);
                 return `
-            <div class="books-util-row" data-di-util-key="${escapeHtml(u.key)}">
-                <span class="books-util-label" title="${escapeHtml(u.label)}">${escapeHtml(u.label)}</span>
-                <input ${amountInputAttrs(`util_${u.key}`, state.month.utilities[u.key])}>
-                ${
-                    deletable
-                        ? `<button type="button" class="books-rm" data-di-util-rm="${escapeHtml(u.key)}" title="Remove utility">×</button>`
-                        : `<span class="books-util-spacer" aria-hidden="true"></span>`
-                }
+            <div class="books-util-card" data-di-util-key="${escapeHtml(u.key)}">
+                <div class="books-util-card-head">
+                    <span class="books-util-label" title="${escapeHtml(u.label)}">${escapeHtml(u.label)}</span>
+                    ${
+                        deletable
+                            ? `<button type="button" class="books-rm" data-di-util-rm="${escapeHtml(u.key)}" title="Remove utility">×</button>`
+                            : ""
+                    }
+                </div>
+                <label class="books-label">Amount
+                    <input ${amountInputAttrs(`util_${u.key}`, state.month.utilities[u.key])}>
+                </label>
             </div>`;
             })
             .join("");
@@ -2082,14 +2086,16 @@
         );
         const payrollSynced = payrollLines.length > 0;
 
-        const payrollFields = payrollSynced
+        const payrollWeekCards = payrollSynced
             ? ""
             : ["week1", "week2", "week3", "week4"]
                   .map(
                       (w, i) => `
-            <label class="books-label">Week ${i + 1}
-                <input ${amountInputAttrs(`payroll_${w}`, state.month.payroll[w])}>
-            </label>`
+            <div class="books-payroll-card">
+                <label class="books-label">Week ${i + 1}
+                    <input ${amountInputAttrs(`payroll_${w}`, state.month.payroll[w])}>
+                </label>
+            </div>`
                   )
                   .join("");
 
@@ -2104,82 +2110,81 @@
               M().num(state.month.payroll.week3) +
               M().num(state.month.payroll.week4);
 
-        const payrollLinesTable = payrollSynced
-            ? `
-                <div class="home-card home-cc-table-wrap payroll-books-table">
-                    <table class="home-cc-table">
-                        <thead>
-                            <tr>
-                                <th>Employee</th>
-                                <th class="home-cc-num">Hours</th>
-                                <th class="home-cc-num">Rate</th>
-                                <th class="home-cc-num">Pay</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${payrollLines
-                                .map(
-                                    (l) => `
-                                <tr>
-                                    <td>${escapeHtml(l.employeeName || "Employee")}</td>
-                                    <td class="home-cc-num">${M().formatAmountForInput(l.hours)}</td>
-                                    <td class="home-cc-num">${money(l.hourlyRate)}</td>
-                                    <td class="home-cc-num">${money(l.pay)}</td>
-                                </tr>`
-                                )
-                                .join("")}
-                        </tbody>
-                    </table>
-                </div>
-                <p class="books-hint">Synced from the <strong>Payroll</strong> tab — this total is included in Books summary automatically. Edit hours in Payroll, save, and it updates here. You do not need to enter weekly totals below.</p>`
-            : `<p class="books-hint">Enter weekly totals below, or use the <strong>Payroll</strong> tab to enter hours by employee (syncs here and into Books summary when you save).</p>`;
-
-        const payrollWeekBlock = payrollFields
-            ? `<h4 class="books-week-heading">Weekly totals</h4>
-                <div class="books-payroll-weeks">${payrollFields}</div>`
+        const payrollEmployeeCards = payrollSynced
+            ? payrollLines
+                  .map(
+                      (l) => `
+                <div class="books-payroll-card books-payroll-card--employee">
+                    <strong class="books-payroll-card-name">${escapeHtml(l.employeeName || "Employee")}</strong>
+                    <div class="books-payroll-card-stats">
+                        <div><span>Hours</span><strong>${M().formatAmountForInput(l.hours)}</strong></div>
+                        <div><span>Rate</span><strong>${money(l.hourlyRate)}</strong></div>
+                        <div><span>Pay</span><strong>${money(l.pay)}</strong></div>
+                    </div>
+                </div>`
+                  )
+                  .join("")
             : "";
 
-        const parts = ['<div class="books-panel data-input-form">'];
-        if (showField("utilities")) {
-            parts.push(`<h3 class="books-subtitle">Utilities</h3>
-                <p class="books-hint">Monthly amounts per utility. Standard types (Internet, Water, Electric, etc.) are always listed; add custom ones below.</p>
-                <div class="books-util-list" data-di-util-list>
-                    <div class="books-util-head">
-                        <span>Utility</span>
-                        <span>Amount</span>
-                        <span></span>
-                    </div>
-                    ${utilRows}
-                    <button type="button" class="books-add-line" data-di-util-add>+ Add utility</button>
+        const utilitiesPanel = showField("utilities")
+            ? `<section class="books-util-payroll-panel">
+                <div class="books-util-payroll-panel-head">
+                    <h3 class="books-subtitle">Utilities</h3>
+                    <p class="books-total-line">Total: <strong>${money(utilTotal)}</strong></p>
                 </div>
-                <p class="books-total-line">Utilities total: <strong>${money(utilTotal)}</strong></p>`);
-        }
-        if (showField("payroll")) {
-            parts.push(`<h3 class="books-subtitle">Payroll</h3>
-                ${payrollLinesTable}
-                ${payrollWeekBlock}
-                <p class="books-total-line">Payroll total: <strong>${money(payTotal)}</strong></p>`);
-        }
-        if (showField("salesTax") || showField("accountant")) {
-            parts.push(`<h3 class="books-subtitle">Other monthly</h3>
-                <div class="books-grid-2">
+                <p class="books-hint">Monthly amounts per utility. Add custom ones below.</p>
+                <div class="books-util-cards" data-di-util-list>
+                    ${utilCards}
+                </div>
+                <button type="button" class="books-add-line" data-di-util-add>+ Add utility</button>
+            </section>`
+            : "";
+
+        const payrollPanel = showField("payroll")
+            ? `<section class="books-util-payroll-panel">
+                <div class="books-util-payroll-panel-head">
+                    <h3 class="books-subtitle">Payroll</h3>
+                    <p class="books-total-line">Total: <strong>${money(payTotal)}</strong></p>
+                </div>
+                ${
+                    payrollSynced
+                        ? `<p class="books-hint">Synced from the <strong>Payroll</strong> tab. Edit hours there to update Books.</p>
+                    <div class="books-payroll-cards">${payrollEmployeeCards}</div>`
+                        : `<p class="books-hint">Enter weekly totals, or use the <strong>Payroll</strong> tab for hours by employee.</p>
+                    <div class="books-payroll-cards">${payrollWeekCards}</div>`
+                }
+            </section>`
+            : "";
+
+        const otherPanel =
+            showField("salesTax") || showField("accountant")
+                ? `<section class="books-util-payroll-panel books-util-payroll-panel--other">
+                <h3 class="books-subtitle">Other monthly</h3>
+                <div class="books-payroll-cards books-payroll-cards--other">
                     ${
                         showField("salesTax")
-                            ? `<label class="books-label">Sales tax
+                            ? `<div class="books-payroll-card"><label class="books-label">Sales tax
                         <input ${amountInputAttrs("salesTax", state.month.salesTax)}>
-                    </label>`
+                    </label></div>`
                             : ""
                     }
                     ${
                         showField("accountant")
-                            ? `<label class="books-label">Accountant
+                            ? `<div class="books-payroll-card"><label class="books-label">Accountant
                         <input ${amountInputAttrs("accountant", state.month.accountant)}>
-                    </label>`
+                    </label></div>`
                             : ""
                     }
-                </div>`);
-        }
+                </div>
+            </section>`
+                : "";
+
         const customMonth = renderCustomBooksFields("month", state.month.customAmounts);
+        const parts = [
+            '<div class="books-panel data-input-form">',
+            `<div class="books-util-payroll-grid">${utilitiesPanel}${payrollPanel}</div>`,
+            otherPanel,
+        ];
         if (customMonth) parts.push(customMonth);
         parts.push(
             isViewingClosedMonth()
@@ -2563,37 +2568,11 @@
                 </div>
                 ${
                     rows.length
-                        ? `<div class="home-card home-cc-table-wrap">
-                    <table class="home-cc-table books-cash-recon-table">
-                        <thead>
-                            <tr>
-                                <th>${escapeHtml(title.includes("Register") ? "Register" : title.split(" ")[0])}</th>
-                                <th>${rows[0]?.kind === "pulltab" ? "Ticket" : rows[0]?.kind === "wind" || rows[0]?.kind === "keno" ? "Type" : "Shift"}</th>
-                                <th class="home-cc-num">Expected</th>
-                                <th class="home-cc-num">Received</th>
-                                <th class="home-cc-num">Pay out</th>
-                                <th class="home-cc-num">Variance</th>
-                                <th>Status</th>
-                                <th>Note</th>
-                            </tr>
-                        </thead>
-                        <tbody>${renderReconTableRows(rows)}</tbody>
-                        <tfoot>
-                            <tr class="books-cash-recon-total-row">
-                                <td colspan="2"><strong>Day total</strong></td>
-                                <td class="home-cc-num"><strong>${money(section.expectedTotal)}</strong></td>
-                                <td class="home-cc-num"><strong>${money(section.receivedTotal)}</strong></td>
-                                <td class="home-cc-num"><strong>${money(section.payOutTotal)}</strong></td>
-                                <td class="home-cc-num"><strong class="${varianceColorClass(section.variance)}">${money(section.variance)}</strong></td>
-                                <td colspan="2"></td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>`
+                        ? renderReconCardsGrid(rows)
                         : `<p class="books-hint">Enter ${escapeHtml(title.toLowerCase())} amounts on the <strong>Daily sheet</strong> first.</p>`
                 }
                 ${extraHtml || ""}
-                <label class="books-label">${escapeHtml(depositLabel)}
+                <label class="books-label books-cash-recon-deposit-field">${escapeHtml(depositLabel)}
                     <input ${amountInputAttrs(depositField, depositVal)}>
                 </label>
                 ${
@@ -2604,6 +2583,98 @@
             </section>`;
     }
 
+    function renderReconShiftCard(row, options = {}) {
+        const readonly = options.readonly === true;
+        const prefix = row.namePrefix;
+        const varCls = varianceColorClass(row.variance);
+        const balanced = Math.abs(num(row.variance)) < 0.005;
+        const title = row.shiftLabel || row.rowLabel;
+        const subtitle = row.shiftLabel && row.rowLabel !== row.shiftLabel ? row.rowLabel : "";
+
+        if (readonly) {
+            return `
+                <div class="books-recon-card books-recon-card--readonly">
+                    <div class="books-recon-card-head">
+                        <strong>${escapeHtml(title)}</strong>
+                        ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ""}
+                        <span class="books-register-recon-status${balanced && row.verified ? " books-register-recon-status--ok" : ""}">
+                            ${row.verified ? (balanced ? "Verified" : "Verified · variance") : balanced ? "Balanced" : "Open"}
+                        </span>
+                    </div>
+                    <div class="books-recon-card-stats">
+                        <div><span>Expected</span><strong>${money(row.expected)}</strong></div>
+                        <div><span>Received</span><strong>${money(row.counted)}</strong></div>
+                        <div><span>Pay out</span><strong>${money(row.payOut)}</strong></div>
+                        <div><span>Variance</span><strong class="${varCls}">${money(row.variance)}</strong></div>
+                    </div>
+                </div>`;
+        }
+
+        return `
+            <div class="books-recon-card">
+                <div class="books-recon-card-head">
+                    <strong>${escapeHtml(row.rowLabel)}</strong>
+                    <span>${escapeHtml(row.shiftLabel || "")}</span>
+                </div>
+                <div class="books-recon-card-stats">
+                    <div><span>Expected</span><strong>${money(row.expected)}</strong></div>
+                    <div><span>Variance</span><strong class="${varCls}">${money(row.variance)}</strong></div>
+                </div>
+                <label class="books-label">Received
+                    <input ${amountInputAttrs(`${prefix}_counted`, row.counted)} aria-label="Received">
+                </label>
+                ${
+                    row.kind === "register"
+                        ? `<div class="books-recon-card-payout"><span>Pay out</span><strong>${money(row.payOut)}</strong></div>`
+                        : renderPayOutsCell(prefix, row.payOuts)
+                }
+                <label class="books-check-label books-register-recon-verified">
+                    <input type="checkbox" name="${prefix}_verified"${row.verified ? " checked" : ""}>
+                    Verified
+                </label>
+                <label class="books-label">Note
+                    <input type="text" class="books-input" name="${prefix}_note" value="${escapeHtml(row.note || "")}" placeholder="Optional">
+                </label>
+            </div>`;
+    }
+
+    function groupReconRowsByLabel(rows) {
+        const groups = [];
+        const map = new Map();
+        (rows || []).forEach((row) => {
+            const key = row.regKey || row.rowLabel || "row";
+            if (!map.has(key)) {
+                const group = { key, label: row.rowLabel || key, rows: [] };
+                map.set(key, group);
+                groups.push(group);
+            }
+            map.get(key).rows.push(row);
+        });
+        return groups;
+    }
+
+    function renderReconCardsGrid(rows, options = {}) {
+        if (!rows?.length) return "";
+        const groups = groupReconRowsByLabel(rows);
+        const multiShiftGroups = groups.some((g) => g.rows.length > 1);
+
+        if (!multiShiftGroups) {
+            return `<div class="books-recon-cards">${rows.map((r) => renderReconShiftCard(r, options)).join("")}</div>`;
+        }
+
+        return groups
+            .map(
+                (group) => `
+            <div class="books-recon-unit">
+                <h4 class="books-recon-unit-title">${escapeHtml(group.label)}</h4>
+                <div class="books-recon-cards">
+                    ${group.rows.map((r) => renderReconShiftCard(r, options)).join("")}
+                </div>
+            </div>`
+            )
+            .join("");
+    }
+
     /** Register section on Cash reconciliation tab — day deposit only; per-shift entry is on Daily sheet. */
     function renderRegisterDepositSection(section, extraHtml) {
         if (!section.applicable) return "";
@@ -2611,20 +2682,7 @@
         const depositVarCls =
             section.deposit == null ? "" : varianceColorClass(section.depositVariance);
         const summaryCls = reconSummaryClass(section);
-        const shiftRows = (section.rows || [])
-            .map(
-                (row) => `
-                <tr>
-                    <td>${escapeHtml(row.rowLabel)}</td>
-                    <td>${escapeHtml(row.shiftLabel)}</td>
-                    <td class="home-cc-num">${money(row.expected)}</td>
-                    <td class="home-cc-num">${money(row.counted)}</td>
-                    <td class="home-cc-num">${money(row.payOut)}</td>
-                    <td class="home-cc-num ${varianceColorClass(row.variance)}">${money(row.variance)}</td>
-                    <td>${row.verified ? "Verified" : "—"}</td>
-                </tr>`
-            )
-            .join("");
+        const cardsHtml = renderReconCardsGrid(section.rows || [], { readonly: true });
 
         return `
             <section class="books-cash-recon-block">
@@ -2645,27 +2703,11 @@
                     </div>
                 </div>
                 ${
-                    shiftRows
-                        ? `<div class="home-card home-cc-table-wrap">
-                    <table class="home-cc-table books-cash-recon-table books-cash-recon-table--readonly">
-                        <thead>
-                            <tr>
-                                <th>Register</th>
-                                <th>Shift</th>
-                                <th class="home-cc-num">Expected</th>
-                                <th class="home-cc-num">Received</th>
-                                <th class="home-cc-num">Pay out</th>
-                                <th class="home-cc-num">Variance</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>${shiftRows}</tbody>
-                    </table>
-                </div>`
-                        : `<p class="books-hint">Enter register sales and received cash on the <strong>Daily sheet</strong> first.</p>`
+                    cardsHtml ||
+                    `<p class="books-hint">Enter register sales and received cash on the <strong>Daily sheet</strong> first.</p>`
                 }
                 ${extraHtml || ""}
-                <label class="books-label">Register received / deposited ($)
+                <label class="books-label books-cash-recon-deposit-field">Register received / deposited ($)
                     <input ${amountInputAttrs("cr_day_deposit", depositVal)}>
                 </label>
                 ${

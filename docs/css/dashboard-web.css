@@ -1387,6 +1387,101 @@
     .books-register-shifts {
         grid-template-columns: 1fr;
     }
+
+    .books-recon-cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+.books-recon-unit {
+    margin: 0 0 14px;
+}
+
+.books-recon-unit-title {
+    margin: 0 0 8px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #334155;
+}
+
+.books-recon-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.books-recon-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--dash-border, #e2e8f0);
+    border-radius: 10px;
+    background: var(--dash-bg, #f8fafc);
+}
+
+.books-recon-card--readonly {
+    background: #fff;
+}
+
+.books-recon-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+}
+
+.books-recon-card-head strong {
+    font-size: 0.9rem;
+    color: #0f172a;
+}
+
+.books-recon-card-head span {
+    font-size: 0.78rem;
+    color: #64748b;
+}
+
+.books-recon-card-head .books-register-recon-status {
+    margin-left: auto;
+}
+
+.books-recon-card-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.books-recon-card-stats div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.books-recon-card-stats span {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.books-recon-card-stats strong {
+    font-size: 0.95rem;
+    color: #0f172a;
+}
+
+.books-recon-card-payout {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    color: #475569;
+}
+
+.books-cash-recon-deposit-field {
+    max-width: 280px;
+    margin-top: 8px;
 }
 
 .books-cash-recon-payout-readonly {
@@ -1801,6 +1896,113 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     margin-bottom: 4px;
 }
 
+.books-util-payroll-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+    align-items: start;
+}
+
+.books-util-payroll-panel {
+    padding: 14px 16px;
+    border: 1px solid var(--dash-border, #e2e8f0);
+    border-radius: 12px;
+    background: #fff;
+}
+
+.books-util-payroll-panel--other {
+    margin-bottom: 16px;
+}
+
+.books-util-payroll-panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 12px;
+    margin-bottom: 6px;
+}
+
+.books-util-payroll-panel-head .books-subtitle,
+.books-util-payroll-panel-head .books-total-line {
+    margin: 0;
+}
+
+.books-util-cards,
+.books-payroll-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 10px 0 12px;
+}
+
+.books-payroll-cards--other {
+    max-width: 480px;
+}
+
+.books-util-card,
+.books-payroll-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--dash-border, #e2e8f0);
+    border-radius: 10px;
+    background: var(--dash-bg, #f8fafc);
+}
+
+.books-util-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.books-util-card .books-label,
+.books-payroll-card .books-label {
+    margin: 0;
+}
+
+.books-util-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--dash-text, #0f172a);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.books-payroll-card-name {
+    font-size: 0.9rem;
+    color: #0f172a;
+}
+
+.books-payroll-card-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.books-payroll-card-stats div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.books-payroll-card-stats span {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.books-payroll-card-stats strong {
+    font-size: 0.9rem;
+    color: #0f172a;
+}
+
 .books-payroll-weeks {
     display: flex;
     flex-direction: column;
@@ -1843,18 +2045,22 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     margin-bottom: 6px;
 }
 
-.books-util-label {
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: var(--dash-text, #0f172a);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .books-util-spacer {
     width: 32px;
     height: 1px;
+}
+
+@media (max-width: 900px) {
+    .books-util-payroll-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 520px) {
+    .books-util-cards,
+    .books-payroll-cards {
+        grid-template-columns: 1fr;
+    }
 }
 
 .books-fieldset {
