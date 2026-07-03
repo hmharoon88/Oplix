@@ -447,11 +447,19 @@
             keyMetricCell("Net", money(agg.net), { ...opt, tone: netTone }),
             keyMetricCell("Utilities", money(agg.utilitiesTotal), { ...opt, drill: "utilities" }),
             keyMetricCell("Payroll", money(agg.payrollTotal), opt),
+            keyMetricCell("Sales tax", money(agg.salesTax), opt),
+            keyMetricCell("Accountant", money(agg.accountant), opt),
             keyMetricCell("Over / short", money(agg.totalOverShort), opt),
             keyMetricCell("Receivables", money(agg.receivablesTotal), opt),
             keyMetricCell("Cash expense", money(agg.cashExpense), opt),
             keyMetricCell("Checks / ACH", money(agg.checksAch), opt),
             keyMetricCell("Other expense", money(agg.otherExpense), opt),
+            ...(M.num(agg.monthAdjustmentsExpense)
+                ? [keyMetricCell("Month adj. (expense)", money(agg.monthAdjustmentsExpense), opt)]
+                : []),
+            ...(M.num(agg.monthAdjustmentsCredit)
+                ? [keyMetricCell("Month adj. (credit)", money(agg.monthAdjustmentsCredit), opt)]
+                : []),
         ];
 
         return `
@@ -498,6 +506,8 @@
             { label: "Other expense", get: (a) => a.otherExpense, trendInvert: true },
             { label: "Sales tax", get: (a) => a.salesTax, trendInvert: true },
             { label: "Accountant", get: (a) => a.accountant, trendInvert: true },
+            { label: "Month adj. (expense)", get: (a) => a.monthAdjustmentsExpense, trendInvert: true },
+            { label: "Month adj. (credit)", get: (a) => a.monthAdjustmentsCredit },
             { label: "Payroll · Week 1", get: (a) => a.payroll?.week1, trendInvert: true },
             { label: "Payroll · Week 2", get: (a) => a.payroll?.week2, trendInvert: true },
             { label: "Payroll · Week 3", get: (a) => a.payroll?.week3, trendInvert: true },

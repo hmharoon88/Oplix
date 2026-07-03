@@ -6,6 +6,7 @@
     const Store = () => window.OplixBooksStore;
     const Charts = () => window.OplixBooksSummaryCharts;
     const RBS = () => window.OplixReportsBooksSections;
+    const RM = () => window.OplixReportsModel;
     const ReportsStore = () => window.OplixReportsStore;
 
     let userId = null;
@@ -466,7 +467,11 @@
 
         const tableRows = rows
             .map((row, rowIndex) => {
-                const dayLabel = formatDayId(row.dayId);
+                const dayDoc = pack.daysById?.[row.dayId];
+                const closedMark =
+                    dayDoc && M().isDayClosed(dayDoc)
+                        ? ' <span class="an-day-closed" title="Day closed">🔒</span>'
+                        : "";
                 const emptyCls = row.hasData ? "" : " an-daily-row--empty";
                 const prev = rowIndex > 0 ? rows[rowIndex - 1] : null;
                 const prevVal = (field) => (prev?.hasData ? prev[field] : null);
@@ -481,7 +486,7 @@
                     : dailyTableCell(row.sales, prevVal("sales"), row, {});
                 return `
                     <tr class="an-daily-row${emptyCls}">
-                        <td class="an-daily-day-col">${escapeHtml(dayLabel)}</td>
+                        <td class="an-daily-day-col">${escapeHtml(formatDayId(row.dayId))}${closedMark}</td>
                         ${extraGas}
                         ${salesCell}
                         ${dailyTableCell(row.cashExpense, prevVal("cashExpense"), row, { trendInvert: true })}
@@ -718,41 +723,35 @@
         return M().monthIdFromDate(new Date(d.getFullYear(), d.getMonth() - 1, 1));
     }
 
-    async function loadApArSnapshot() {
+    async function loadApArData() {
         const PM = window.OplixPayablesModel;
         const RecM = window.OplixReceivablesModel;
-        if (!PM || !RecM || !ReportsStore() || !userId || !state.locationId) return null;
+        if (!PM || !RecM || !ReportsStore() || !RM() || !userId || !state.locationId) {
+            return { snapshot: null, report: null };
+        }
         try {
             const pack = await ReportsStore().loadPayablesReceivables(
                 userId,
                 state.locationId,
                 locName(state.locationId)
             );
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const payables = (pack.payables || []).map((p) => PM.normalizePayable(p, state.locationId));
-            const receivables = (pack.receivables || []).map((r) =>
-                RecM.normalizeReceivable(r, state.locationId)
-            );
-            const openPayables = payables.filter((p) => !p.isPaid);
-            const openReceivables = receivables.filter((r) => !r.isReceived);
-            const overduePayables = openPayables.filter((p) => {
-                const due = PM.toDate(p.dueDate);
-                return due && due < today;
-            }).length;
-            const overdueReceivables = openReceivables.filter((r) => {
-                const due = RecM.toDate(r.dueDate);
-                return due && due < today;
-            }).length;
+            const report = RM().buildPayablesReceivablesReport([pack], {
+                locationName: locName(state.locationId),
+                allLocations: false,
+            });
+            const summary = report.summary || [];
             return {
-                openPayables: openPayables.reduce((s, p) => s + M().num(p.amount), 0),
-                openReceivables: openReceivables.reduce((s, r) => s + M().num(r.amount), 0),
-                overduePayables,
-                overdueReceivables,
+                snapshot: {
+                    openPayables: summary[0]?.value ?? 0,
+                    openReceivables: summary[1]?.value ?? 0,
+                    overduePayables: summary[2]?.value ?? 0,
+                    overdueReceivables: summary[3]?.value ?? 0,
+                },
+                report,
             };
         } catch (err) {
             console.warn("[Oplix] Could not load payables/receivables for summary:", err);
-            return null;
+            return { snapshot: null, report: null };
         }
     }
 
@@ -815,12 +814,181 @@
                     <label class="books-label">Month
                         <select id="${monthId}" class="books-select">${monthOptions(state.monthId)}</select>
                     </label>
+                    ${renderMonthStatusBadge()}
                     <button type="button" class="btn btn-nav-outline an-compare-toggle" id="${compareId}">
                         ${state.showCompare ? "Hide month compare" : "Compare to previous month"}
                     </button>
                 </div>
                 ${state.showCompare && window.OplixBooksTrendLegend ? OplixBooksTrendLegend.legendHtml("month") : ""}
             </div>`;
+    }
+
+    let reviewMonthDoc = null;
+
+    function renderMonthStatusBadge() {
+        const month = reviewMonthDoc;
+        if (!month) return "";
+        if (M().isMonthClosed(month)) {
+            const at = month.closedAt
+                ? new Date(month.closedAt).toLocaleDateString("en-US", { dateStyle: "medium" })
+                : "";
+            return `<span class="bs-month-badge bs-month-badge--closed" title="Month closed${at ? ` · ${at}` : ""}">Month closed</span>`;
+        }
+        return `<span class="bs-month-badge bs-month-badge--open">Month open</span>`;
+    }
+
+    function refreshMonthStatusBadge() {
+        const host = scopeRoot()?.querySelector(".an-month-toolbar .bs-toolbar-fields");
+        if (!host) return;
+        const monthSelect = host.querySelector(`#${monthControlId()}`);
+        if (!monthSelect) return;
+        const html = renderMonthStatusBadge();
+        const existing = host.querySelector(".bs-month-badge");
+        if (existing) existing.remove();
+        if (html) monthSelect.insertAdjacentHTML("afterend", html);
+    }
+
+    function reviewAmountRow(label, amount, opts = {}) {
+        const n = M().num(amount);
+        if (!opts.showZero && n === 0) return "";
+        const prefix = opts.credit ? "+" : opts.expense ? "−" : "";
+        const display = opts.credit || opts.expense ? `${prefix}${money(Math.abs(n))}` : money(n);
+        const note = opts.note ? `<span class="bs-review-note">${escapeHtml(opts.note)}</span>` : "";
+        return `<tr><td>${escapeHtml(label)}${note}</td><td class="home-cc-num">${display}</td></tr>`;
+    }
+
+    function renderBooksReviewSection(pack, apArReport) {
+        if (!pack?.aggregate) return "";
+        const agg = pack.aggregate;
+        const month = pack.month || M().defaultMonthDoc();
+        const health = M().booksHealthSummary(pack.monthId, pack.daysById, month, {
+            hasGasStation: agg.hasGasStation,
+        });
+        const supplement = RM()?.buildBooksSupplement?.(agg) || {};
+        const legacyRec = (month.receivables || []).filter((r) => !r.linkedReceivableId);
+
+        const revenueRows = [
+            ...(agg.salesBreakdown || M().salesBreakdownFromAggregate(agg))
+                .filter((r) => M().num(r.amount) !== 0)
+                .map((r) =>
+                    reviewAmountRow(r.label, r.amount, {
+                        note: r.format === "number" ? "count" : "",
+                    })
+                ),
+            reviewAmountRow("Month credits (Net)", agg.receivablesTotal, { credit: true }),
+            ...(agg.monthAdjustments || [])
+                .filter((a) => a.kind === "credit" && M().num(a.amount) !== 0)
+                .map((a) => reviewAmountRow(`Adjustment — ${a.description || "Credit"}`, a.amount, { credit: true })),
+        ].filter(Boolean);
+
+        const expenseRows = [
+            reviewAmountRow("Cash expenses (daily)", agg.cashExpense, { expense: true }),
+            reviewAmountRow("Checks / ACH", agg.checksAch, { expense: true }),
+            reviewAmountRow("Other daily expenses", agg.otherExpense, { expense: true }),
+            ...(agg.utilitiesBreakdown || [])
+                .filter((u) => M().num(u.amount) !== 0)
+                .map((u) => reviewAmountRow(`Utility — ${u.label}`, u.amount, { expense: true })),
+            reviewAmountRow("Payroll", agg.payrollTotal, { expense: true }),
+            reviewAmountRow("Sales tax", agg.salesTax, { expense: true }),
+            reviewAmountRow("Accountant", agg.accountant, { expense: true }),
+            ...(agg.monthAdjustments || [])
+                .filter((a) => a.kind !== "credit" && M().num(a.amount) !== 0)
+                .map((a) =>
+                    reviewAmountRow(`Adjustment — ${a.description || "Expense"}`, a.amount, { expense: true })
+                ),
+        ].filter(Boolean);
+
+        const statusItems = [
+            { label: "Days with entry", value: `${health.daysWithData} / ${health.daysInMonth}` },
+            { label: "Days closed", value: String(health.daysClosed) },
+            {
+                label: "Days with entry not closed",
+                value: String(health.unclosedWithData),
+                warn: health.unclosedWithData > 0,
+            },
+            { label: "Month status", value: M().isMonthClosed(month) ? "Closed" : "Open" },
+        ];
+
+        const payoutsHtml =
+            supplement.registerPayouts?.length && RBS()
+                ? `<div class="bs-review-block">
+                    <h4 class="bs-review-subtitle">Register payouts</h4>
+                    ${RBS().renderRegisterPayouts(supplement.registerPayouts)}
+                </div>`
+                : "";
+
+        const payrollHtml =
+            (supplement.booksPayroll?.length || agg.payrollTotal) && RBS()
+                ? `<div class="bs-review-block">
+                    <h4 class="bs-review-subtitle">Payroll detail</h4>
+                    ${RBS().renderBooksPayroll(supplement.booksPayroll, agg.payrollTotal)}
+                </div>`
+                : "";
+
+        const apArHtml =
+            apArReport && RBS()
+                ? `<div class="bs-review-block">
+                    ${RBS().renderPayablesReceivablesReport(apArReport)}`
+                : "";
+
+        const legacyHtml = legacyRec.length
+            ? `<div class="bs-review-block">
+                <h4 class="bs-review-subtitle">Legacy month credits</h4>
+                <table class="home-cc-table">
+                    <thead><tr><th>Description</th><th class="home-cc-num">Amount</th></tr></thead>
+                    <tbody>${legacyRec
+                        .map(
+                            (r) =>
+                                `<tr><td>${escapeHtml(r.description || "—")}</td><td class="home-cc-num">${money(r.amount)}</td></tr>`
+                        )
+                        .join("")}</tbody>
+                </table></div>`
+            : "";
+
+        const closeNotes = month.closeNotes?.trim()
+            ? `<div class="bs-review-block"><h4 class="bs-review-subtitle">Close notes</h4><p class="books-hint">${escapeHtml(month.closeNotes)}</p></div>`
+            : "";
+
+        return `
+            <section class="bs-panel bs-panel--review">
+                <div class="bs-panel-head">
+                    <div class="bs-panel-head-text">
+                        <h3 class="bs-panel-title">Books review</h3>
+                        <p class="bs-panel-sub">Everything recorded for this facility and month. Edit in <strong>Daily books</strong> or <strong>Monthly books</strong>.</p>
+                    </div>
+                </div>
+                <div class="bs-review-status-grid">
+                    ${statusItems
+                        .map(
+                            (item) =>
+                                `<div class="bs-review-status${item.warn ? " bs-review-status--warn" : ""}"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.value)}</strong></div>`
+                        )
+                        .join("")}
+                </div>
+                <div class="bs-review-grid">
+                    <div class="bs-review-block">
+                        <h4 class="bs-review-subtitle">Revenue &amp; credits</h4>
+                        ${
+                            revenueRows.length
+                                ? `<table class="home-cc-table bs-review-table"><tbody>${revenueRows.join("")}<tr class="an-total-row"><td><strong>Net</strong></td><td class="home-cc-num"><strong class="${agg.net >= 0 ? "pos" : "neg"}">${money(agg.net)}</strong></td></tr></tbody></table>`
+                                : `<p class="books-hint">No revenue recorded this month.</p>`
+                        }
+                    </div>
+                    <div class="bs-review-block">
+                        <h4 class="bs-review-subtitle">Expenses</h4>
+                        ${
+                            expenseRows.length
+                                ? `<table class="home-cc-table bs-review-table"><tbody>${expenseRows.join("")}<tr class="an-total-row"><td><strong>Total expenses</strong></td><td class="home-cc-num"><strong>${money(agg.expenses)}</strong></td></tr></tbody></table>`
+                                : `<p class="books-hint">No expenses recorded this month.</p>`
+                        }
+                    </div>
+                </div>
+                ${payoutsHtml}
+                ${payrollHtml}
+                ${apArHtml}
+                ${legacyHtml}
+                ${closeNotes}
+            </section>`;
     }
 
     function buildEmptyPack(locationId, monthId) {
@@ -855,10 +1023,13 @@
             ...primaryPack,
         };
 
+        reviewMonthDoc = primaryPack.month || null;
+
         let overviewHtml;
         try {
             overviewHtml = `
             <div class="bs-report">
+                ${renderBooksReviewSection(primaryPack, extras?.apArReport)}
                 ${renderMainDashboard(primaryPack.aggregate, drillPack.title)}
                 ${extras?.apAr || ""}
                 ${extras?.compare || ""}
@@ -980,7 +1151,7 @@
             renderPreviousMonthsMount("");
             renderKeyMetricsMount("");
 
-            const [primaryPacks, lotteryForms, apArSnapshot] = await Promise.all([
+            const [primaryPacks, lotteryForms, apArData] = await Promise.all([
                 Store().loadMonthsForCompare(
                     userId,
                     [state.locationId],
@@ -988,7 +1159,7 @@
                     loadOptions()
                 ),
                 fetchLotteryForms(state.locationId),
-                loadApArSnapshot(),
+                loadApArData(),
             ]);
             if (analysisKey() !== keyAtStart) return;
 
@@ -1000,9 +1171,11 @@
             if (analysisKey() !== keyAtStart) return;
 
             renderPrimaryDashboard(primaryPack, {
-                apAr: renderApArSnapshot(apArSnapshot),
+                apAr: renderApArSnapshot(apArData.snapshot),
+                apArReport: apArData.report,
                 compare: compareHtml,
             });
+            refreshMonthStatusBadge();
             out.querySelector(".an-load-error")?.remove();
 
             loadHistorySections(keyAtStart, primaryPack, lotteryForms);

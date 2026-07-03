@@ -305,20 +305,6 @@
     color: var(--dash-text);
 }
 
-.sidebar-books-group {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    margin: 2px 0;
-}
-
-.sidebar-btn--sub {
-    margin-left: 10px;
-    padding-left: 12px;
-    font-size: 0.72rem;
-    border-left-width: 2px;
-}
-
 .sidebar-btn.active {
     background: var(--dash-accent-soft);
     color: var(--dash-accent);
@@ -2661,6 +2647,110 @@
 
 .bs-key-metric--neg .bs-key-metric-value {
     color: #dc2626;
+}
+
+.bs-month-badge {
+    display: inline-flex;
+    align-items: center;
+    align-self: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.bs-month-badge--closed {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+.bs-month-badge--open {
+    background: #ecfdf5;
+    color: #047857;
+    border: 1px solid #6ee7b7;
+}
+
+.bs-panel--review {
+    margin-bottom: 16px;
+}
+
+.bs-review-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.bs-review-status {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bs-review-status span {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.bs-review-status strong {
+    font-size: 1rem;
+    color: #0f172a;
+}
+
+.bs-review-status--warn {
+    background: #fffbeb;
+    border-color: #fcd34d;
+}
+
+.bs-review-status--warn strong {
+    color: #b45309;
+}
+
+.bs-review-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.bs-review-block {
+    margin-top: 16px;
+}
+
+.bs-review-subtitle {
+    margin: 0 0 8px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #334155;
+}
+
+.bs-review-table td:first-child {
+    max-width: 280px;
+}
+
+.bs-review-note {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #64748b;
+    text-transform: lowercase;
+}
+
+.an-day-closed {
+    margin-left: 4px;
+    font-size: 0.85em;
+    opacity: 0.85;
 }
 
 .bs-metric-mini--drill {
