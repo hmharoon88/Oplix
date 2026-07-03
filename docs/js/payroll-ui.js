@@ -272,10 +272,10 @@
                 <select id="payroll-month" class="books-select">${monthOptions(state.monthId)}</select>
             </label>`;
         }
-        return `<label class="books-label">Week (pick any day in the week)
+        return `<label class="books-label payroll-week-field">Week (pick any day in the week)
             <input type="date" id="payroll-week" class="books-input" value="${escapeHtml(state.weekDate)}">
-        </label>
-        <p class="books-hint payroll-week-hint">${escapeHtml(M().weekRangeLabel(periodKey()))}</p>`;
+            <span class="books-hint payroll-week-hint">${escapeHtml(M().weekRangeLabel(periodKey()))}</span>
+        </label>`;
     }
 
     function monthOptions(selected) {

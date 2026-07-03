@@ -1571,6 +1571,38 @@
     font-size: 0.9rem;
 }
 
+input.books-input[type="date"] {
+    min-height: 0;
+    line-height: 1.25;
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+input.books-input[type="date"]::-webkit-date-and-time-value {
+    text-align: left;
+    min-height: 0;
+}
+
+input.books-input[type="date"]::-webkit-datetime-edit,
+input.books-input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+}
+
+input.books-input[type="date"]::-webkit-calendar-picker-indicator {
+    margin: 0 0 0 6px;
+    padding: 0;
+    cursor: pointer;
+    opacity: 0.65;
+}
+
+.bs-toolbar input.books-input[type="date"],
+.books-toolbar input.books-input[type="date"] {
+    max-width: 10.5rem;
+}
+
 .books-grid-3 {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -4170,8 +4202,13 @@
 }
 
 .payroll-week-hint {
-    margin: 0;
-    align-self: center;
+    margin: 4px 0 0;
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+.payroll-week-field {
+    max-width: 11rem;
 }
 
 /* Shared column tracks so headers line up with inputs */
