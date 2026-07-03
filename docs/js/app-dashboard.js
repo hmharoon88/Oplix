@@ -23,6 +23,7 @@
         "payroll",
         "tasks",
         "data-input",
+        "monthly-books",
         "analytics",
         "reports",
         "settings",
@@ -99,6 +100,9 @@
             case "data-input":
                 window.OplixDataInput?.resetToRoot?.();
                 break;
+            case "monthly-books":
+                window.OplixMonthlyBooks?.resetToRoot?.();
+                break;
             case "analytics":
                 window.OplixAnalytics?.resetToRoot?.();
                 break;
@@ -123,6 +127,9 @@
         switch (panelId) {
             case "data-input":
                 if (window.OplixDataInput) OplixDataInput.init(uid, locs);
+                break;
+            case "monthly-books":
+                if (window.OplixMonthlyBooks) OplixMonthlyBooks.init(uid, locs);
                 break;
             case "analytics":
                 if (window.OplixAnalytics) OplixAnalytics.init(uid, locs);
@@ -162,6 +169,9 @@
         }
         if (panelId === "data-input" && window.OplixDataInput) {
             OplixDataInput.onShow();
+        }
+        if (panelId === "monthly-books" && window.OplixMonthlyBooks) {
+            OplixMonthlyBooks.onShow();
         }
         if (panelId === "analytics" && window.OplixAnalytics) {
             OplixAnalytics.onShow();
@@ -219,6 +229,9 @@
         const locs = locationsCache;
         if (initializedPanels.has("data-input") && window.OplixDataInput) {
             OplixDataInput.init(uid, locs);
+        }
+        if (initializedPanels.has("monthly-books") && window.OplixMonthlyBooks) {
+            OplixMonthlyBooks.init(uid, locs);
         }
         if (initializedPanels.has("analytics") && window.OplixAnalytics) {
             OplixAnalytics.init(uid, locs);

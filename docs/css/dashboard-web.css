@@ -305,6 +305,20 @@
     color: var(--dash-text);
 }
 
+.sidebar-books-group {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: 2px 0;
+}
+
+.sidebar-btn--sub {
+    margin-left: 10px;
+    padding-left: 12px;
+    font-size: 0.72rem;
+    border-left-width: 2px;
+}
+
 .sidebar-btn.active {
     background: var(--dash-accent-soft);
     color: var(--dash-accent);

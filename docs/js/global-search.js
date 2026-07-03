@@ -30,6 +30,7 @@
         { id: "payroll", title: "Payroll", keywords: "hours wages pay" },
         { id: "tasks", title: "Tasks", keywords: "completions checklist" },
         { id: "data-input", title: "Daily books", keywords: "books register daily entry" },
+        { id: "monthly-books", title: "Monthly books", keywords: "close month final math adjustments" },
         { id: "analytics", title: "Books summary", keywords: "analytics totals monthly" },
         { id: "reports", title: "Reports", keywords: "export pdf csv" },
         { id: "settings", title: "Settings", keywords: "preferences layout notifications" },

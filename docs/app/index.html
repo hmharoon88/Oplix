@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../css/site.css?v=20260702fullwidth">
-    <link rel="stylesheet" href="../css/dashboard-web.css?v=20260702monthly">
+    <link rel="stylesheet" href="../css/dashboard-web.css?v=20260702sidebar">
 </head>
 <body class="dashboard-body">
     <header class="dashboard-topbar">
@@ -49,7 +49,10 @@
                 <button type="button" class="sidebar-btn" data-panel="compliance">Compliance</button>
                 <button type="button" class="sidebar-btn" data-panel="payroll">Payroll</button>
                 <button type="button" class="sidebar-btn" data-panel="tasks">Tasks</button>
-                <button type="button" class="sidebar-btn" data-panel="data-input" title="Daily books">Daily books</button>
+                <div class="sidebar-books-group">
+                    <button type="button" class="sidebar-btn" data-panel="data-input" title="Daily books">Daily books</button>
+                    <button type="button" class="sidebar-btn sidebar-btn--sub" data-panel="monthly-books" title="Monthly books — close month">Monthly books</button>
+                </div>
                 <button type="button" class="sidebar-btn" data-panel="analytics" title="Books summary">Summary</button>
                 <button type="button" class="sidebar-btn" data-panel="reports">Reports</button>
                 <button type="button" class="sidebar-btn" data-panel="settings">Settings</button>
@@ -122,6 +125,12 @@
                 <div id="data-input-root"></div>
             </section>
 
+            <section class="dashboard-panel dashboard-panel--wide" id="panel-monthly-books" data-panel="monthly-books" hidden>
+                <h1 class="panel-title">Monthly books</h1>
+                <p class="panel-lead books-intro">Final month math, adjustments, and close month — after daily entry is done.</p>
+                <div id="monthly-books-root"></div>
+            </section>
+
             <section class="dashboard-panel dashboard-panel--wide" id="panel-analytics" data-panel="analytics" hidden>
                 <h1 class="panel-title">Books summary</h1>
                 <p class="panel-lead books-intro">Monthly books totals and previous months by facility.</p>
@@ -189,7 +198,7 @@
     <script src="../js/facilities.js?v=20260702step3"></script>
     <script src="../js/books-links.js?v=20260702step1"></script>
     <script src="../js/books-store.js?v=20260702monthly"></script>
-    <script src="../js/data-input.js?v=20260702monthly"></script>
+    <script src="../js/data-input.js?v=20260702sidebar"></script>
     <script src="../js/books-summary-charts.js?v=20260702step2"></script>
     <script src="../js/analytics-books.js?v=20260702step2"></script>
     <script src="../js/reports-books-sections.js?v=20260702all"></script>
@@ -210,7 +219,7 @@
     <script src="../js/settings-model.js"></script>
     <script src="../js/settings-store.js"></script>
     <script src="../js/settings-ui.js"></script>
-    <script src="../js/global-search.js?v=20260524search"></script>
-    <script src="../js/app-dashboard.js"></script>
+    <script src="../js/global-search.js?v=20260702sidebar"></script>
+    <script src="../js/app-dashboard.js?v=20260702sidebar"></script>
 </body>
 </html>
