@@ -1697,7 +1697,6 @@
         rows.forEach((row) => {
             const id = row.dataset.diRow;
             const existing = (state.day.checksAch || []).find((r) => r.id === id) || { id };
-            const payableEl = row.querySelector('[name="payableId"]');
             const desc = row.querySelector('[name="description"]');
             const checkNo = row.querySelector('[name="checkNo"]');
             const amt = row.querySelector('[name="amount"]');
@@ -1705,7 +1704,7 @@
                 ...existing,
                 id,
                 date: state.dayId,
-                payableId: payableEl?.value || null,
+                payableId: existing.payableId || null,
                 description: desc ? desc.value : "",
                 checkNo: checkNo ? checkNo.value : "",
                 amount: amt ? M().num(amt.value) : 0,
@@ -2696,46 +2695,17 @@
     function renderChecksAchList() {
         const list = state.day.checksAch || [];
         const total = list.reduce((s, row) => s + M().num(row.amount), 0);
-        const openPayables = window.OplixBooksLinks
-            ? OplixBooksLinks.openPayablesForPick(state.payables)
-            : (state.payables || []).filter((p) => !p.isPaid);
-        const payableOptions = (selectedId) => {
-            const opts = ['<option value="">— Payable —</option>'];
-            openPayables.forEach((p) => {
-                const label = window.OplixBooksLinks
-                    ? OplixBooksLinks.payablePickLabel(p)
-                    : `${p.payTo} — ${money(p.amount)}`;
-                opts.push(
-                    `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? " selected" : ""}>${escapeHtml(label)}</option>`
-                );
-            });
-            (state.payables || [])
-                .filter((p) => p.isPaid && p.id === selectedId)
-                .forEach((p) => {
-                    opts.push(
-                        `<option value="${escapeHtml(p.id)}" selected>${escapeHtml(p.payTo || "Paid")} (paid)</option>`
-                    );
-                });
-            return opts.join("");
-        };
         const cards = list
-            .map((row, index) => {
-                const pid = row.payableId || "";
+            .map((row) => {
                 return `
-                <div class="books-station-card" data-di-row="${escapeHtml(row.id)}">
-                    <div class="books-station-card-head">
-                        <strong>Line ${index + 1}</strong>
-                        <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="checksAch" title="Remove">×</button>
-                    </div>
-                    <div class="books-station-card-fields">
-                        <label class="books-label">Payable
-                            <select class="books-select" name="payableId" data-di-payable-pick="${escapeHtml(row.id)}">${payableOptions(pid)}</select>
-                        </label>
+                <div class="books-station-card books-station-card--flow" data-di-row="${escapeHtml(row.id)}">
+                    <button type="button" class="books-rm books-station-card-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="checksAch" title="Remove">×</button>
+                    <div class="books-station-card-fields books-station-card-fields--checks">
                         <label class="books-label">Description
-                            <input type="text" class="books-input" name="description" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(row.description || "")}" placeholder="Description">
+                            <input type="text" class="books-input" name="description" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(row.description || "")}" placeholder="Payee / description">
                         </label>
-                        <label class="books-label">Check #
-                            <input type="text" class="books-input" name="checkNo" value="${escapeHtml(row.checkNo || "")}">
+                        <label class="books-label">Check # / ACH
+                            <input type="text" class="books-input" name="checkNo" value="${escapeHtml(row.checkNo || "")}" placeholder="Check # or ACH">
                         </label>
                         <label class="books-label">Amount
                             <input ${amountInputAttrs("amount", row.amount)}>
@@ -2750,8 +2720,8 @@
                     <h4 class="books-register-group-title">Checks / ACH</h4>
                     <span class="books-register-group-total">${money(total)}</span>
                 </div>
-                <p class="books-hint">Link a line to an open payable to mark it paid when you save.</p>
-                <div class="books-station-cards" data-di-list="checksAch">
+                <p class="books-hint">Enter payee, check number or ACH, and amount.</p>
+                <div class="books-station-cards books-station-cards--flow" data-di-list="checksAch">
                     ${cards}
                     <button type="button" class="books-add-line" data-di-add="checksAch">+ Add check / ACH</button>
                 </div>
