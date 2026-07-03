@@ -1211,13 +1211,13 @@
     margin: 0;
 }
 
-.books-toolbar .btn {
-    padding: 8px 14px;
+.dashboard-body .books-toolbar button.btn.btn-nav-outline {
+    padding: 7px 14px;
     font-size: 0.9rem;
     line-height: 1.25;
     border-radius: 8px;
-    height: auto;
-    font-weight: 600;
+    box-sizing: border-box;
+    min-height: 0;
 }
 
 .books-tabs {
@@ -4130,12 +4130,13 @@
     margin: 0;
 }
 
-.an-month-toolbar .an-compare-toggle {
-    padding: 8px 14px;
+.dashboard-body .an-month-toolbar button.btn.an-compare-toggle {
+    padding: 7px 14px;
     font-size: 0.9rem;
     line-height: 1.25;
     border-radius: 8px;
-    height: auto;
+    box-sizing: border-box;
+    min-height: 0;
 }
 
 .an-month-status {
