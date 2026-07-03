@@ -6,6 +6,7 @@
     const RS = () => window.OplixReportsStore;
     const BM = () => window.OplixBooksModel;
     const Charts = () => window.OplixBooksSummaryCharts;
+    const RBS = () => window.OplixReportsBooksSections;
 
     let userId = null;
     let locations = [];
@@ -40,6 +41,7 @@
     }
 
     function formatValue(v, format) {
+        if (format === "text") return escapeHtml(String(v ?? ""));
         if (format === "number") {
             return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(RM().num(v));
         }
@@ -270,6 +272,9 @@
     }
 
     function renderMonthlyBooksBody(report) {
+        const supplementHtml = RBS()?.renderBooksSupplement(report.supplement, {
+            payrollTotal: report.payrollTotal,
+        });
         return `
             <table class="home-cc-table rpt-table">
                 <thead><tr><th>Line item</th><th class="home-cc-num">Amount</th></tr></thead>
@@ -281,7 +286,8 @@
                 report.expenseDetail?.length
                     ? `<h4 class="rpt-detail-subtitle">Expense detail</h4>${renderExpenseDetailTable(report.expenseDetail, report.totalExpenses)}`
                     : ""
-            }`;
+            }
+            ${supplementHtml ? `<div class="rpt-supplement">${supplementHtml}</div>` : ""}`;
     }
 
     function renderAllLocationsBody(report) {
@@ -488,6 +494,7 @@
                         ${expenseBlock}
                         <h4 class="rpt-detail-subtitle">Daily sales &amp; expenses</h4>
                         ${dailyBlock}
+                        ${RBS()?.renderBooksSupplement(section.supplement, { payrollTotal: section.payrollTotal }) || ""}
                     </section>`;
             })
             .join("");
@@ -556,6 +563,16 @@
                 return renderAllLocationsDetailBody(report);
             case "all_locations_compare":
                 return renderAllLocationsCompareBody(report);
+            case "cash_reconciliation":
+                return `
+                    ${RBS()?.renderCashReconCategories(report.categories) || ""}
+                    ${RBS()?.renderBooksSupplement(report.supplement, { includeRecon: false }) || ""}`;
+            case "all_locations_cash_recon":
+                return RBS()?.renderAllLocationsCashReconTable(report) || "";
+            case "payables_receivables":
+                return RBS()?.renderPayablesReceivablesReport(report) || "";
+            case "books_payroll_payouts":
+                return RBS()?.renderBooksPayrollPayoutsReport(report) || "";
             case "compliance":
                 return renderComplianceBody(report);
             case "lottery":
@@ -691,6 +708,49 @@
                 report = RM().buildAllLocationsCompareReport(packs, {
                     monthLabel: monthLabel(state.monthId),
                     monthId: state.monthId,
+                });
+            } else if (state.reportType === "cash_reconciliation") {
+                if (!locId) throw new Error("Select a location.");
+                const agg = await RS().loadBooksAggregate(userId, locId, state.monthId, hasGas(locId));
+                report = RM().buildCashReconciliationReport(agg, {
+                    locationName: locName(locId),
+                    monthLabel: monthLabel(state.monthId),
+                    monthId: state.monthId,
+                });
+            } else if (state.reportType === "all_locations_cash_recon") {
+                const packs = await RS().loadAllLocationsBooks(userId, locations, state.monthId);
+                report = RM().buildAllLocationsCashReconReport(packs, {
+                    monthLabel: monthLabel(state.monthId),
+                    monthId: state.monthId,
+                });
+            } else if (state.reportType === "payables_receivables") {
+                const all =
+                    state.locationScope === "all" && !state.embeddedLocationId;
+                const packs = all
+                    ? await RS().loadAllLocationsPayablesReceivables(userId, locations)
+                    : [
+                          await RS().loadPayablesReceivables(
+                              userId,
+                              locId,
+                              locName(locId)
+                          ),
+                      ];
+                if (!all && !locId) throw new Error("Select a location.");
+                report = RM().buildPayablesReceivablesReport(packs, {
+                    locationName: all ? null : locName(locId),
+                    allLocations: all,
+                });
+            } else if (state.reportType === "books_payroll_payouts") {
+                const all =
+                    state.locationScope === "all" && !state.embeddedLocationId;
+                const locs = all ? locations : locations.filter((l) => l.id === locId);
+                if (!locs.length) throw new Error("Select a location.");
+                const packs = await RS().loadAllLocationsBooks(userId, locs, state.monthId);
+                report = RM().buildBooksPayrollPayoutsReport(packs, {
+                    monthLabel: monthLabel(state.monthId),
+                    monthId: state.monthId,
+                    locationName: all ? null : locName(locId),
+                    allLocations: all,
                 });
             } else if (state.reportType === "compliance") {
                 const all =

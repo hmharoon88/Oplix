@@ -5,6 +5,8 @@
     const M = () => window.OplixBooksModel;
     const Store = () => window.OplixBooksStore;
     const Charts = () => window.OplixBooksSummaryCharts;
+    const RBS = () => window.OplixReportsBooksSections;
+    const ReportsStore = () => window.OplixReportsStore;
 
     let userId = null;
     let locations = [];
@@ -14,6 +16,7 @@
     let state = {
         locationId: "",
         monthId: "",
+        showCompare: false,
     };
 
     function defaultMonthId() {
@@ -676,6 +679,83 @@
             </section>`;
     }
 
+    function prevMonthId(monthId) {
+        const d = M().parseMonthId(monthId);
+        return M().monthIdFromDate(new Date(d.getFullYear(), d.getMonth() - 1, 1));
+    }
+
+    async function loadApArSnapshot() {
+        const PM = window.OplixPayablesModel;
+        const RecM = window.OplixReceivablesModel;
+        if (!PM || !RecM || !ReportsStore() || !userId || !state.locationId) return null;
+        try {
+            const pack = await ReportsStore().loadPayablesReceivables(
+                userId,
+                state.locationId,
+                locName(state.locationId)
+            );
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const payables = (pack.payables || []).map((p) => PM.normalizePayable(p, state.locationId));
+            const receivables = (pack.receivables || []).map((r) =>
+                RecM.normalizeReceivable(r, state.locationId)
+            );
+            const openPayables = payables.filter((p) => !p.isPaid);
+            const openReceivables = receivables.filter((r) => !r.isReceived);
+            const overduePayables = openPayables.filter((p) => {
+                const due = PM.toDate(p.dueDate);
+                return due && due < today;
+            }).length;
+            const overdueReceivables = openReceivables.filter((r) => {
+                const due = RecM.toDate(r.dueDate);
+                return due && due < today;
+            }).length;
+            return {
+                openPayables: openPayables.reduce((s, p) => s + M().num(p.amount), 0),
+                openReceivables: openReceivables.reduce((s, r) => s + M().num(r.amount), 0),
+                overduePayables,
+                overdueReceivables,
+            };
+        } catch (err) {
+            console.warn("[Oplix] Could not load payables/receivables for summary:", err);
+            return null;
+        }
+    }
+
+    async function loadCompareHtml(primaryPack) {
+        if (!state.showCompare || !Charts() || !primaryPack?.aggregate) return "";
+        const prevId = prevMonthId(state.monthId);
+        let prevAgg;
+        try {
+            const [prevPack] = await Store().loadMonthsForCompare(
+                userId,
+                [state.locationId],
+                [prevId],
+                loadOptions()
+            );
+            prevAgg = prevPack?.aggregate || M().aggregateMonth(M().defaultMonthDoc(), {}, loadOptions().facilityTypesById[state.locationId] === "c_store_gas" ? { hasGasStation: true } : {});
+        } catch {
+            prevAgg = M().aggregateMonth(M().defaultMonthDoc(), {}, {
+                hasGasStation: facilityTypesById()[state.locationId] === "c_store_gas",
+            });
+        }
+        const cmp = M().compareAggregates(primaryPack.aggregate, prevAgg, {
+            base: `${locName(state.locationId)} · ${monthLabel(state.monthId)}`,
+            compare: `${locName(state.locationId)} · ${monthLabel(prevId)}`,
+        });
+        return Charts().renderCompareOverview(cmp, primaryPack.aggregate, prevAgg, M());
+    }
+
+    function renderApArSnapshot(snapshot) {
+        if (!snapshot || !RBS()) return "";
+        return RBS().renderPayablesReceivablesSnapshot(
+            snapshot.openPayables,
+            snapshot.openReceivables,
+            snapshot.overduePayables,
+            snapshot.overdueReceivables
+        );
+    }
+
     function renderMonthPicker() {
         const locOpts = locations
             .map(
@@ -698,6 +778,9 @@
                     <label class="books-label">Month
                         <select id="an-month" class="books-select">${monthOptions(state.monthId)}</select>
                     </label>
+                    <button type="button" class="btn btn-nav-outline an-compare-toggle" id="an-compare-toggle">
+                        ${state.showCompare ? "Hide month compare" : "Compare to previous month"}
+                    </button>
                 </div>
             </div>`;
     }
@@ -727,7 +810,7 @@
         /* loaded progressively in loadHistorySections */
     }
 
-    function renderPrimaryDashboard(primaryPack) {
+    function renderPrimaryDashboard(primaryPack, extras) {
         if (!primaryPack?.aggregate) return;
         drillPack = {
             title: `${locName(primaryPack.locationId)} · ${monthLabel(primaryPack.monthId)}`,
@@ -739,6 +822,8 @@
             overviewHtml = `
             <div class="bs-report">
                 ${renderMainDashboard(primaryPack.aggregate, drillPack.title)}
+                ${extras?.apAr || ""}
+                ${extras?.compare || ""}
                 ${renderDailySalesExpenseSection(primaryPack)}
                 ${renderCashReconciliationSection(primaryPack.aggregate)}
             </div>`;
@@ -855,7 +940,7 @@
             renderPreviousMonthsMount("");
             renderKeyMetricsMount("");
 
-            const [primaryPacks, lotteryForms] = await Promise.all([
+            const [primaryPacks, lotteryForms, apArSnapshot] = await Promise.all([
                 Store().loadMonthsForCompare(
                     userId,
                     [state.locationId],
@@ -863,6 +948,7 @@
                     loadOptions()
                 ),
                 fetchLotteryForms(state.locationId),
+                loadApArSnapshot(),
             ]);
             if (analysisKey() !== keyAtStart) return;
 
@@ -870,7 +956,13 @@
                 primaryPacks[0] || buildEmptyPack(state.locationId, state.monthId),
                 lotteryForms
             );
-            renderPrimaryDashboard(primaryPack);
+            const compareHtml = await loadCompareHtml(primaryPack);
+            if (analysisKey() !== keyAtStart) return;
+
+            renderPrimaryDashboard(primaryPack, {
+                apAr: renderApArSnapshot(apArSnapshot),
+                compare: compareHtml,
+            });
             out.querySelector(".an-load-error")?.remove();
 
             loadHistorySections(keyAtStart, primaryPack, lotteryForms);
@@ -899,6 +991,12 @@
         panel.dataset.anBound = "1";
 
         panel.addEventListener("click", (e) => {
+            if (e.target.id === "an-compare-toggle") {
+                state.showCompare = !state.showCompare;
+                render();
+                runAnalysis();
+                return;
+            }
             const prevRow = e.target.closest("[data-an-prev-month]");
             if (prevRow) {
                 state.monthId = prevRow.dataset.anPrevMonth;

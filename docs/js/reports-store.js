@@ -55,6 +55,27 @@
         return packs;
     }
 
+    async function loadPayablesReceivables(userId, locationId, locationName) {
+        const [payables, receivables] = await Promise.all([
+            fetchSub(userId, locationId, "payables"),
+            fetchSub(userId, locationId, "receivables"),
+        ]);
+        return {
+            locationId,
+            locationName: locationName || "Facility",
+            payables,
+            receivables,
+        };
+    }
+
+    async function loadAllLocationsPayablesReceivables(userId, locations) {
+        const packs = [];
+        for (const loc of locations) {
+            packs.push(await loadPayablesReceivables(userId, loc.id, loc.name));
+        }
+        return packs;
+    }
+
     async function loadCompliance(userId, locationId) {
         if (!Compliance()) return [];
         return Compliance().list(userId, locationId);
@@ -84,6 +105,8 @@
         loadBooksAggregate,
         loadAllLocationsBooks,
         loadAllLocationsBooksDetail,
+        loadPayablesReceivables,
+        loadAllLocationsPayablesReceivables,
         loadCompliance,
         loadComplianceAll,
         loadShiftReportData,

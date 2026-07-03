@@ -34,6 +34,36 @@
             needsLocation: false,
         },
         {
+            id: "cash_reconciliation",
+            label: "Cash reconciliation",
+            desc: "Expected deposit, received/deposited, and variance by day for one facility.",
+            needsMonth: true,
+            needsLocation: true,
+        },
+        {
+            id: "all_locations_cash_recon",
+            label: "All locations — cash reconciliation",
+            desc: "Register cash reconciliation rollup for every facility.",
+            needsMonth: true,
+            needsLocation: false,
+        },
+        {
+            id: "payables_receivables",
+            label: "Payables & receivables",
+            desc: "Open bills and amounts owed to you — one or all facilities.",
+            needsMonth: false,
+            needsLocation: true,
+            locationAllOption: true,
+        },
+        {
+            id: "books_payroll_payouts",
+            label: "Books payroll & payouts",
+            desc: "Payroll from Daily books and register payout totals by facility.",
+            needsMonth: true,
+            needsLocation: true,
+            locationAllOption: true,
+        },
+        {
             id: "compliance",
             label: "Licenses & renewals",
             desc: "Registrations with expiry dates and status for one or all facilities.",
@@ -122,6 +152,348 @@
                 net: 0,
             }
         );
+    }
+
+    const RECON_CATEGORY_DEFS = [
+        {
+            key: "register",
+            title: "Register cash",
+            subtitle: "Register cash minus cash expenses and payouts = expected deposit.",
+        },
+        {
+            key: "lottery",
+            title: "Lottery cash",
+            subtitle: "Lottery cash per shift from the Daily sheet or lottery closes.",
+        },
+        {
+            key: "pulltab",
+            title: "Pulltab cash",
+            subtitle: "Pulltab machine cash from the Daily sheet.",
+        },
+        {
+            key: "wind",
+            title: "Wind station cash",
+            subtitle: "Wind station cash from the Daily sheet.",
+        },
+        {
+            key: "keno",
+            title: "Keno station cash",
+            subtitle: "Keno station cash from the Daily sheet.",
+        },
+    ];
+
+    function cashReconCategoriesFromAgg(agg) {
+        const cr = agg?.cashReconciliation || {};
+        return RECON_CATEGORY_DEFS.map((def) => ({
+            ...def,
+            data: cr[def.key] || null,
+        })).filter((c) => (c.data?.dailyRows || []).length > 0);
+    }
+
+    function registerPayoutRows(agg) {
+        return [
+            { label: "In house account", amount: num(agg?.inHouseAccount), trackOnly: true },
+            { label: "Lottery pay out", amount: num(agg?.lotteryPayOut), trackOnly: true },
+            { label: "Pull tab payout", amount: num(agg?.pullTabPayout), trackOnly: true },
+            { label: "Other cash pay out", amount: num(agg?.otherCashPayOut), trackOnly: false },
+        ].filter((r) => r.amount !== 0);
+    }
+
+    function booksPayrollRows(agg) {
+        const M = window.OplixBooksModel;
+        const lines = (agg?.payrollLines || []).map((l) => M.normalizePayrollLine(l));
+        if (lines.length) {
+            return lines
+                .filter((l) => l.pay > 0 || l.hours > 0 || l.employeeName)
+                .map((l) => ({
+                    label: l.employeeName || "Employee",
+                    hours: l.hours,
+                    rate: l.hourlyRate,
+                    amount: l.pay,
+                }));
+        }
+        const p = agg?.payroll || {};
+        return ["week1", "week2", "week3", "week4"]
+            .map((w, i) => ({
+                label: `Week ${i + 1}`,
+                amount: num(p[w]),
+            }))
+            .filter((r) => r.amount !== 0);
+    }
+
+    function buildBooksSupplement(agg) {
+        return {
+            registerPayouts: registerPayoutRows(agg),
+            booksPayroll: booksPayrollRows(agg),
+            cashReconCategories: cashReconCategoriesFromAgg(agg),
+        };
+    }
+
+    function reconRollupFromRegister(reg) {
+        const rows = reg?.dailyRows || [];
+        let worstDay = null;
+        let worstVariance = 0;
+        rows.forEach((row) => {
+            const v = Math.abs(
+                row.deposit != null ? num(row.depositVariance) : num(row.variance)
+            );
+            if (v > worstVariance) {
+                worstVariance = v;
+                worstDay = row.dayId;
+            }
+        });
+        return {
+            daysWithExpected: reg?.daysWithExpected || 0,
+            daysReconciled: reg?.daysReconciled || 0,
+            daysNeedingAttention: reg?.daysNeedingAttention || 0,
+            totalExpectedDeposit: num(reg?.totalExpectedDeposit),
+            totalDeposit: num(reg?.totalDeposit),
+            totalDepositVariance: num(reg?.totalDepositVariance),
+            totalVariance: num(reg?.totalVariance),
+            worstDay,
+            worstVariance,
+        };
+    }
+
+    function startOfToday() {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return d;
+    }
+
+    function formatIsoDate(value, model) {
+        if (!value) return "—";
+        if (model?.isoDateInput) return model.isoDateInput(value) || "—";
+        const d = toDate(value);
+        return d ? d.toLocaleDateString("en-US") : "—";
+    }
+
+    function buildPayablesReceivablesReport(packs, meta) {
+        const PM = window.OplixPayablesModel;
+        const RM = window.OplixReceivablesModel;
+        const today = startOfToday();
+
+        const payablesOpen = [];
+        const payablesPaid = [];
+        const receivablesOpen = [];
+        const receivablesReceived = [];
+
+        (packs || []).forEach((pack) => {
+            const loc = pack.locationName || "Facility";
+            (pack.payables || []).forEach((raw) => {
+                const p = PM ? PM.normalizePayable(raw, pack.locationId) : raw;
+                const due = PM ? PM.toDate(p.dueDate) : toDate(p.dueDate);
+                const row = {
+                    location: loc,
+                    name: p.payTo || "—",
+                    amount: num(p.amount),
+                    dueDate: formatIsoDate(p.dueDate, PM),
+                    overdue: !p.isPaid && due && due < today,
+                    notes: p.notes || "",
+                };
+                if (p.isPaid) payablesPaid.push(row);
+                else payablesOpen.push(row);
+            });
+            (pack.receivables || []).forEach((raw) => {
+                const r = RM ? RM.normalizeReceivable(raw, pack.locationId) : raw;
+                const due = RM ? RM.toDate(r.dueDate) : toDate(r.dueDate);
+                const row = {
+                    location: loc,
+                    name: r.receiveFrom || "—",
+                    amount: num(r.amount),
+                    dueDate: formatIsoDate(r.dueDate, RM),
+                    overdue: !r.isReceived && due && due < today,
+                    notes: r.notes || "",
+                };
+                if (r.isReceived) receivablesReceived.push(row);
+                else receivablesOpen.push(row);
+            });
+        });
+
+        const openPayablesTotal = payablesOpen.reduce((s, r) => s + r.amount, 0);
+        const openReceivablesTotal = receivablesOpen.reduce((s, r) => s + r.amount, 0);
+        const overduePayables = payablesOpen.filter((r) => r.overdue).length;
+        const overdueReceivables = receivablesOpen.filter((r) => r.overdue).length;
+
+        return {
+            type: "payables_receivables",
+            title: "Payables & receivables",
+            meta,
+            headline: meta.allLocations ? "All facilities" : meta.locationName,
+            subhead: `Open items · ${new Date().toLocaleDateString("en-US")}`,
+            summary: [
+                { label: "Open payables", value: openPayablesTotal },
+                { label: "Open receivables", value: openReceivablesTotal },
+                { label: "Overdue payables", value: overduePayables, format: "number" },
+                { label: "Overdue receivables", value: overdueReceivables, format: "number" },
+            ],
+            payablesOpen,
+            payablesPaid,
+            receivablesOpen,
+            receivablesReceived,
+            csvRows: [
+                ["Payables — open"],
+                ["Facility", "Pay to", "Amount", "Due", "Overdue"],
+                ...payablesOpen.map((r) => [r.location, r.name, r.amount, r.dueDate, r.overdue ? "Yes" : ""]),
+                [],
+                ["Receivables — open"],
+                ["Facility", "Receive from", "Amount", "Due", "Overdue"],
+                ...receivablesOpen.map((r) => [r.location, r.name, r.amount, r.dueDate, r.overdue ? "Yes" : ""]),
+            ],
+        };
+    }
+
+    function buildCashReconciliationReport(agg, meta) {
+        const categories = cashReconCategoriesFromAgg(agg);
+        const reg = agg?.cashReconciliation?.register || {};
+        const rollup = reconRollupFromRegister(reg);
+        return {
+            type: "cash_reconciliation",
+            title: "Cash reconciliation report",
+            meta,
+            headline: meta.locationName,
+            subhead: meta.monthLabel,
+            summary: [
+                { label: "Days reconciled", value: `${rollup.daysReconciled} / ${rollup.daysWithExpected}`, format: "text" },
+                { label: "Deposit variance", value: rollup.totalDepositVariance },
+                { label: "Need attention", value: rollup.daysNeedingAttention, format: "number" },
+            ],
+            categories,
+            supplement: buildBooksSupplement(agg),
+            csvRows: [
+                ["Day", "Received", "Expected deposit", "Deposited", "Variance", "Status"],
+                ...(reg.dailyRows || []).flatMap((row) => [
+                    [
+                        row.dayId,
+                        num(row.countedTotal),
+                        num(row.expectedDeposit),
+                        row.deposit == null ? "" : num(row.deposit),
+                        row.deposit != null ? num(row.depositVariance) : num(row.variance),
+                        row.status?.label || "",
+                    ],
+                ]),
+            ],
+        };
+    }
+
+    function buildAllLocationsCashReconReport(packs, meta) {
+        const tableRows = (packs || []).map((p) => {
+            const reg = p.aggregate?.cashReconciliation?.register || {};
+            const rollup = reconRollupFromRegister(reg);
+            return {
+                location: p.locationName,
+                ...rollup,
+            };
+        });
+        const totals = tableRows.reduce(
+            (t, r) => ({
+                daysWithExpected: t.daysWithExpected + r.daysWithExpected,
+                daysReconciled: t.daysReconciled + r.daysReconciled,
+                daysNeedingAttention: t.daysNeedingAttention + r.daysNeedingAttention,
+                totalExpectedDeposit: t.totalExpectedDeposit + r.totalExpectedDeposit,
+                totalDeposit: t.totalDeposit + r.totalDeposit,
+                totalDepositVariance: t.totalDepositVariance + r.totalDepositVariance,
+            }),
+            {
+                daysWithExpected: 0,
+                daysReconciled: 0,
+                daysNeedingAttention: 0,
+                totalExpectedDeposit: 0,
+                totalDeposit: 0,
+                totalDepositVariance: 0,
+            }
+        );
+
+        return {
+            type: "all_locations_cash_recon",
+            title: "All locations — cash reconciliation",
+            meta,
+            headline: "All facilities",
+            subhead: meta.monthLabel,
+            summary: [
+                { label: "Locations", value: tableRows.length, format: "number" },
+                { label: "Days needing attention", value: totals.daysNeedingAttention, format: "number" },
+                { label: "Total deposit variance", value: totals.totalDepositVariance },
+            ],
+            tableRows,
+            totals,
+            csvRows: [
+                [
+                    "Facility",
+                    "Days w/ expected",
+                    "Days reconciled",
+                    "Need attention",
+                    "Expected deposit",
+                    "Deposited",
+                    "Deposit variance",
+                    "Worst day",
+                    "Worst variance",
+                ],
+                ...tableRows.map((r) => [
+                    r.location,
+                    r.daysWithExpected,
+                    r.daysReconciled,
+                    r.daysNeedingAttention,
+                    r.totalExpectedDeposit,
+                    r.totalDeposit,
+                    r.totalDepositVariance,
+                    r.worstDay || "",
+                    r.worstVariance,
+                ]),
+            ],
+        };
+    }
+
+    function buildBooksPayrollPayoutsReport(packs, meta) {
+        const sections = (packs || []).map((p) => ({
+            locationName: p.locationName,
+            registerPayouts: registerPayoutRows(p.aggregate),
+            booksPayroll: booksPayrollRows(p.aggregate),
+            payrollTotal: num(p.aggregate?.payrollTotal),
+            payoutTotal: registerPayoutRows(p.aggregate).reduce((s, r) => s + r.amount, 0),
+        }));
+
+        const totals = sections.reduce(
+            (t, s) => ({
+                payroll: t.payroll + s.payrollTotal,
+                payouts: t.payouts + s.payoutTotal,
+            }),
+            { payroll: 0, payouts: 0 }
+        );
+
+        return {
+            type: "books_payroll_payouts",
+            title: "Books payroll & payouts",
+            meta,
+            headline: meta.allLocations ? "All facilities" : meta.locationName,
+            subhead: meta.monthLabel,
+            summary: [
+                { label: "Locations", value: sections.length, format: "number" },
+                { label: "Payroll total", value: totals.payroll },
+                { label: "Payouts total", value: totals.payouts },
+            ],
+            sections,
+            csvRows: [
+                ["Facility", "Line", "Hours", "Rate", "Amount", "Track only"],
+                ...sections.flatMap((s) => {
+                    const rows = [];
+                    s.booksPayroll.forEach((l) => {
+                        rows.push([
+                            s.locationName,
+                            l.label,
+                            l.hours ?? "",
+                            l.rate ?? "",
+                            l.amount,
+                            "",
+                        ]);
+                    });
+                    s.registerPayouts.forEach((p) => {
+                        rows.push([s.locationName, p.label, "", "", p.amount, p.trackOnly ? "Yes" : ""]);
+                    });
+                    return rows;
+                }),
+            ],
+        };
     }
 
     function toDate(v) {
@@ -287,6 +659,8 @@
             rows,
             expenseDetail: agg.expenseDetail || [],
             totalExpenses: agg.expenses,
+            supplement: buildBooksSupplement(agg),
+            payrollTotal: agg.payrollTotal,
             csvRows: [
                 ...rows
                     .filter((r) => !r.section)
@@ -537,6 +911,8 @@
                 totalNet: agg.net,
                 dailyRows,
                 dailyTotals,
+                supplement: buildBooksSupplement(agg),
+                payrollTotal: agg.payrollTotal,
             };
         });
 
@@ -878,5 +1254,10 @@
         buildPayrollReport,
         buildRegisterReport,
         prevMonthIdFrom,
+        buildCashReconciliationReport,
+        buildAllLocationsCashReconReport,
+        buildPayablesReceivablesReport,
+        buildBooksPayrollPayoutsReport,
+        buildBooksSupplement,
     };
 })();

@@ -3628,6 +3628,77 @@
     color: #dc2626;
 }
 
+.rpt-supplement {
+    margin-top: 24px;
+}
+
+.rpt-recon-category {
+    margin-bottom: 20px;
+}
+
+.rpt-var--zero {
+    color: inherit;
+}
+
+.rpt-var--neg {
+    color: #dc2626;
+}
+
+.rpt-var--pos {
+    color: #16a34a;
+}
+
+.rpt-overdue {
+    color: #dc2626;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+.rpt-row--overdue td {
+    background: rgba(220, 38, 38, 0.04);
+}
+
+.an-ap-ar-snapshot {
+    margin-top: 8px;
+}
+
+.an-ap-ar-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    padding: 0 4px 4px;
+}
+
+.an-ap-ar-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    background: var(--dash-surface, #fff);
+    border: 1px solid var(--dash-border, #e2e8f0);
+    border-radius: 10px;
+}
+
+.an-ap-ar-stat span {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--dash-muted, #64748b);
+}
+
+.an-ap-ar-stat strong {
+    font-size: 1.25rem;
+    color: var(--dash-text, #0f172a);
+}
+
+.an-compare-toggle {
+    align-self: end;
+    white-space: nowrap;
+}
+
+.an-month-toolbar .bs-toolbar-fields {
+    align-items: end;
+}
+
 .rpt-section-row td {
     height: 8px;
     padding: 0;
