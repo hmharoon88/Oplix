@@ -1265,7 +1265,11 @@
 }
 
 .books-register-groups--gaming {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.books-register-groups--gaming .books-station-cards--shifts {
+    grid-template-columns: minmax(0, 1fr);
 }
 
 .books-register-groups--expenses {
@@ -1467,6 +1471,10 @@
     .books-register-groups--recon,
     .books-register-groups--gaming,
     .books-register-groups--expenses {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .books-register-groups--gaming .books-station-cards--shifts {
         grid-template-columns: minmax(0, 1fr);
     }
 
@@ -2241,9 +2249,18 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     box-sizing: border-box;
 }
 
+@media (max-width: 1100px) {
+    .books-register-groups--gaming {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .books-register-groups--gaming .books-station-cards--shifts {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 @media (max-width: 900px) {
     .books-util-payroll-grid,
-    .books-register-groups--gaming,
     .books-register-groups--expenses {
         grid-template-columns: minmax(0, 1fr);
     }
