@@ -1242,6 +1242,46 @@
     margin-bottom: 12px;
 }
 
+.books-layout-btn {
+    margin-left: auto;
+}
+
+.books-layout-customize {
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+    background: #f8fbff;
+}
+
+.books-layout-reg-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin: 8px 0;
+}
+
+.books-layout-reg-row strong {
+    min-width: 5.5rem;
+}
+
+.books-layout-customize-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.books-register-shift-legend {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 0 4px;
+}
+
 .books-register-unit-title {
     margin: 0;
 }
@@ -2188,6 +2228,14 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.books-station-cards--sales {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.books-station-cards--grades {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .books-station-cards .books-add-line {
     justify-self: start;
 }
@@ -2266,6 +2314,14 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     .books-register-groups--gaming .books-station-cards--shifts {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+
+    .books-station-cards--sales {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .books-station-cards--grades {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 900px) {
@@ -2278,7 +2334,9 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
 @media (max-width: 520px) {
     .books-util-cards,
     .books-payroll-cards,
-    .books-station-cards--shifts {
+    .books-station-cards--shifts,
+    .books-station-cards--sales,
+    .books-station-cards--grades {
         grid-template-columns: minmax(0, 1fr);
     }
 

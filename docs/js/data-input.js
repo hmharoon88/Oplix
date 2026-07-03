@@ -25,6 +25,7 @@
         dirty: false,
         expenseDescriptions: [],
         entryDayId: M().dayIdFromDate(new Date()),
+        showLayoutCustomize: false,
     };
 
     function booksRoot() {
@@ -137,11 +138,17 @@
         return M().applyStationLayoutToDay(day, getStationLayout());
     }
 
-    async function persistStationLayout() {
+    async function persistStationLayout(overrides = {}) {
         if (!userId || !state.locationId || !window.OplixLocationStore?.updateBooksStationLayout) {
             return;
         }
-        const layout = M().stationLayoutFromDay(state.day, getStationLayout());
+        const layout = {
+            ...M().stationLayoutFromDay(state.day, getStationLayout()),
+            ...overrides,
+        };
+        if (overrides.registers) {
+            layout.registers = M().normalizeRegisterLayout(overrides.registers);
+        }
         const loc = currentLocation();
         if (loc) loc.booksStationLayout = layout;
         try {
@@ -157,6 +164,62 @@
         } catch (err) {
             console.warn("[Oplix] Could not save station layout:", err);
         }
+    }
+
+    function getRegisterLayout() {
+        return getStationLayout().registers;
+    }
+
+    async function setRegisterLayout(registers) {
+        const next = M().normalizeRegisterLayout(registers);
+        if (!M().countEnabledRegisterShifts({ registers: next })) {
+            window.alert("Keep at least one register shift.");
+            return false;
+        }
+        await persistStationLayout({ registers: next });
+        return true;
+    }
+
+    async function removeRegisterShift(regKey, shiftKey) {
+        const registers = getRegisterLayout().map((reg) => ({
+            ...reg,
+            shifts: [...reg.shifts],
+        }));
+        const reg = registers.find((r) => r.key === regKey);
+        if (!reg) return;
+        reg.shifts = reg.shifts.filter((s) => s !== shiftKey);
+        const next = registers.filter((r) => r.shifts.length > 0);
+        if (!(await setRegisterLayout(next))) return;
+        render();
+    }
+
+    async function removeRegister(regKey) {
+        const next = getRegisterLayout().filter((r) => r.key !== regKey);
+        if (!(await setRegisterLayout(next))) return;
+        render();
+    }
+
+    async function saveRegisterLayoutFromCustomize(root) {
+        const host = root || booksRoot();
+        if (!host) return;
+        const registers = [];
+        ["register1", "register2"].forEach((regKey, idx) => {
+            const shifts = [];
+            ["shift1", "shift2"].forEach((sh) => {
+                const el = host.querySelector(`[name="layout_${regKey}_${sh}"]`);
+                if (el?.checked) shifts.push(sh);
+            });
+            if (shifts.length) {
+                registers.push({
+                    key: regKey,
+                    label: regKey === "register2" ? "Register 2" : "Register 1",
+                    shifts,
+                });
+            }
+        });
+        if (!(await setRegisterLayout(registers))) return;
+        state.showLayoutCustomize = false;
+        render();
     }
 
     function switchDay(dayId) {
@@ -1080,6 +1143,31 @@
                 }
                 return;
             }
+            if (e.target.closest("[data-layout-toggle]")) {
+                state.showLayoutCustomize = !state.showLayoutCustomize;
+                render();
+                return;
+            }
+            if (e.target.closest("[data-layout-cancel]")) {
+                state.showLayoutCustomize = false;
+                render();
+                return;
+            }
+            if (e.target.closest("[data-layout-save]")) {
+                saveRegisterLayoutFromCustomize();
+                return;
+            }
+            const rmReg = e.target.closest("[data-layout-rm-reg]");
+            if (rmReg) {
+                removeRegister(rmReg.dataset.layoutRmReg);
+                return;
+            }
+            const rmShift = e.target.closest("[data-layout-rm-shift]");
+            if (rmShift) {
+                const [regKey, shiftKey] = (rmShift.dataset.layoutRmShift || "").split(":");
+                if (regKey && shiftKey) removeRegisterShift(regKey, shiftKey);
+                return;
+            }
             const add = e.target.closest("[data-di-add]");
             if (add) {
                 if (isViewingClosedDay() || isViewingClosedMonth()) return;
@@ -1797,33 +1885,92 @@
             </section>`;
     }
 
-    /** All register shifts in one parallel row, grouped under Register 1 / Register 2 headings. */
-    function renderAllRegisters() {
-        const r1 = state.day.register1 || M().defaultRegisterUnit();
-        const r2 = state.day.register2 || M().defaultRegisterUnit();
-        const t1 = M().registerBlockTotal(r1);
-        const t2 = M().registerBlockTotal(r2);
-        const all = M().registerDayTotal(state.day);
-        const group = (title, total, regKey, unit) => `
-            <div class="books-register-group">
-                <div class="books-register-group-head">
-                    <h4 class="books-register-group-title">${escapeHtml(title)}</h4>
-                    <span class="books-register-group-total">${money(total.card + total.cash)}</span>
-                </div>
-                <div class="books-register-shifts">
-                    ${renderRegisterShiftBlock("Shift 1", `reg_${regKey}_shift1`, unit.shift1, regKey, "shift1")}
-                    ${renderRegisterShiftBlock("Shift 2", `reg_${regKey}_shift2`, unit.shift2, regKey, "shift2")}
+    function renderRegisterLayoutCustomize() {
+        const layout = getRegisterLayout();
+        const enabled = (regKey, shiftKey) =>
+            M().isRegisterShiftEnabled({ registers: layout }, regKey, shiftKey);
+        const row = (regKey, label) => `
+            <div class="books-layout-reg-row">
+                <strong>${escapeHtml(label)}</strong>
+                <label class="books-check-label">
+                    <input type="checkbox" name="layout_${regKey}_shift1"${enabled(regKey, "shift1") ? " checked" : ""}>
+                    Shift 1
+                </label>
+                <label class="books-check-label">
+                    <input type="checkbox" name="layout_${regKey}_shift2"${enabled(regKey, "shift2") ? " checked" : ""}>
+                    Shift 2
+                </label>
+            </div>`;
+        return `
+            <div class="books-layout-customize" data-books-layout-customize>
+                <p class="books-hint">Choose registers and shifts for this facility. Saved for all future days.</p>
+                ${row("register1", "Register 1")}
+                ${row("register2", "Register 2")}
+                <div class="books-layout-customize-actions">
+                    <button type="button" class="btn btn-nav-outline" data-layout-cancel>Cancel</button>
+                    <button type="button" class="btn books-save" data-layout-save>Save layout</button>
                 </div>
             </div>`;
+    }
+
+    /** Enabled register shifts for this facility, grouped under register headings. */
+    function renderAllRegisters() {
+        const layout = getRegisterLayout();
+        const all = M().registerDayTotal(state.day);
+        const closed = isBooksLocked();
+        const groups = layout
+            .map((reg) => {
+                const unit = state.day[reg.key] || M().defaultRegisterUnit();
+                const total = M().registerBlockTotal(unit);
+                const canRemoveReg = M().countEnabledRegisterShifts({ registers: layout }) > reg.shifts.length;
+                const shifts = reg.shifts
+                    .map((sh) => {
+                        const label = sh === "shift2" ? "Shift 2" : "Shift 1";
+                        const canRemoveShift =
+                            M().countEnabledRegisterShifts({ registers: layout }) > 1;
+                        return renderRegisterShiftBlock(
+                            label,
+                            `reg_${reg.key}_${sh}`,
+                            unit[sh],
+                            reg.key,
+                            sh,
+                            { canRemove: !closed && canRemoveShift }
+                        );
+                    })
+                    .join("");
+                return `
+            <div class="books-register-group">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">${escapeHtml(reg.label)}</h4>
+                    <span class="books-register-group-total">${money(total.card + total.cash)}</span>
+                    ${
+                        !closed && canRemoveReg
+                            ? `<button type="button" class="books-rm" data-layout-rm-reg="${escapeHtml(reg.key)}" title="Remove register from layout">×</button>`
+                            : ""
+                    }
+                </div>
+                <div class="books-register-shifts">
+                    ${shifts}
+                </div>
+            </div>`;
+            })
+            .join("");
         return `
             <section class="books-register-unit books-register-unit--all">
                 <div class="books-register-unit-head">
                     <h3 class="books-subtitle books-register-unit-title">Registers</h3>
                     <p class="books-total-line books-register-unit-total">All ${money(all.card + all.cash)} card+cash</p>
+                    ${
+                        closed
+                            ? ""
+                            : `<button type="button" class="btn btn-nav-outline books-layout-btn" data-layout-toggle>
+                        ${state.showLayoutCustomize ? "Close layout" : "Customize layout"}
+                    </button>`
+                    }
                 </div>
+                ${state.showLayoutCustomize ? renderRegisterLayoutCustomize() : ""}
                 <div class="books-register-groups">
-                    ${group("Register 1", t1, "register1", r1)}
-                    ${group("Register 2", t2, "register2", r2)}
+                    ${groups}
                 </div>
             </section>`;
     }
@@ -1844,7 +1991,7 @@
         return state.day.cashReconciliation[regKey][shiftKey];
     }
 
-    function renderRegisterShiftBlock(title, prefix, data, regKey, shiftKey) {
+    function renderRegisterShiftBlock(title, prefix, data, regKey, shiftKey, options = {}) {
         const shift = data || M().emptyShiftRegister();
         const countAsExpense = !!shift.cashPayOutExpense;
         const cashSale = M().num(shift.cashSale);
@@ -1859,7 +2006,14 @@
 
         return `
             <fieldset class="books-fieldset books-register-shift">
-                <legend>${escapeHtml(title)}</legend>
+                <legend class="books-register-shift-legend">
+                    <span>${escapeHtml(title)}</span>
+                    ${
+                        options.canRemove
+                            ? `<button type="button" class="books-rm" data-layout-rm-shift="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}" title="Remove shift from layout">×</button>`
+                            : ""
+                    }
+                </legend>
                 <div class="books-register-shift-sales">
                     ${REGISTER_SHIFT_FIELDS.map(
                         (f) => `
@@ -2307,14 +2461,6 @@
         return inner;
     }
 
-    function renderDailyMerchEntry() {
-        return `
-            <label class="books-label">Merch sale ($)
-                <input ${amountInputAttrs("merch_sale", state.day.merchSale)}>
-                <span class="books-field-hint">In-store merch total for the day</span>
-            </label>`;
-    }
-
     function fuelGradesActive(fuel) {
         return M().sumFuelGradeGallons(fuel) > 0;
     }
@@ -2327,45 +2473,95 @@
         const showFuel = showField("fuel");
         if (!showMerch && !showCredit && !showFuel) return "";
 
-        const parts = [
-            `<h3 class="books-subtitle">Daily sales</h3>`,
-            `<p class="books-hint">Merch, credit card, and fuel are separate — none are combined into each other.</p>`,
-        ];
-        if (showMerch) parts.push(renderDailyMerchEntry());
+        const salesCards = [];
+        if (showMerch) {
+            salesCards.push(`
+                <div class="books-station-card">
+                    <div class="books-station-card-head"><strong>Merch sale</strong></div>
+                    <label class="books-label">Amount ($)
+                        <input ${amountInputAttrs("merch_sale", state.day.merchSale)}>
+                    </label>
+                    <p class="books-hint books-register-payout-hint">In-store merch total</p>
+                </div>`);
+        }
         if (showCredit) {
-            parts.push(`<label class="books-label">Credit card ($)
-                <input ${amountInputAttrs("credit_card", state.day.creditCard)}>
-                <span class="books-field-hint">Credit card sales — separate from merch sale and fuel ($)</span>
-            </label>`);
+            salesCards.push(`
+                <div class="books-station-card">
+                    <div class="books-station-card-head"><strong>Credit card</strong></div>
+                    <label class="books-label">Amount ($)
+                        <input ${amountInputAttrs("credit_card", state.day.creditCard)}>
+                    </label>
+                    <p class="books-hint books-register-payout-hint">Separate from merch and fuel</p>
+                </div>`);
         }
         if (showFuel) {
-            parts.push(`<div class="books-grid-2">
-                <label class="books-label">Gallons sold
-                    <input ${amountInputAttrs("fuel_gallons", fuel.gallons)}>
-                    ${gradesActive ? '<span class="books-field-hint">Filled from grade breakdown below — clear all grades to enter a single total here</span>' : ""}
-                </label>
-                <label class="books-label">Fuel amount ($)
-                    <input ${amountInputAttrs("fuel_dollars", fuel.dollars)}>
-                    <span class="books-field-hint">Fuel revenue — separate from merch and credit card</span>
-                </label>
-            </div>
-            <p class="books-hint books-fuel-grade-hint">Optional — gallons by grade (total updates Gallons sold automatically)</p>
-            <div class="books-grid-4 books-fuel-grades">
-                <label class="books-label">Regular (gal)
-                    <input ${amountInputAttrs("fuel_regular", fuel.regular)}>
-                </label>
-                <label class="books-label">Mid grade (gal)
-                    <input ${amountInputAttrs("fuel_mid_grade", fuel.midGrade)}>
-                </label>
-                <label class="books-label">Premium (gal)
-                    <input ${amountInputAttrs("fuel_premium", fuel.premium)}>
-                </label>
-                <label class="books-label">Diesel (gal)
-                    <input ${amountInputAttrs("fuel_diesel", fuel.diesel)}>
-                </label>
-            </div>`);
+            salesCards.push(`
+                <div class="books-station-card">
+                    <div class="books-station-card-head"><strong>Fuel</strong></div>
+                    <div class="books-station-card-fields">
+                        <label class="books-label">Gallons sold
+                            <input ${amountInputAttrs("fuel_gallons", fuel.gallons)}>
+                        </label>
+                        <label class="books-label">Fuel amount ($)
+                            <input ${amountInputAttrs("fuel_dollars", fuel.dollars)}>
+                        </label>
+                    </div>
+                    ${gradesActive ? `<p class="books-hint books-register-payout-hint">Gallons filled from grades below</p>` : ""}
+                </div>`);
         }
-        return parts.join("\n");
+
+        const gradeCards = showFuel
+            ? `
+            <div class="books-register-group books-register-group--wide">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">Fuel grades (optional)</h4>
+                </div>
+                <p class="books-hint">Gallons by grade — total updates Gallons sold automatically.</p>
+                <div class="books-station-cards books-station-cards--grades">
+                    <div class="books-station-card">
+                        <div class="books-station-card-head"><strong>Regular</strong></div>
+                        <label class="books-label">Gallons
+                            <input ${amountInputAttrs("fuel_regular", fuel.regular)}>
+                        </label>
+                    </div>
+                    <div class="books-station-card">
+                        <div class="books-station-card-head"><strong>Mid grade</strong></div>
+                        <label class="books-label">Gallons
+                            <input ${amountInputAttrs("fuel_mid_grade", fuel.midGrade)}>
+                        </label>
+                    </div>
+                    <div class="books-station-card">
+                        <div class="books-station-card-head"><strong>Premium</strong></div>
+                        <label class="books-label">Gallons
+                            <input ${amountInputAttrs("fuel_premium", fuel.premium)}>
+                        </label>
+                    </div>
+                    <div class="books-station-card">
+                        <div class="books-station-card-head"><strong>Diesel</strong></div>
+                        <label class="books-label">Gallons
+                            <input ${amountInputAttrs("fuel_diesel", fuel.diesel)}>
+                        </label>
+                    </div>
+                </div>
+            </div>`
+            : "";
+
+        return `
+            <section class="books-register-unit">
+                <div class="books-register-unit-head">
+                    <h3 class="books-subtitle books-register-unit-title">Daily sales</h3>
+                </div>
+                <p class="books-hint">Merch, credit card, and fuel are separate — none are combined into each other.</p>
+                <div class="books-register-groups books-register-groups--gaming">
+                    <div class="books-register-group books-register-group--wide">
+                        <div class="books-register-group-head">
+                            <h4 class="books-register-group-title">Sales</h4>
+                        </div>
+                        <div class="books-station-cards books-station-cards--sales">${salesCards.join("")}</div>
+                    </div>
+                    ${gradeCards}
+                </div>
+            </section>`;
     }
 
     function renderRegisterWaynePass() {
@@ -2568,42 +2764,24 @@
         return `<div class="books-register-groups books-register-groups--expenses">${parts.join("\n")}</div>`;
     }
 
-    function renderDailyDetailSheet(reg) {
-        const bodyParts = [];
-        if (showField("registers")) {
-            bodyParts.push(
-                renderAllRegisters(),
-                `<p class="books-hint">Register card/cash on the detail sheet is for shift reconciliation only — not added to merch, credit card, or fuel.</p>`
-            );
-        }
-        const gasExtras = [renderRegisterWaynePass(), renderRegisterPayoutFields()].filter(Boolean);
-        if (gasExtras.length) {
-            bodyParts.push(`<div class="books-register-groups books-register-groups--gaming">${gasExtras.join("\n")}</div>`);
-        }
-        const gaming = renderGamingStationsGrid();
-        if (gaming) bodyParts.push(gaming);
-        const expenses = renderDailyExpensesBlock();
-        if (expenses) bodyParts.push(expenses);
-
-        if (!bodyParts.length) return "";
-
-        return `
-            <details class="books-detail-sheet" open>
-                <summary class="books-detail-summary">Detail sheet</summary>
-                <div class="books-detail-body">
-                    ${bodyParts.join("\n")}
-                </div>
-            </details>`;
-    }
-
-    function renderDailyCStore() {
-        const reg = M().registerDayTotal(state.day);
+    /** Shared daily body: registers, gaming, expenses (C-store and gas). */
+    function renderDailySharedSections(options = {}) {
         const parts = [];
         if (showField("registers")) {
             parts.push(
-                `<p class="books-hint"><strong>Total sales</strong> in Books summary uses register card + cash (both registers, both shifts). Lottery and pulltab are tracked separately.</p>
-            ${renderAllRegisters()}`
+                options.gas
+                    ? `<p class="books-hint">Register card/cash is for shift reconciliation only — not added to merch, credit card, or fuel.</p>`
+                    : `<p class="books-hint"><strong>Total sales</strong> in Books summary uses register card + cash (both registers, both shifts). Lottery and pulltab are tracked separately.</p>`
             );
+            parts.push(renderAllRegisters());
+        }
+        if (options.gas) {
+            const gasExtras = [renderRegisterWaynePass(), renderRegisterPayoutFields()].filter(Boolean);
+            if (gasExtras.length) {
+                parts.push(
+                    `<div class="books-register-groups books-register-groups--gaming">${gasExtras.join("\n")}</div>`
+                );
+            }
         }
         const gaming = renderGamingStationsGrid();
         if (gaming) parts.push(gaming);
@@ -2613,29 +2791,12 @@
     }
 
     function renderDaily() {
-        const reg = M().registerDayTotal(state.day);
         const gas = hasGasStation();
         const fuelSale = M().normalizeFuelSale(state.day.fuelSale);
         const closed = isBooksLocked();
         const fieldsetAttr = closed ? " disabled" : "";
-
-        if (gas) {
-            const gasSales = renderDailyGasSales(fuelSale);
-            const detail = renderDailyDetailSheet(reg);
-            return `
-            <div class="books-panel data-input-form">
-                ${renderDayStatusBanner()}
-                <label class="books-label">Day
-                    <select id="di-day" class="books-select">${dayOptions()}</select>
-                </label>
-                <fieldset class="books-day-fields"${fieldsetAttr}>
-                    ${gasSales}
-                    ${detail}
-                    ${renderCustomBooksFields("daily", state.day.customAmounts)}
-                </fieldset>
-                ${closed ? "" : `<button type="button" class="btn books-save" id="di-save-day">Save this day</button>`}
-            </div>`;
-        }
+        const sales = gas ? renderDailyGasSales(fuelSale) : "";
+        const shared = renderDailySharedSections({ gas });
 
         return `
             <div class="books-panel data-input-form">
@@ -2644,7 +2805,8 @@
                     <select id="di-day" class="books-select">${dayOptions()}</select>
                 </label>
                 <fieldset class="books-day-fields"${fieldsetAttr}>
-                    ${renderDailyCStore()}
+                    ${sales}
+                    ${shared}
                     ${renderCustomBooksFields("daily", state.day.customAmounts)}
                 </fieldset>
                 ${closed ? "" : `<button type="button" class="btn books-save" id="di-save-day">Save this day</button>`}
@@ -3038,7 +3200,9 @@
         if (!showField("cashReconciliation")) {
             return `<p class="data-list-empty">Cash reconciliation is turned off for this facility. Enable it under Facilities → Customize.</p>`;
         }
-        const summary = M().cashReconciliationSummary(state.day);
+        const summary = M().cashReconciliationSummary(state.day, {
+            stationLayout: getStationLayout(),
+        });
         const reg = summary.register;
         const sectionEntries = [
             { section: summary.register, fieldId: "registers" },

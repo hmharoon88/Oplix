@@ -139,12 +139,57 @@
         return [normalizeKenoStationEntry({ station: "1" }, "ks_0", 0)];
     }
 
-    /** Per-location template for pulltab / wind / keno slots (ids + labels only). */
+    /** Per-location template for pulltab / wind / keno slots and register/shift layout. */
+    function defaultRegisterLayout() {
+        return [
+            { key: "register1", label: "Register 1", shifts: ["shift1", "shift2"] },
+            { key: "register2", label: "Register 2", shifts: ["shift1", "shift2"] },
+        ];
+    }
+
+    function normalizeRegisterLayout(raw) {
+        const base = defaultRegisterLayout();
+        if (!Array.isArray(raw) || !raw.length) return base;
+        const allowedShifts = new Set(["shift1", "shift2"]);
+        const allowedKeys = new Set(["register1", "register2"]);
+        const out = [];
+        raw.forEach((row, i) => {
+            const key = String(row?.key || "").trim();
+            if (!allowedKeys.has(key)) return;
+            if (out.some((r) => r.key === key)) return;
+            const shifts = (Array.isArray(row.shifts) ? row.shifts : [])
+                .map((s) => String(s || "").trim())
+                .filter((s) => allowedShifts.has(s));
+            const uniqueShifts = [...new Set(shifts)];
+            if (!uniqueShifts.length) return;
+            const label =
+                String(row?.label || "").trim() ||
+                (key === "register2" ? "Register 2" : "Register 1");
+            out.push({ key, label, shifts: uniqueShifts.sort() });
+        });
+        if (!out.length) return base;
+        return out.sort((a, b) => a.key.localeCompare(b.key));
+    }
+
+    function isRegisterShiftEnabled(layout, regKey, shiftKey) {
+        const registers = normalizeRegisterLayout(layout?.registers);
+        const reg = registers.find((r) => r.key === regKey);
+        return !!(reg && reg.shifts.includes(shiftKey));
+    }
+
+    function countEnabledRegisterShifts(layout) {
+        return normalizeRegisterLayout(layout?.registers).reduce(
+            (n, reg) => n + reg.shifts.length,
+            0
+        );
+    }
+
     function defaultStationLayout() {
         return {
             pulltabs: [{ id: "pt_0" }],
             windStations: [{ id: "ws_0", station: "1" }],
             kenoStations: [{ id: "ks_0", station: "1" }],
+            registers: defaultRegisterLayout(),
         };
     }
 
@@ -177,7 +222,8 @@
                   }))
                   .filter((row) => row.id)
             : base.kenoStations;
-        return { pulltabs, windStations, kenoStations };
+        const registers = normalizeRegisterLayout(raw.registers);
+        return { pulltabs, windStations, kenoStations, registers };
     }
 
     /**
@@ -203,6 +249,7 @@
                 id: k.id || `ks_${i}`,
                 station: String(k.station ?? String(i + 1)),
             })),
+            registers: prev.registers,
         };
     }
 
@@ -1867,13 +1914,19 @@
     }
 
     /** Cash reconciliation totals for a day — register, lottery, pulltab, and wind. */
-    function cashReconciliationSummary(day) {
+    function cashReconciliationSummary(day, options) {
         const normalized = normalizeDayDoc(day);
         const recon = normalized.cashReconciliation;
+        const stationLayout = options?.stationLayout
+            ? normalizeStationLayout(options.stationLayout)
+            : null;
 
         const registerRowsAll = [];
         ["register1", "register2"].forEach((regKey, regIdx) => {
             ["shift1", "shift2"].forEach((sh, shIdx) => {
+                if (stationLayout && !isRegisterShiftEnabled(stationLayout, regKey, sh)) {
+                    return;
+                }
                 const shift = normalized[regKey][sh];
                 const expectedGross = registerShiftGrossCash(normalized, regKey, sh);
                 const payOut = num(shift.cashPayOut);
@@ -2235,6 +2288,10 @@
         kenoStationDayTotal,
         defaultStationLayout,
         normalizeStationLayout,
+        defaultRegisterLayout,
+        normalizeRegisterLayout,
+        isRegisterShiftEnabled,
+        countEnabledRegisterShifts,
         stationLayoutFromDay,
         applyStationLayoutToDay,
         lotteryDayTotal,
