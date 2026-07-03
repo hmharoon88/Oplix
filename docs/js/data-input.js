@@ -1178,6 +1178,9 @@
             }
             syncFromForm();
             state.dirty = true;
+            if (e.target.closest("[data-reg-recon], [data-reg-recon-input]")) {
+                updateInlineRegisterReconDisplays($("data-input-root"));
+            }
             if (state.tab === "cash-recon" && e.target.name === "cr_day_deposit") {
                 render();
             }
@@ -1786,28 +1789,54 @@
         const total = M().registerBlockTotal(unit);
         return `
             <h3 class="books-subtitle">${escapeHtml(title)}</h3>
-            ${renderRegisterShiftBlock("Shift 1", `reg_${regKey}_shift1`, unit.shift1)}
-            ${renderRegisterShiftBlock("Shift 2", `reg_${regKey}_shift2`, unit.shift2)}
+            ${renderRegisterShiftBlock("Shift 1", `reg_${regKey}_shift1`, unit.shift1, regKey, "shift1")}
+            ${renderRegisterShiftBlock("Shift 2", `reg_${regKey}_shift2`, unit.shift2, regKey, "shift2")}
             <p class="books-total-line">${escapeHtml(title)} total: ${money(total.card + total.cash)} card+cash</p>`;
     }
 
-    function renderRegisterShiftBlock(title, prefix, data) {
+    function registerShiftReconEntry(regKey, shiftKey) {
+        if (!state.day.cashReconciliation) {
+            state.day.cashReconciliation = M().defaultCashReconciliation();
+        }
+        if (!state.day.cashReconciliation[regKey]) {
+            state.day.cashReconciliation[regKey] = {
+                shift1: M().emptyCashReconShift(),
+                shift2: M().emptyCashReconShift(),
+            };
+        }
+        if (!state.day.cashReconciliation[regKey][shiftKey]) {
+            state.day.cashReconciliation[regKey][shiftKey] = M().emptyCashReconShift();
+        }
+        return state.day.cashReconciliation[regKey][shiftKey];
+    }
+
+    function renderRegisterShiftBlock(title, prefix, data, regKey, shiftKey) {
         const shift = data || M().emptyShiftRegister();
         const countAsExpense = !!shift.cashPayOutExpense;
+        const cashSale = M().num(shift.cashSale);
+        const payOut = M().num(shift.cashPayOut);
+        const expected = Math.max(0, cashSale - payOut);
+        const showRecon = showField("cashReconciliation") && showField("registers");
+        const recon = showRecon ? registerShiftReconEntry(regKey, shiftKey) : null;
+        const counted = recon ? M().num(recon.countedCash) : 0;
+        const variance = counted - expected;
+        const varCls = varianceColorClass(variance);
+        const crPrefix = `cr_${regKey}_${shiftKey}`;
+
         return `
-            <fieldset class="books-fieldset">
+            <fieldset class="books-fieldset books-register-shift">
                 <legend>${escapeHtml(title)}</legend>
                 <div class="books-grid-3">
                     ${REGISTER_SHIFT_FIELDS.map(
                         (f) => `
                     <label class="books-label">${escapeHtml(f.label)}
-                        <input ${amountInputAttrs(`${prefix}_${f.name}`, shift[f.name])}>
+                        <input ${amountInputAttrs(`${prefix}_${f.name}`, shift[f.name])} data-reg-recon-input="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}">
                     </label>`
                     ).join("")}
                 </div>
                 <div class="books-register-payout-row">
                     <label class="books-label">Cash pay out ($)
-                        <input ${amountInputAttrs(`${prefix}_cashPayOut`, shift.cashPayOut)}>
+                        <input ${amountInputAttrs(`${prefix}_cashPayOut`, shift.cashPayOut)} data-reg-recon-input="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}">
                     </label>
                     <label class="books-label">Count in store expense?
                         <select class="books-select" name="${prefix}_cashPayOutExpense">
@@ -1816,8 +1845,74 @@
                         </select>
                     </label>
                 </div>
-                <p class="books-hint books-register-payout-hint">Pay out reduces <strong>expected cash</strong> for this shift on Cash reconciliation. Choose <strong>Yes</strong> to also include it in daily cash expense totals.</p>
+                <p class="books-hint books-register-payout-hint">Pay out reduces <strong>expected cash</strong> for this shift. Choose <strong>Yes</strong> to also include it in daily cash expense totals.</p>
+                ${
+                    showRecon
+                        ? `<div class="books-register-recon" data-reg-recon="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}">
+                    <div class="books-register-recon-head">
+                        <span class="books-register-recon-title">Cash reconciliation</span>
+                        <span class="books-register-recon-status${Math.abs(variance) < 0.005 && counted !== 0 ? " books-register-recon-status--ok" : ""}" data-reg-recon-status>
+                            ${Math.abs(variance) < 0.005 && (counted !== 0 || expected === 0) ? "Balanced" : "Count cash in drawer"}
+                        </span>
+                    </div>
+                    <div class="books-register-recon-grid">
+                        <div class="books-register-recon-stat">
+                            <span>Expected</span>
+                            <strong data-reg-recon-expected>${money(expected)}</strong>
+                        </div>
+                        <label class="books-label books-register-recon-received">Received (counted)
+                            <input ${amountInputAttrs(`${crPrefix}_counted`, recon.countedCash)} data-reg-recon-input="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}" aria-label="Received cash">
+                        </label>
+                        <div class="books-register-recon-stat">
+                            <span>Variance</span>
+                            <strong class="${varCls}" data-reg-recon-variance>${money(variance)}</strong>
+                        </div>
+                        <label class="books-check-label books-register-recon-verified">
+                            <input type="checkbox" name="${crPrefix}_verified"${recon.verified ? " checked" : ""}>
+                            Verified
+                        </label>
+                    </div>
+                    <label class="books-label books-register-recon-note">Note
+                        <input type="text" class="books-input" name="${crPrefix}_note" value="${escapeHtml(recon.note || "")}" placeholder="Optional">
+                    </label>
+                    <p class="books-hint books-register-recon-hint">Expected = cash sale − pay out. Received should match expected.</p>
+                </div>`
+                        : ""
+                }
             </fieldset>`;
+    }
+
+    function updateInlineRegisterReconDisplays(root) {
+        if (!root) return;
+        root.querySelectorAll("[data-reg-recon]").forEach((block) => {
+            const key = block.dataset.regRecon || "";
+            const [regKey, shiftKey] = key.split(":");
+            if (!regKey || !shiftKey) return;
+            const prefix = `reg_${regKey}_${shiftKey}`;
+            const cashSaleEl = root.querySelector(`[name="${prefix}_cashSale"]`);
+            const payOutEl = root.querySelector(`[name="${prefix}_cashPayOut"]`);
+            const countedEl = root.querySelector(`[name="cr_${regKey}_${shiftKey}_counted"]`);
+            const cashSale = M().num(cashSaleEl?.value);
+            const payOut = M().num(payOutEl?.value);
+            const expected = Math.max(0, cashSale - payOut);
+            const counted = M().num(countedEl?.value);
+            const variance = counted - expected;
+            const expectedEl = block.querySelector("[data-reg-recon-expected]");
+            const varianceEl = block.querySelector("[data-reg-recon-variance]");
+            const statusEl = block.querySelector("[data-reg-recon-status]");
+            if (expectedEl) expectedEl.textContent = money(expected);
+            if (varianceEl) {
+                varianceEl.textContent = money(variance);
+                varianceEl.classList.remove("books-cash-recon-var--ok", "books-cash-recon-var--bad");
+                const cls = varianceColorClass(variance);
+                if (cls) varianceEl.classList.add(cls);
+            }
+            if (statusEl) {
+                const balanced = Math.abs(variance) < 0.005 && (counted !== 0 || expected === 0);
+                statusEl.textContent = balanced ? "Balanced" : "Count cash in drawer";
+                statusEl.classList.toggle("books-register-recon-status--ok", balanced);
+            }
+        });
     }
 
     function renderShiftBlock(title, prefix, data, fields) {
@@ -2639,7 +2734,7 @@
                     <p class="books-cash-recon-summary-title">${escapeHtml(matchLabel)}</p>
                 </div>
 
-                <p class="books-hint">Per shift: <strong>Expected</strong> = cash sale minus pay out from the Daily sheet. <strong>Received</strong> should match Expected. Register pay outs are entered under each shift on the <strong>Daily sheet</strong>. Other cash expenses lower expected deposit at day level.</p>
+                <p class="books-hint">Register cash can be reconciled under each shift on the <strong>Daily sheet</strong> (expected, received, verified). This tab shows the full day, lottery/pulltab/stations, and deposit totals. Per shift: <strong>Expected</strong> = cash sale − pay out; <strong>Received</strong> should match expected.</p>
 
                 <fieldset class="books-day-fields"${fieldsetAttr}>
                 ${
@@ -2651,7 +2746,7 @@
                 ${showField("registers")
                     ? renderReconSection(
                           "Register cash",
-                          "Expected deposit = register cash sales − shift pay outs − cash expenses − day-level register payouts. Per shift: expected = cash sale − pay out (Daily sheet); received should match expected.",
+                          "Enter received cash under each register shift on the Daily sheet, or here. Expected deposit = register cash sales − shift pay outs − cash expenses − day-level register payouts.",
                           reg,
                           "cr_day_deposit",
                           "Register received / deposited ($)",

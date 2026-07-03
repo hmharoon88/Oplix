@@ -1239,6 +1239,94 @@
     font-size: 0.78rem;
 }
 
+.books-register-recon {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid #dbeafe;
+    background: #f8fbff;
+}
+
+.books-register-recon-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.books-register-recon-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #1e40af;
+}
+
+.books-register-recon-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+}
+
+.books-register-recon-status--ok {
+    color: #047857;
+}
+
+.books-register-recon-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px 12px;
+    align-items: end;
+}
+
+.books-register-recon-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 58px;
+    justify-content: flex-end;
+}
+
+.books-register-recon-stat span {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.books-register-recon-stat strong {
+    font-size: 1rem;
+    color: #0f172a;
+    line-height: 1.3;
+}
+
+.books-register-recon-received,
+.books-register-recon-note {
+    margin: 0;
+}
+
+.books-register-recon-note {
+    margin-top: 10px;
+}
+
+.books-register-recon-verified {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #334155;
+}
+
+.books-register-recon-hint {
+    margin: 8px 0 0;
+    font-size: 0.78rem;
+}
+
 .books-cash-recon-payout-readonly {
     display: inline-block;
     padding: 6px 8px;
