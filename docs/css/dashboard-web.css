@@ -1251,6 +1251,48 @@
     font-size: 0.875rem;
 }
 
+.books-register-groups {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    min-width: 0;
+    align-items: start;
+}
+
+.books-register-groups--recon {
+    margin-bottom: 12px;
+}
+
+.books-register-group {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--dash-border, #e2e8f0);
+    border-radius: 12px;
+    background: #fff;
+}
+
+.books-register-group-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.books-register-group-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.books-register-group-total {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #475569;
+    font-variant-numeric: tabular-nums;
+}
+
 .books-register-shifts {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1407,6 +1449,11 @@
 }
 
 @media (max-width: 820px) {
+    .books-register-groups,
+    .books-register-groups--recon {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
     .books-register-shifts,
     .books-register-shifts--all,
     .books-recon-cards,

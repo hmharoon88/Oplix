@@ -1800,26 +1800,33 @@
             </section>`;
     }
 
-    /** All register shifts in one parallel row: R1 S1 | R1 S2 | R2 S1 | R2 S2 */
+    /** All register shifts in one parallel row, grouped under Register 1 / Register 2 headings. */
     function renderAllRegisters() {
         const r1 = state.day.register1 || M().defaultRegisterUnit();
         const r2 = state.day.register2 || M().defaultRegisterUnit();
         const t1 = M().registerBlockTotal(r1);
         const t2 = M().registerBlockTotal(r2);
         const all = M().registerDayTotal(state.day);
+        const group = (title, total, regKey, unit) => `
+            <div class="books-register-group">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">${escapeHtml(title)}</h4>
+                    <span class="books-register-group-total">${money(total.card + total.cash)}</span>
+                </div>
+                <div class="books-register-shifts">
+                    ${renderRegisterShiftBlock("Shift 1", `reg_${regKey}_shift1`, unit.shift1, regKey, "shift1")}
+                    ${renderRegisterShiftBlock("Shift 2", `reg_${regKey}_shift2`, unit.shift2, regKey, "shift2")}
+                </div>
+            </div>`;
         return `
             <section class="books-register-unit books-register-unit--all">
                 <div class="books-register-unit-head">
                     <h3 class="books-subtitle books-register-unit-title">Registers</h3>
-                    <p class="books-total-line books-register-unit-total">
-                        R1 ${money(t1.card + t1.cash)} · R2 ${money(t2.card + t2.cash)} · All ${money(all.card + all.cash)} card+cash
-                    </p>
+                    <p class="books-total-line books-register-unit-total">All ${money(all.card + all.cash)} card+cash</p>
                 </div>
-                <div class="books-register-shifts books-register-shifts--all">
-                    ${renderRegisterShiftBlock("Register 1 · Shift 1", "reg_register1_shift1", r1.shift1, "register1", "shift1")}
-                    ${renderRegisterShiftBlock("Register 1 · Shift 2", "reg_register1_shift2", r1.shift2, "register1", "shift2")}
-                    ${renderRegisterShiftBlock("Register 2 · Shift 1", "reg_register2_shift1", r2.shift1, "register2", "shift1")}
-                    ${renderRegisterShiftBlock("Register 2 · Shift 2", "reg_register2_shift2", r2.shift2, "register2", "shift2")}
+                <div class="books-register-groups">
+                    ${group("Register 1", t1, "register1", r1)}
+                    ${group("Register 2", t2, "register2", r2)}
                 </div>
             </section>`;
     }
@@ -2737,23 +2744,31 @@
         const flatAll = options.flatAll === true;
         const cardClass = flatAll ? "books-recon-cards books-recon-cards--all" : "books-recon-cards";
 
-        if (flatAll) {
-            return `<div class="${cardClass}">${rows
-                .map((r) =>
-                    renderReconShiftCard(
-                        {
-                            ...r,
-                            shiftLabel: `${r.rowLabel} · ${r.shiftLabel}`,
-                            rowLabel: `${r.rowLabel} · ${r.shiftLabel}`,
-                        },
-                        options
-                    )
+        const groups = groupReconRowsByLabel(rows);
+        const multiShiftGroups = groups.some((g) => g.rows.length > 1);
+
+        if (flatAll && multiShiftGroups) {
+            return `<div class="books-register-groups books-register-groups--recon">${groups
+                .map(
+                    (group) => `
+                <div class="books-register-group">
+                    <div class="books-register-group-head">
+                        <h4 class="books-register-group-title">${escapeHtml(group.label)}</h4>
+                    </div>
+                    <div class="books-recon-cards">
+                        ${group.rows
+                            .map((r) =>
+                                renderReconShiftCard(
+                                    { ...r, shiftLabel: r.shiftLabel, rowLabel: r.shiftLabel },
+                                    options
+                                )
+                            )
+                            .join("")}
+                    </div>
+                </div>`
                 )
                 .join("")}</div>`;
         }
-
-        const groups = groupReconRowsByLabel(rows);
-        const multiShiftGroups = groups.some((g) => g.rows.length > 1);
 
         if (!multiShiftGroups) {
             return `<div class="${cardClass}">${rows.map((r) => renderReconShiftCard(r, options)).join("")}</div>`;
