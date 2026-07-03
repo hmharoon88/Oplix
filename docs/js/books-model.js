@@ -367,7 +367,7 @@
     /** Month entry status for health strip / dashboards. */
     function booksHealthSummary(monthId, daysById, month, options) {
         const hasGasStation = !!(options && options.hasGasStation);
-        const rows = dailySalesExpenseRows(monthId, daysById, { hasGasStation });
+        const { rows } = dailySalesExpenseRows(monthId, daysById, { hasGasStation });
         const closedIds = new Set(listClosedDayIds(monthId, daysById));
         let daysWithData = 0;
         let unclosedWithData = 0;
