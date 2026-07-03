@@ -1856,7 +1856,7 @@
             return {
                 kind: "pulltab",
                 rowId: pt.id,
-                rowLabel: `Machine ${idx + 1}`,
+                rowLabel: `Terminal ${idx + 1}`,
                 shiftLabel: ticket ? `#${ticket}` : "—",
                 namePrefix: `cr_pt_${pt.id}`,
                 expected,

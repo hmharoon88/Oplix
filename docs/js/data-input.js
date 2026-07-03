@@ -2038,8 +2038,8 @@
                         { name: "winner", label: "Winners", type: "number" },
                         { name: "overShort", label: "O/S", type: "number" },
                     ],
-                    "+ Add machine",
-                    "Machine"
+                    "+ Add terminal",
+                    "Terminal"
                 )}
             </div>`;
     }
