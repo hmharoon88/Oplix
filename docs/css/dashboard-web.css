@@ -1257,10 +1257,19 @@
     gap: 16px;
     min-width: 0;
     align-items: start;
+    margin-bottom: 16px;
 }
 
 .books-register-groups--recon {
     margin-bottom: 12px;
+}
+
+.books-register-groups--gaming {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.books-register-groups--expenses {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .books-register-group {
@@ -1269,6 +1278,11 @@
     border: 1px solid var(--dash-border, #e2e8f0);
     border-radius: 12px;
     background: #fff;
+    overflow: hidden;
+}
+
+.books-register-group--wide {
+    grid-column: 1 / -1;
 }
 
 .books-register-group-head {
@@ -1450,7 +1464,9 @@
 
 @media (max-width: 820px) {
     .books-register-groups,
-    .books-register-groups--recon {
+    .books-register-groups--recon,
+    .books-register-groups--gaming,
+    .books-register-groups--expenses {
         grid-template-columns: minmax(0, 1fr);
     }
 
@@ -2152,41 +2168,6 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     height: 1px;
 }
 
-.books-gaming-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
-    margin: 0 0 16px;
-    align-items: start;
-}
-
-.books-gaming-panel {
-    min-width: 0;
-    padding: 14px 16px;
-    border: 1px solid var(--dash-border, #e2e8f0);
-    border-radius: 12px;
-    background: #fff;
-    overflow: hidden;
-}
-
-.books-gaming-panel-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 8px 12px;
-    margin-bottom: 4px;
-}
-
-.books-gaming-panel-head .books-subtitle,
-.books-gaming-panel-head .books-total-line {
-    margin: 0;
-}
-
-.books-gaming-panel-head .books-total-line {
-    flex-shrink: 0;
-}
-
 .books-station-cards {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -2262,7 +2243,8 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
 
 @media (max-width: 900px) {
     .books-util-payroll-grid,
-    .books-gaming-grid {
+    .books-register-groups--gaming,
+    .books-register-groups--expenses {
         grid-template-columns: minmax(0, 1fr);
     }
 }

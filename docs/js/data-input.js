@@ -783,58 +783,6 @@
             </div>`;
     }
 
-    function renderChecksAchList() {
-        const list = state.day.checksAch || [];
-        const openPayables = window.OplixBooksLinks
-            ? OplixBooksLinks.openPayablesForPick(state.payables)
-            : (state.payables || []).filter((p) => !p.isPaid);
-        const payableOptions = (selectedId) => {
-            const opts = ['<option value="">— Payable —</option>'];
-            openPayables.forEach((p) => {
-                const label = window.OplixBooksLinks
-                    ? OplixBooksLinks.payablePickLabel(p)
-                    : `${p.payTo} — ${money(p.amount)}`;
-                opts.push(
-                    `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? " selected" : ""}>${escapeHtml(label)}</option>`
-                );
-            });
-            (state.payables || [])
-                .filter((p) => p.isPaid && p.id === selectedId)
-                .forEach((p) => {
-                    opts.push(
-                        `<option value="${escapeHtml(p.id)}" selected>${escapeHtml(p.payTo || "Paid")} (paid)</option>`
-                    );
-                });
-            return opts.join("");
-        };
-        return `
-            <h3 class="books-subtitle">Checks / ACH</h3>
-            <p class="books-hint">Link a line to an open payable to mark it paid when you save this day.</p>
-            <div class="books-lines books-lines--checks" data-di-list="checksAch">
-                <div class="books-lines-head books-lines-head--checks">
-                    <span>Payable</span>
-                    <span>Description</span>
-                    <span>Check #</span>
-                    <span>Amount</span>
-                    <span></span>
-                </div>
-                ${list
-                    .map((row) => {
-                        const pid = row.payableId || "";
-                        return `
-                    <div class="books-lines-row books-lines-row--checks" data-di-row="${escapeHtml(row.id)}">
-                        <select class="books-select" name="payableId" data-di-payable-pick="${escapeHtml(row.id)}">${payableOptions(pid)}</select>
-                        <input type="text" class="books-input" name="description" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(row.description || "")}" placeholder="Description">
-                        <input type="text" class="books-input" name="checkNo" value="${escapeHtml(row.checkNo || "")}">
-                        <input ${amountInputAttrs("amount", row.amount)}>
-                        <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="checksAch">×</button>
-                    </div>`;
-                    })
-                    .join("")}
-                <button type="button" class="books-add-line" data-di-add="checksAch">+ Add check / ACH</button>
-            </div>`;
-    }
-
     async function recordCheckFromPayable(payable) {
         if (isViewingClosedDay()) {
             window.alert("This day is closed. Reopen it or choose another day to record the check.");
@@ -2062,28 +2010,26 @@
                 </div>
             </div>`;
         return `
-            <section class="books-gaming-panel">
-                <div class="books-gaming-panel-head">
-                    <h3 class="books-subtitle">Lottery</h3>
-                    <p class="books-total-line">Total: <strong>${money(total.cash)}</strong></p>
+            <div class="books-register-group">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">Lottery</h4>
+                    <span class="books-register-group-total">${money(total.cash)}</span>
                 </div>
-                <p class="books-hint">Cash per shift. Count received on Cash reconciliation.</p>
                 <div class="books-station-cards books-station-cards--shifts">
                     ${shiftCard("Shift 1", "lot_shift1", lot.shift1 || M().emptyGamingShift())}
                     ${shiftCard("Shift 2", "lot_shift2", lot.shift2 || M().emptyGamingShift())}
                 </div>
-            </section>`;
+            </div>`;
     }
 
     function renderPulltabs() {
         const total = M().pulltabDayTotal(state.day);
         return `
-            <section class="books-gaming-panel">
-                <div class="books-gaming-panel-head">
-                    <h3 class="books-subtitle">Pulltab</h3>
-                    <p class="books-total-line">Total: <strong>${money(total.cash)}</strong></p>
+            <div class="books-register-group">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">Pulltab</h4>
+                    <span class="books-register-group-total">${money(total.cash)}</span>
                 </div>
-                <p class="books-hint">One card per machine.</p>
                 ${renderStationCards(
                     "pulltabs",
                     [
@@ -2095,7 +2041,7 @@
                     "+ Add machine",
                     "Machine"
                 )}
-            </section>`;
+            </div>`;
     }
 
     function renderWindStations() {
@@ -2103,12 +2049,11 @@
         const count = (state.day.windStations || []).length;
         const canAdd = count < 3;
         return `
-            <section class="books-gaming-panel">
-                <div class="books-gaming-panel-head">
-                    <h3 class="books-subtitle">Wind station</h3>
-                    <p class="books-total-line">Total: <strong>${money(total)}</strong></p>
+            <div class="books-register-group">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">Wind station</h4>
+                    <span class="books-register-group-total">${money(total)}</span>
                 </div>
-                <p class="books-hint">Up to 3 stations.</p>
                 ${renderStationCards(
                     "windStations",
                     [
@@ -2118,7 +2063,7 @@
                     canAdd ? "+ Add station" : false,
                     "Station"
                 )}
-            </section>`;
+            </div>`;
     }
 
     function renderKenoStations() {
@@ -2126,12 +2071,11 @@
         const count = (state.day.kenoStations || []).length;
         const canAdd = count < 3;
         return `
-            <section class="books-gaming-panel">
-                <div class="books-gaming-panel-head">
-                    <h3 class="books-subtitle">Keno station</h3>
-                    <p class="books-total-line">Total: <strong>${money(total)}</strong></p>
+            <div class="books-register-group">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">Keno station</h4>
+                    <span class="books-register-group-total">${money(total)}</span>
                 </div>
-                <p class="books-hint">Up to 3 stations.</p>
                 ${renderStationCards(
                     "kenoStations",
                     [
@@ -2141,7 +2085,7 @@
                     canAdd ? "+ Add station" : false,
                     "Station"
                 )}
-            </section>`;
+            </div>`;
     }
 
     function renderGamingStationsGrid() {
@@ -2151,7 +2095,7 @@
         if (showField("kenoStations")) panels.push(renderKenoStations());
         if (showField("lottery")) panels.push(renderLotteryDaily());
         if (!panels.length) return "";
-        return `<div class="books-gaming-grid">${panels.join("\n")}</div>`;
+        return `<div class="books-register-groups books-register-groups--gaming">${panels.join("\n")}</div>`;
     }
 
     function renderUtilitiesPayroll() {
@@ -2358,59 +2302,201 @@
     function renderRegisterWaynePass() {
         if (!showField("waynePass")) return "";
         return `
-            <label class="books-label">Wayne Pass ($)
-                <input ${amountInputAttrs("wayne_pass", state.day.waynePass)}>
-                <span class="books-field-hint">Wayne Pass sales — recorded with register, not a payout</span>
-            </label>`;
+            <div class="books-register-group">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">Wayne Pass</h4>
+                </div>
+                <div class="books-station-cards">
+                    <div class="books-station-card">
+                        <label class="books-label">Amount ($)
+                            <input ${amountInputAttrs("wayne_pass", state.day.waynePass)}>
+                        </label>
+                        <p class="books-hint books-register-payout-hint">Sales — not a payout</p>
+                    </div>
+                </div>
+            </div>`;
     }
 
     function renderRegisterPayoutFields() {
         if (!showField("registerPayouts")) return "";
+        const fields = [
+            { name: "in_house_account", label: "In house", value: state.day.inHouseAccount, hint: "Track only" },
+            { name: "lottery_pay_out", label: "Lottery pay out", value: state.day.lotteryPayOut, hint: "Track only" },
+            { name: "pull_tab_payout", label: "Pull tab payout", value: state.day.pullTabPayout, hint: "Track only" },
+            { name: "other_cash_pay_out", label: "Other cash pay out", value: state.day.otherCashPayOut, hint: "Lowers deposit" },
+        ];
         return `
-            <h3 class="books-subtitle">Register payouts</h3>
-            <p class="books-hint">Track payouts from the register. In house account, lottery pay out, and pull tab payout are <strong>track only</strong> — they do not change cash reconciliation. Other cash pay out lowers expected deposit.</p>
-            <div class="books-grid-2">
-                <label class="books-label">In house account ($)
-                    <input ${amountInputAttrs("in_house_account", state.day.inHouseAccount)}>
-                    <span class="books-field-hint">Track only — not subtracted on Cash reconciliation</span>
-                </label>
-                <label class="books-label">Lottery pay out ($)
-                    <input ${amountInputAttrs("lottery_pay_out", state.day.lotteryPayOut)}>
-                    <span class="books-field-hint">Track only — not subtracted on Cash reconciliation</span>
-                </label>
-                <label class="books-label">Pull tab payout ($)
-                    <input ${amountInputAttrs("pull_tab_payout", state.day.pullTabPayout)}>
-                    <span class="books-field-hint">Track only — not subtracted on Cash reconciliation</span>
-                </label>
-                <label class="books-label">Other cash pay out ($)
-                    <input ${amountInputAttrs("other_cash_pay_out", state.day.otherCashPayOut)}>
-                    <span class="books-field-hint">Reduces expected deposit on Cash reconciliation</span>
-                </label>
+            <div class="books-register-group books-register-group--wide">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">Day-level register payouts</h4>
+                </div>
+                <p class="books-hint">Gas day totals. Prefer shift <strong>Cash pay out</strong> for drawer cash.</p>
+                <div class="books-station-cards books-station-cards--shifts">
+                    ${fields
+                        .map(
+                            (f) => `
+                    <div class="books-station-card">
+                        <div class="books-station-card-head"><strong>${escapeHtml(f.label)}</strong></div>
+                        <label class="books-label">Amount ($)
+                            <input ${amountInputAttrs(f.name, f.value)}>
+                        </label>
+                        <p class="books-hint books-register-payout-hint">${escapeHtml(f.hint)}</p>
+                    </div>`
+                        )
+                        .join("")}
+                </div>
+            </div>`;
+    }
+
+    function renderExpenseGroupCards(listKey, title, columns, addLabel, hint) {
+        const list = state.day[listKey] || [];
+        const total = list.reduce((s, row) => s + M().num(row.amount), 0);
+        const cards = list
+            .map((row, index) => {
+                const fields = columns
+                    .map((c) => {
+                        const type = c.type || "text";
+                        const val = row[c.name] ?? "";
+                        if (type === "number") {
+                            return `<label class="books-label">${escapeHtml(c.label)}
+                                <input ${amountInputAttrs(c.name, val)}>
+                            </label>`;
+                        }
+                        if (c.name === "description") {
+                            return `<label class="books-label">${escapeHtml(c.label)}
+                                <input type="text" class="books-input" name="${c.name}" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(val)}" placeholder="Start typing…">
+                            </label>`;
+                        }
+                        return `<label class="books-label">${escapeHtml(c.label)}
+                            <input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}">
+                        </label>`;
+                    })
+                    .join("");
+                return `
+                <div class="books-station-card" data-di-row="${escapeHtml(row.id)}">
+                    <div class="books-station-card-head">
+                        <strong>Line ${index + 1}</strong>
+                        <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="${listKey}" title="Remove">×</button>
+                    </div>
+                    <div class="books-station-card-fields">${fields}</div>
+                </div>`;
+            })
+            .join("");
+        return `
+            <div class="books-register-group">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">${escapeHtml(title)}</h4>
+                    <span class="books-register-group-total">${money(total)}</span>
+                </div>
+                ${hint ? `<p class="books-hint">${hint}</p>` : ""}
+                <div class="books-station-cards" data-di-list="${listKey}">
+                    ${cards}
+                    <button type="button" class="books-add-line" data-di-add="${listKey}">${escapeHtml(addLabel || "+ Add line")}</button>
+                </div>
+            </div>`;
+    }
+
+    function renderChecksAchList() {
+        const list = state.day.checksAch || [];
+        const total = list.reduce((s, row) => s + M().num(row.amount), 0);
+        const openPayables = window.OplixBooksLinks
+            ? OplixBooksLinks.openPayablesForPick(state.payables)
+            : (state.payables || []).filter((p) => !p.isPaid);
+        const payableOptions = (selectedId) => {
+            const opts = ['<option value="">— Payable —</option>'];
+            openPayables.forEach((p) => {
+                const label = window.OplixBooksLinks
+                    ? OplixBooksLinks.payablePickLabel(p)
+                    : `${p.payTo} — ${money(p.amount)}`;
+                opts.push(
+                    `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? " selected" : ""}>${escapeHtml(label)}</option>`
+                );
+            });
+            (state.payables || [])
+                .filter((p) => p.isPaid && p.id === selectedId)
+                .forEach((p) => {
+                    opts.push(
+                        `<option value="${escapeHtml(p.id)}" selected>${escapeHtml(p.payTo || "Paid")} (paid)</option>`
+                    );
+                });
+            return opts.join("");
+        };
+        const cards = list
+            .map((row, index) => {
+                const pid = row.payableId || "";
+                return `
+                <div class="books-station-card" data-di-row="${escapeHtml(row.id)}">
+                    <div class="books-station-card-head">
+                        <strong>Line ${index + 1}</strong>
+                        <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="checksAch" title="Remove">×</button>
+                    </div>
+                    <div class="books-station-card-fields">
+                        <label class="books-label">Payable
+                            <select class="books-select" name="payableId" data-di-payable-pick="${escapeHtml(row.id)}">${payableOptions(pid)}</select>
+                        </label>
+                        <label class="books-label">Description
+                            <input type="text" class="books-input" name="description" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(row.description || "")}" placeholder="Description">
+                        </label>
+                        <label class="books-label">Check #
+                            <input type="text" class="books-input" name="checkNo" value="${escapeHtml(row.checkNo || "")}">
+                        </label>
+                        <label class="books-label">Amount
+                            <input ${amountInputAttrs("amount", row.amount)}>
+                        </label>
+                    </div>
+                </div>`;
+            })
+            .join("");
+        return `
+            <div class="books-register-group">
+                <div class="books-register-group-head">
+                    <h4 class="books-register-group-title">Checks / ACH</h4>
+                    <span class="books-register-group-total">${money(total)}</span>
+                </div>
+                <p class="books-hint">Link a line to an open payable to mark it paid when you save.</p>
+                <div class="books-station-cards" data-di-list="checksAch">
+                    ${cards}
+                    <button type="button" class="books-add-line" data-di-add="checksAch">+ Add check / ACH</button>
+                </div>
             </div>`;
     }
 
     function renderDailyExpensesBlock() {
         const parts = [];
         if (showField("cashExpenses")) {
-            parts.push(`<h3 class="books-subtitle">Cash expense (office)</h3>
-                    <p class="books-hint">Paid from <strong>office cash</strong> (separate from the register drawer). Counts as store expense only — does <strong>not</strong> change register expected cash or day deposit. Paid from the drawer? Use <strong>Cash pay out</strong> on that shift instead.</p>
-                    ${renderLineList("cashExpenses", [
+            parts.push(
+                renderExpenseGroupCards(
+                    "cashExpenses",
+                    "Cash expense (office)",
+                    [
                         { name: "description", label: "Description" },
                         { name: "amount", label: "Amount", type: "number" },
                         { name: "overShort", label: "O/S", type: "number" },
-                    ])}`);
+                    ],
+                    "+ Add line",
+                    "Office cash only — not register drawer. Drawer cash → shift Cash pay out."
+                )
+            );
         }
         if (showField("checksAch")) {
             parts.push(renderChecksAchList());
         }
         if (showField("otherExpenses")) {
-            parts.push(`<h3 class="books-subtitle">Other expense</h3>
-                    ${renderLineList("otherExpenses", [
+            parts.push(
+                renderExpenseGroupCards(
+                    "otherExpenses",
+                    "Other expense",
+                    [
                         { name: "description", label: "Description" },
                         { name: "amount", label: "Amount", type: "number" },
-                    ])}`);
+                    ],
+                    "+ Add line",
+                    ""
+                )
+            );
         }
-        return parts.join("\n");
+        if (!parts.length) return "";
+        return `<div class="books-register-groups books-register-groups--expenses">${parts.join("\n")}</div>`;
     }
 
     function renderDailyDetailSheet(reg) {
@@ -2421,10 +2507,10 @@
                 `<p class="books-hint">Register card/cash on the detail sheet is for shift reconciliation only — not added to merch, credit card, or fuel.</p>`
             );
         }
-        const wayne = renderRegisterWaynePass();
-        if (wayne) bodyParts.push(wayne);
-        const payouts = renderRegisterPayoutFields();
-        if (payouts) bodyParts.push(payouts);
+        const gasExtras = [renderRegisterWaynePass(), renderRegisterPayoutFields()].filter(Boolean);
+        if (gasExtras.length) {
+            bodyParts.push(`<div class="books-register-groups books-register-groups--gaming">${gasExtras.join("\n")}</div>`);
+        }
         const gaming = renderGamingStationsGrid();
         if (gaming) bodyParts.push(gaming);
         const expenses = renderDailyExpensesBlock();
