@@ -858,7 +858,8 @@
         const config = agg?.booksFieldConfig;
         const hasGas = !!agg?.hasGasStation;
         const lines = [
-            { fieldId: "pulltabs", label: "Pulltab", amount: num(agg?.pulltabCash) },
+            { fieldId: "pulltabs", label: "Pulltab cash", amount: num(agg?.pulltabCash) },
+            { fieldId: "pulltabs", label: "Pulltab winners", amount: num(agg?.pulltabWinner) },
             { fieldId: "lottery", label: "Lottery", amount: num(agg?.lotteryCash) },
             { fieldId: "windStations", label: "Wind station", amount: num(agg?.windStationCash) },
             { fieldId: "kenoStations", label: "Keno station", amount: num(agg?.kenoStationCash) },
