@@ -1211,7 +1211,12 @@
     margin: 0;
 }
 
-.dashboard-body .books-toolbar button.btn.btn-nav-outline {
+/* Compact buttons in filter toolbars — match .books-select height (beats .dashboard-body button.btn) */
+.dashboard-body .books-toolbar button.btn,
+.dashboard-body .bs-toolbar button.btn,
+.dashboard-body .an-month-toolbar button.btn,
+.dashboard-body .vendors-hub-toolbar button.btn,
+.dashboard-body .books-day-banner-actions button.btn {
     padding: 7px 14px;
     font-size: 0.9rem;
     line-height: 1.25;
@@ -4128,15 +4133,6 @@
 
 .an-month-toolbar .books-label {
     margin: 0;
-}
-
-.dashboard-body .an-month-toolbar button.btn.an-compare-toggle {
-    padding: 7px 14px;
-    font-size: 0.9rem;
-    line-height: 1.25;
-    border-radius: 8px;
-    box-sizing: border-box;
-    min-height: 0;
 }
 
 .an-month-status {
