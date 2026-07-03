@@ -50,6 +50,26 @@
         return M().isDayClosed(state.day);
     }
 
+    function isViewingClosedMonth() {
+        return M().isMonthClosed(state.month);
+    }
+
+    function isBooksLocked() {
+        return isViewingClosedDay() || isViewingClosedMonth();
+    }
+
+    function formatMonthLabel(monthId) {
+        const [y, m] = String(monthId).split("-").map(Number);
+        return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    }
+
+    function monthAggregate() {
+        return M().aggregateMonth(state.month, state.daysById, {
+            hasGasStation: hasGasStation(),
+            booksFieldConfig: booksFieldConfig(),
+        });
+    }
+
     function confirmDiscardDirty() {
         if (!state.dirty) return true;
         return window.confirm("You have unsaved changes on this day. Discard them?");
@@ -66,7 +86,7 @@
     }
 
     async function closeCurrentDay(options = {}) {
-        if (isViewingClosedDay()) return;
+        if (isViewingClosedDay() || isViewingClosedMonth()) return;
         if (state.dirty) {
             normalizeAllAmountFields();
             syncFromForm();
@@ -104,7 +124,7 @@
     }
 
     async function reopenCurrentDay() {
-        if (!isViewingClosedDay()) return;
+        if (!isViewingClosedDay() || isViewingClosedMonth()) return;
         if (
             !window.confirm(
                 "Reopen this day for editing? Anyone with access can change numbers until it is closed again."
@@ -128,6 +148,110 @@
         }, 2000);
     }
 
+    async function closeCurrentMonth() {
+        if (isViewingClosedMonth()) return;
+        normalizeAllAmountFields();
+        syncFromForm();
+        const health = M().booksHealthSummary(state.monthId, state.daysById, state.month, {
+            hasGasStation: hasGasStation(),
+        });
+        const openPay = (state.payables || []).filter((p) => !p.isPaid).length;
+        const warnings = [];
+        if (health.unclosedWithData > 0) {
+            warnings.push(
+                `${health.unclosedWithData} day${health.unclosedWithData === 1 ? "" : "s"} with entry not closed`
+            );
+        }
+        if (openPay > 0) {
+            warnings.push(`${openPay} open payable${openPay === 1 ? "" : "s"}`);
+        }
+        let msg = `Close ${formatMonthLabel(state.monthId)} for ${currentLocation()?.name || "this facility"}?\n\nThe whole month will be read-only until reopened.`;
+        if (warnings.length) {
+            msg += `\n\nStill open:\n• ${warnings.join("\n• ")}`;
+            if (health.unclosedWithData > 0) {
+                msg += "\n\nClose those days first, or continue anyway.";
+            }
+        }
+        if (!window.confirm(msg)) return;
+        if (health.unclosedWithData > 0) {
+            if (
+                !window.confirm(
+                    `${health.unclosedWithData} day(s) with entry are still open. Close the month anyway?`
+                )
+            ) {
+                return;
+            }
+        }
+        if (state.dirty) await saveMonth({ silent: true });
+        state.month.closed = true;
+        state.month.closedAt = new Date().toISOString();
+        state.month.closedBy = currentUserLabel();
+        $("di-status").textContent = "Closing month…";
+        await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
+        window.OplixAnalytics?.invalidateCache?.();
+        state.dirty = false;
+        render();
+        $("di-status").textContent = "Month closed.";
+        setTimeout(() => {
+            if ($("di-status")?.textContent === "Month closed.") $("di-status").textContent = "";
+        }, 2000);
+    }
+
+    async function reopenCurrentMonth() {
+        if (!isViewingClosedMonth()) return;
+        if (
+            !window.confirm(
+                "Reopen this month for editing? Daily sheets, utilities, payables, and adjustments can be changed again."
+            )
+        ) {
+            return;
+        }
+        state.month.closed = false;
+        state.month.closedAt = null;
+        state.month.closedBy = null;
+        $("di-status").textContent = "Reopening month…";
+        await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
+        window.OplixAnalytics?.invalidateCache?.();
+        state.dirty = false;
+        render();
+        $("di-status").textContent = "Month reopened.";
+        setTimeout(() => {
+            if ($("di-status")?.textContent === "Month reopened.") $("di-status").textContent = "";
+        }, 2000);
+    }
+
+    function renderMonthStatusBanner() {
+        const label = formatMonthLabel(state.monthId);
+        if (isViewingClosedMonth()) {
+            const at = state.month.closedAt
+                ? new Date(state.month.closedAt).toLocaleString("en-US", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                  })
+                : "";
+            const by = state.month.closedBy || "";
+            return `<div class="books-day-banner books-day-banner--closed books-month-banner" role="status">
+                <div class="books-day-banner-text">
+                    <strong>${escapeHtml(label)}</strong>
+                    <span class="books-day-banner-tag">Month closed</span>
+                    ${at ? `<span class="books-day-banner-meta">Closed ${escapeHtml(at)}${by ? ` · ${escapeHtml(by)}` : ""}</span>` : ""}
+                </div>
+                <div class="books-day-banner-actions">
+                    ${state.tab !== "monthly-books" ? `<button type="button" class="btn btn-nav-outline" id="di-open-monthly-books">Open Monthly books</button>` : ""}
+                    <button type="button" class="btn" id="di-reopen-month">Reopen month</button>
+                </div>
+            </div>`;
+        }
+        if (state.tab !== "monthly-books") return "";
+        return `<div class="books-day-banner books-day-banner--open books-month-banner" role="status">
+            <div class="books-day-banner-text">
+                <span class="books-day-banner-tag books-day-banner-tag--entry">Month open</span>
+                <strong>${escapeHtml(label)}</strong>
+                <span class="books-day-banner-meta">Review final math below, add month adjustments, then close the month.</span>
+            </div>
+        </div>`;
+    }
+
     function renderDayStatusBanner() {
         const label = formatDayLabel(state.dayId);
         if (isViewingClosedDay()) {
@@ -146,7 +270,7 @@
                 </div>
                 <div class="books-day-banner-actions">
                     <button type="button" class="btn btn-nav-outline" id="di-return-entry">Return to entry day</button>
-                    <button type="button" class="btn" id="di-reopen-day">Reopen day</button>
+                    ${isViewingClosedMonth() ? "" : `<button type="button" class="btn" id="di-reopen-day">Reopen day</button>`}
                 </div>
             </div>`;
         }
@@ -158,7 +282,7 @@
             </div>
             <div class="books-day-banner-actions">
                 ${showReturn ? `<button type="button" class="btn btn-nav-outline" id="di-return-entry">Return to entry day</button>` : ""}
-                <button type="button" class="btn btn-nav-outline" id="di-close-day">Close day</button>
+                ${isViewingClosedMonth() ? "" : `<button type="button" class="btn btn-nav-outline" id="di-close-day">Close day</button>`}
             </div>
         </div>`;
     }
@@ -398,6 +522,9 @@
             hasGasStation: hasGasStation(),
         });
         const openPay = (state.payables || []).filter((p) => !p.isPaid).length;
+        const monthTag = isViewingClosedMonth()
+            ? `<span class="books-health-warn">Month closed</span>`
+            : "";
         const warn =
             h.unclosedWithData > 0
                 ? `<span class="books-health-warn">${h.unclosedWithData} day${h.unclosedWithData === 1 ? "" : "s"} with entry not closed</span>`
@@ -407,17 +534,190 @@
             <span><strong>${h.daysClosed}</strong> closed</span>
             <span><strong>${openPay}</strong> open payables</span>
             <span><strong>${h.monthReceivablesLines}</strong> month credits (Net)</span>
+            ${monthTag}
             ${warn}
         </div>`;
+    }
+
+    function renderMonthlyCloseChecklist(health, openPay) {
+        const items = [
+            {
+                ok: health.daysWithData > 0,
+                label: `${health.daysWithData} day${health.daysWithData === 1 ? "" : "s"} with entry`,
+            },
+            {
+                ok: health.unclosedWithData === 0,
+                warn: health.unclosedWithData > 0,
+                label:
+                    health.unclosedWithData > 0
+                        ? `${health.unclosedWithData} day${health.unclosedWithData === 1 ? "" : "s"} with entry not closed`
+                        : "All entered days closed",
+            },
+            {
+                ok: openPay === 0,
+                warn: openPay > 0,
+                label: openPay > 0 ? `${openPay} open payable${openPay === 1 ? "" : "s"}` : "No open payables",
+            },
+            {
+                ok: true,
+                label: `${health.monthReceivablesLines} month credit line${health.monthReceivablesLines === 1 ? "" : "s"} (Net)`,
+            },
+        ];
+        return `<ul class="books-month-checklist">
+            ${items
+                .map((item) => {
+                    const cls = item.warn ? " books-month-checklist-item--warn" : item.ok ? " books-month-checklist-item--ok" : "";
+                    const icon = item.warn ? "!" : item.ok ? "✓" : "·";
+                    return `<li class="books-month-checklist-item${cls}"><span class="books-month-check-icon">${icon}</span>${escapeHtml(item.label)}</li>`;
+                })
+                .join("")}
+        </ul>`;
+    }
+
+    function renderMonthAdjustments(closed) {
+        const list = state.month.monthAdjustments || [];
+        const fieldsetAttr = closed ? " disabled" : "";
+        return `
+            <fieldset class="books-fieldset"${fieldsetAttr}>
+                <h3 class="books-subtitle">Month adjustments</h3>
+                <p class="books-hint">Catch-all lines for anything not on daily sheets or other tabs — bank fees, corrections, one-off credits. Expenses reduce Net; credits increase Net.</p>
+                <div class="books-lines books-month-adj-lines" data-di-list="monthAdjustments">
+                    <div class="books-lines-head books-month-adj-head">
+                        <span>Description</span>
+                        <span>Type</span>
+                        <span>Amount</span>
+                        <span></span>
+                    </div>
+                    ${list
+                        .map((row) => {
+                            const kind = row.kind === "credit" ? "credit" : "expense";
+                            return `
+                    <div class="books-lines-row books-month-adj-row" data-di-row="${escapeHtml(row.id)}">
+                        <input type="text" class="books-input" name="description" value="${escapeHtml(row.description || "")}" placeholder="e.g. Bank fee, correction">
+                        <select class="books-select" name="kind">
+                            <option value="expense"${kind === "expense" ? " selected" : ""}>Expense</option>
+                            <option value="credit"${kind === "credit" ? " selected" : ""}>Credit</option>
+                        </select>
+                        <input ${amountInputAttrs("amount", row.amount)}>
+                        <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="monthAdjustments">×</button>
+                    </div>`;
+                        })
+                        .join("")}
+                    ${closed ? "" : `<button type="button" class="books-add-line" data-di-add="monthAdjustments">+ Add adjustment</button>`}
+                </div>
+            </fieldset>`;
+    }
+
+    function renderMonthlyBooks() {
+        const agg = monthAggregate();
+        const health = M().booksHealthSummary(state.monthId, state.daysById, state.month, {
+            hasGasStation: hasGasStation(),
+        });
+        const openPay = (state.payables || []).filter((p) => !p.isPaid).length;
+        const closed = isViewingClosedMonth();
+        const fieldsetAttr = closed ? " disabled" : "";
+        const linkedRec = (state.receivables || []).filter((r) => r.isReceived).length;
+        const openRec = (state.receivables || []).filter((r) => !r.isReceived).length;
+
+        const pnlRows = [
+            { label: "Sales (merch / register)", amount: agg.sales, kind: "plus" },
+            ...(hasGasStation()
+                ? [
+                      { label: "Fuel ($)", amount: agg.fuelDollars, kind: "info" },
+                      { label: "Credit card (register)", amount: agg.creditCard, kind: "info" },
+                  ]
+                : []),
+            { label: "Month credits (Net)", amount: agg.receivablesTotal, kind: "plus" },
+            ...(agg.monthAdjustmentsCredit > 0
+                ? [{ label: "Month adjustment credits", amount: agg.monthAdjustmentsCredit, kind: "plus" }]
+                : []),
+            { label: "Cash expenses (daily)", amount: agg.cashExpense, kind: "minus" },
+            { label: "Checks / ACH", amount: agg.checksAch, kind: "minus" },
+            { label: "Other daily expenses", amount: agg.otherExpense, kind: "minus" },
+            { label: "Utilities", amount: agg.utilitiesTotal, kind: "minus" },
+            { label: "Payroll", amount: agg.payrollTotal, kind: "minus" },
+            ...(agg.salesTax ? [{ label: "Sales tax", amount: agg.salesTax, kind: "minus" }] : []),
+            ...(agg.accountant ? [{ label: "Accountant", amount: agg.accountant, kind: "minus" }] : []),
+            ...(agg.monthAdjustmentsExpense > 0
+                ? [{ label: "Month adjustment expenses", amount: agg.monthAdjustmentsExpense, kind: "minus" }]
+                : []),
+        ];
+
+        return `
+            <div class="books-panel books-monthly-panel data-input-form">
+                ${renderMonthStatusBanner()}
+                <p class="books-hint">Use other tabs for daily entry, utilities, payables, and receivables. This tab rolls everything up and is where you <strong>close the month</strong> when books are final.</p>
+
+                <div class="books-month-grid">
+                    <section class="books-month-section">
+                        <h3 class="books-subtitle">Pre-close checklist</h3>
+                        ${renderMonthlyCloseChecklist(health, openPay)}
+                        <p class="books-hint books-month-tab-hint">Utilities & payroll: <strong>Utilities & payroll</strong> tab · Payables: <strong>Payables</strong> · Receivables: <strong>Receivables</strong> (${linkedRec} received, ${openRec} open)</p>
+                    </section>
+
+                    <section class="books-month-section">
+                        <h3 class="books-subtitle">Month totals</h3>
+                        <div class="an-kpi-row books-month-kpis">
+                            <div class="an-kpi"><span>Sales</span><strong>${money(agg.sales)}</strong></div>
+                            <div class="an-kpi"><span>Expenses</span><strong>${money(agg.expenses)}</strong></div>
+                            <div class="an-kpi"><span>Net</span><strong class="${agg.net >= 0 ? "pos" : "neg"}">${money(agg.net)}</strong></div>
+                            <div class="an-kpi"><span>Over / short</span><strong>${money(agg.totalOverShort)}</strong></div>
+                        </div>
+                    </section>
+                </div>
+
+                <section class="books-month-section">
+                    <h3 class="books-subtitle">Final math (P&amp;L)</h3>
+                    <div class="home-card home-cc-table-wrap">
+                        <table class="home-cc-table books-month-pnl">
+                            <tbody>
+                                ${pnlRows
+                                    .map((row) => {
+                                        if (row.kind === "info") {
+                                            return `<tr class="books-month-pnl-info"><td>${escapeHtml(row.label)}</td><td class="home-cc-num">${money(row.amount)}</td></tr>`;
+                                        }
+                                        const prefix = row.kind === "minus" ? "−" : row.kind === "plus" ? "+" : "";
+                                        return `<tr><td>${escapeHtml(row.label)}</td><td class="home-cc-num">${prefix}${money(row.amount)}</td></tr>`;
+                                    })
+                                    .join("")}
+                                <tr class="an-total-row">
+                                    <td><strong>Net</strong></td>
+                                    <td class="home-cc-num"><strong class="${agg.net >= 0 ? "pos" : "neg"}">${money(agg.net)}</strong></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                ${renderMonthAdjustments(closed)}
+
+                <fieldset class="books-fieldset"${fieldsetAttr}>
+                    <label class="books-label">Close notes (optional)
+                        <textarea class="books-input books-textarea" id="di-close-notes" rows="2" placeholder="Accountant sign-off, items to review next month…">${escapeHtml(state.month.closeNotes || "")}</textarea>
+                    </label>
+                </fieldset>
+
+                <div class="books-month-actions">
+                    ${closed ? "" : `<button type="button" class="btn books-save" id="di-save-month">Save month adjustments</button>`}
+                    ${
+                        closed
+                            ? `<button type="button" class="btn" id="di-reopen-month">Reopen month</button>`
+                            : `<button type="button" class="btn btn-nav-outline" id="di-close-month">Close month</button>`
+                    }
+                </div>
+            </div>`;
     }
 
     function renderLegacyMonthReceivables() {
         const manual = (state.month.receivables || []).filter((r) => !r.linkedReceivableId);
         if (!manual.length) return "";
+        const closed = isViewingClosedMonth();
+        const fieldsetAttr = closed ? " disabled" : "";
         return `
             <div class="books-panel books-legacy-receivables data-input-form">
                 <h3 class="books-subtitle">Legacy month credits</h3>
                 <p class="books-hint">Older lines entered only on the month doc. New items should use <strong>Add receivable</strong> above — marking received syncs to Books Net automatically.</p>
+                <fieldset class="books-fieldset"${fieldsetAttr}>
                 ${renderLineList(
                     "receivables",
                     [
@@ -427,7 +727,8 @@
                     null,
                     true
                 )}
-                <button type="button" class="btn books-save" id="di-save-month">Save legacy credits</button>
+                </fieldset>
+                ${closed ? "" : `<button type="button" class="btn books-save" id="di-save-month">Save legacy credits</button>`}
             </div>`;
     }
 
@@ -613,6 +914,7 @@
     }
 
     function tabVisible(tabId) {
+        if (tabId === "monthly-books") return true;
         if (!FC()) return true;
         return FC().tabEnabled(booksFieldConfig(), tabId, hasGasStation());
     }
@@ -700,6 +1002,21 @@
                 closeCurrentDay();
                 return;
             }
+            if (e.target.id === "di-close-month") {
+                closeCurrentMonth();
+                return;
+            }
+            if (e.target.id === "di-reopen-month") {
+                reopenCurrentMonth();
+                return;
+            }
+            if (e.target.id === "di-open-monthly-books") {
+                if (!confirmDiscardDirty()) return;
+                syncFromForm();
+                state.tab = "monthly-books";
+                render();
+                return;
+            }
             if (e.target.id === "di-reopen-day") {
                 reopenCurrentDay();
                 return;
@@ -732,14 +1049,14 @@
             }
             const add = e.target.closest("[data-di-add]");
             if (add) {
-                if (isViewingClosedDay()) return;
+                if (isViewingClosedDay() || isViewingClosedMonth()) return;
                 addLine(add.dataset.diAdd);
                 render();
                 return;
             }
             const rm = e.target.closest("[data-di-rm]");
             if (rm) {
-                if (isViewingClosedDay()) return;
+                if (isViewingClosedDay() || isViewingClosedMonth()) return;
                 removeLine(rm.dataset.diList, rm.dataset.diRm);
                 render();
                 return;
@@ -794,7 +1111,7 @@
 
         panel.addEventListener("input", (e) => {
             if (!e.target.closest(".data-input-form")) return;
-            if (isViewingClosedDay()) return;
+            if (isViewingClosedDay() || isViewingClosedMonth()) return;
             if (e.target.name === "fuel_gallons") {
                 const root = $("data-input-root");
                 ["fuel_regular", "fuel_mid_grade", "fuel_premium", "fuel_diesel"].forEach((name) => {
@@ -884,12 +1201,22 @@
             });
         } else if (list === "receivables") {
             state.month.receivables.push({ id: lineId(), description: "", amount: 0 });
+        } else if (list === "monthAdjustments") {
+            if (!state.month.monthAdjustments) state.month.monthAdjustments = [];
+            state.month.monthAdjustments.push({
+                id: lineId(),
+                description: "",
+                amount: 0,
+                kind: "expense",
+            });
         }
     }
 
     function removeLine(list, id) {
         if (list === "receivables") {
             state.month.receivables = state.month.receivables.filter((r) => r.id !== id);
+        } else if (list === "monthAdjustments") {
+            state.month.monthAdjustments = (state.month.monthAdjustments || []).filter((r) => r.id !== id);
         } else {
             state.day[list] = (state.day[list] || []).filter((r) => r.id !== id);
         }
@@ -1096,6 +1423,9 @@
         syncLinesFromDom("receivables", ["description", "amount"], true);
         syncCustomAmountsFromDom(root, state.day, "daily");
         syncCustomAmountsFromDom(root, state.month, "month");
+        syncMonthAdjustmentsFromDom();
+        const closeNotes = root.querySelector("#di-close-notes");
+        if (closeNotes) state.month.closeNotes = closeNotes.value;
 
         if (!state.day.cashReconciliation) {
             state.day.cashReconciliation = M().defaultCashReconciliation();
@@ -1155,6 +1485,29 @@
             const v = String(kenoDeposit.value ?? "").trim();
             state.day.cashReconciliation.kenoDeposit = v === "" ? null : M().num(v);
         }
+    }
+
+    function syncMonthAdjustmentsFromDom() {
+        const root = $("data-input-root");
+        if (!root?.querySelector('[data-di-list="monthAdjustments"]')) return;
+        const rows = root.querySelectorAll('[data-di-list="monthAdjustments"] [data-di-row]');
+        const updated = [];
+        rows.forEach((row) => {
+            const id = row.dataset.diRow;
+            const existing =
+                (state.month.monthAdjustments || []).find((r) => r.id === id) || { id };
+            const desc = row.querySelector('[name="description"]');
+            const kind = row.querySelector('[name="kind"]');
+            const amount = row.querySelector('[name="amount"]');
+            updated.push({
+                ...existing,
+                id,
+                description: desc?.value || "",
+                kind: kind?.value === "credit" ? "credit" : "expense",
+                amount: M().num(amount?.value),
+            });
+        });
+        state.month.monthAdjustments = updated;
     }
 
     function syncLinesFromDom(listKey, fields, isMonth) {
@@ -1234,7 +1587,7 @@
                 state.monthId
             );
             await Promise.all([loadUtilityProviders(), loadPayables(), loadReceivables()]);
-            state.month = month;
+            state.month = M().normalizeMonthDoc(month);
             state.month.utilities = M().normalizeMonthUtilities(
                 state.month.utilities,
                 M().mergeUtilityKeys(state.utilityProviders, state.month.utilities)
@@ -1259,20 +1612,30 @@
         }
     }
 
-    async function saveMonth() {
+    async function saveMonth(options = {}) {
+        if (isViewingClosedMonth()) {
+            $("di-status").textContent = "Month is closed — reopen to save.";
+            return;
+        }
         normalizeAllAmountFields();
         syncFromForm();
-        $("di-status").textContent = "Saving…";
+        if (!options.silent) $("di-status").textContent = "Saving…";
         await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
         window.OplixAnalytics?.invalidateCache?.();
         state.dirty = false;
-        $("di-status").textContent = "Month saved.";
-        setTimeout(() => {
-            if ($("di-status").textContent === "Month saved.") $("di-status").textContent = "";
-        }, 2000);
+        if (!options.silent) {
+            $("di-status").textContent = "Month saved.";
+            setTimeout(() => {
+                if ($("di-status").textContent === "Month saved.") $("di-status").textContent = "";
+            }, 2000);
+        }
     }
 
     async function saveDay(options = {}) {
+        if (isViewingClosedMonth()) {
+            $("di-status").textContent = "Month is closed — reopen to save.";
+            return;
+        }
         if (isViewingClosedDay()) {
             $("di-status").textContent = "Day is closed — reopen to save.";
             return;
@@ -1626,10 +1989,16 @@
         const customMonth = renderCustomBooksFields("month", state.month.customAmounts);
         if (customMonth) parts.push(customMonth);
         parts.push(
-            '<button type="button" class="btn books-save" id="di-save-month">Save month (utilities & payroll)</button>',
+            isViewingClosedMonth()
+                ? ""
+                : '<button type="button" class="btn books-save" id="di-save-month">Save month (utilities & payroll)</button>',
             "</div>"
         );
-        return parts.join("\n");
+        const inner = parts.join("\n");
+        if (isViewingClosedMonth()) {
+            return `<fieldset class="books-fieldset" disabled>${inner}</fieldset>`;
+        }
+        return inner;
     }
 
     function renderDailyMerchEntry() {
@@ -1807,7 +2176,7 @@
         const reg = M().registerDayTotal(state.day);
         const gas = hasGasStation();
         const fuelSale = M().normalizeFuelSale(state.day.fuelSale);
-        const closed = isViewingClosedDay();
+        const closed = isBooksLocked();
         const fieldsetAttr = closed ? " disabled" : "";
 
         if (gas) {
@@ -2125,7 +2494,7 @@
                    </div>`);
         }
         const registerExtra = registerExtraParts.join("");
-        const closed = isViewingClosedDay();
+        const closed = isBooksLocked();
         const fieldsetAttr = closed ? " disabled" : "";
 
         return `
@@ -2245,6 +2614,7 @@
             { id: "payables", label: "Payables" },
             { id: "receivables", label: "Receivables" },
             { id: "cash-recon", label: "Cash reconciliation" },
+            { id: "monthly-books", label: "Monthly books" },
         ];
         const tabs = allTabs.filter((t) => tabVisible(t.id));
         if (!tabs.some((t) => t.id === state.tab)) {
@@ -2255,27 +2625,43 @@
         if (state.tab === "daily") body = renderDaily();
         else if (state.tab === "utilities") body = renderUtilitiesPayroll();
         else if (state.tab === "payables") {
-            body = tabVisible("payables")
-                ? window.OplixPayablesUI
-                    ? OplixPayablesUI.renderTab({
-                          userId,
-                          locationId: state.locationId,
-                          monthId: state.monthId,
-                          payables: state.payables,
-                      })
-                    : '<p class="data-list-empty">Payables unavailable.</p>'
-                : '<p class="data-list-empty">Payables is turned off for this facility.</p>';
+            body =
+                (isViewingClosedMonth()
+                    ? `<p class="books-hint books-month-locked-hint">This month is closed — payables are read-only until you reopen from <button type="button" class="books-link-btn" id="di-open-monthly-books">Monthly books</button>.</p>`
+                    : "") +
+                (tabVisible("payables")
+                    ? window.OplixPayablesUI
+                        ? OplixPayablesUI.renderTab({
+                              userId,
+                              locationId: state.locationId,
+                              monthId: state.monthId,
+                              payables: state.payables,
+                          })
+                        : '<p class="data-list-empty">Payables unavailable.</p>'
+                    : '<p class="data-list-empty">Payables is turned off for this facility.</p>');
         } else if (state.tab === "cash-recon") body = renderCashReconciliation();
+        else if (state.tab === "monthly-books") body = renderMonthlyBooks();
         else {
-            body = tabVisible("receivables")
-                ? renderBooksReceivablesTab()
-                : '<p class="data-list-empty">Receivables is turned off for this facility.</p>';
+            body =
+                (isViewingClosedMonth()
+                    ? `<p class="books-hint books-month-locked-hint">This month is closed — receivables are read-only until you reopen from <button type="button" class="books-link-btn" id="di-open-monthly-books">Monthly books</button>.</p>`
+                    : "") +
+                (tabVisible("receivables")
+                    ? renderBooksReceivablesTab()
+                    : '<p class="data-list-empty">Receivables is turned off for this facility.</p>');
         }
 
         const loc = currentLocation();
-        const customizeHint = loc
-            ? `<p class="books-hint books-customize-hint">Daily books layout for this facility can be customized in <button type="button" class="books-link-btn" id="di-open-books-config">Facilities → Customize</button>.</p>`
-            : "";
+        const customizeHint =
+            loc && state.tab !== "monthly-books"
+                ? `<p class="books-hint books-customize-hint">Daily books layout for this facility can be customized in <button type="button" class="books-link-btn" id="di-open-books-config">Facilities → Customize</button>.</p>`
+                : "";
+        const monthClosedBanner =
+            isViewingClosedMonth() && state.tab !== "monthly-books" ? renderMonthStatusBanner() : "";
+        const amountTip =
+            state.tab === "monthly-books"
+                ? ""
+                : `<p class="books-hint books-amount-tip">Amount fields: use <strong>+</strong> or <strong>−</strong> to add/subtract (e.g. <code>100+50-25</code>). Tab out of the field to total.</p>`;
 
         root.innerHTML = `
             <div class="books-toolbar">
@@ -2291,8 +2677,9 @@
                 <span class="books-status" id="di-status"></span>
             </div>
             ${renderBooksHealthStrip()}
+            ${monthClosedBanner}
             ${customizeHint}
-            <p class="books-hint books-amount-tip">Amount fields: use <strong>+</strong> or <strong>−</strong> to add/subtract (e.g. <code>100+50-25</code>). Tab out of the field to total.</p>
+            ${amountTip}
             <nav class="books-tabs">
                 ${tabs.map((t) => `<button type="button" class="books-tab${state.tab === t.id ? " active" : ""}" data-di-tab="${t.id}">${t.label}</button>`).join("")}
             </nav>

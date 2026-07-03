@@ -286,8 +286,55 @@
             accountant: 0,
             categorySales: {},
             customAmounts: {},
+            monthAdjustments: [],
+            closeNotes: "",
+            closed: false,
+            closedAt: null,
+            closedBy: null,
             updatedAt: null,
         };
+    }
+
+    function isMonthClosed(month) {
+        return !!(month && month.closed);
+    }
+
+    function normalizeMonthAdjustment(row) {
+        return {
+            id: row.id || "",
+            description: row.description || "",
+            amount: num(row.amount),
+            kind: row.kind === "credit" ? "credit" : "expense",
+        };
+    }
+
+    function monthAdjustmentsTotals(adjustments) {
+        const rows = (adjustments || []).map(normalizeMonthAdjustment);
+        let expense = 0;
+        let credit = 0;
+        rows.forEach((r) => {
+            if (r.kind === "credit") credit += r.amount;
+            else expense += r.amount;
+        });
+        return { rows, expense, credit };
+    }
+
+    function normalizeMonthDoc(month) {
+        const base = defaultMonthDoc();
+        const m = { ...base, ...(month || {}) };
+        m.utilities = m.utilities || defaultUtilities();
+        m.payroll = m.payroll || defaultPayroll();
+        m.payrollLines = (m.payrollLines || []).map(normalizePayrollLine);
+        m.receivables = m.receivables || [];
+        m.customAmounts = normalizeCustomAmounts(m.customAmounts);
+        m.monthAdjustments = (m.monthAdjustments || []).map(normalizeMonthAdjustment);
+        m.closeNotes = m.closeNotes || "";
+        m.closed = !!m.closed;
+        m.closedAt = m.closedAt || null;
+        m.closedBy = m.closedBy || null;
+        m.salesTax = num(m.salesTax);
+        m.accountant = num(m.accountant);
+        return m;
     }
 
     function defaultDayDoc() {
@@ -754,6 +801,16 @@
         if (num(month.accountant) !== 0) {
             lines.push({ category: "Monthly", description: "Accountant", amount: num(month.accountant) });
         }
+
+        (month.monthAdjustments || []).forEach((row) => {
+            const adj = normalizeMonthAdjustment(row);
+            if (adj.amount === 0 && !adj.description) return;
+            lines.push({
+                category: adj.kind === "credit" ? "Month credit" : "Month adjustment",
+                description: adj.description || "(no description)",
+                amount: adj.kind === "credit" ? -adj.amount : adj.amount,
+            });
+        });
 
         Object.keys(daysById || {})
             .sort()
@@ -1236,6 +1293,7 @@
         const payrollLines = (month.payrollLines || []).map(normalizePayrollLine);
         const payrollTotal = payrollTotalFrom(month);
         const receivablesTotal = sumLines(month.receivables, "amount");
+        const monthAdj = monthAdjustmentsTotals(month.monthAdjustments);
 
         const sales = hasGasStation ? merchSale : registerCard + registerCash;
         const totalRevenue = hasGasStation
@@ -1252,7 +1310,8 @@
             payrollTotal +
             num(month.salesTax) +
             num(month.accountant) +
-            customExpenseTotal;
+            customExpenseTotal +
+            monthAdj.expense;
 
         const aggCore = {
             hasGasStation,
@@ -1293,10 +1352,13 @@
             payrollTotal,
             receivables: month.receivables || [],
             receivablesTotal,
+            monthAdjustments: monthAdj.rows,
+            monthAdjustmentsExpense: monthAdj.expense,
+            monthAdjustmentsCredit: monthAdj.credit,
             salesTax: num(month.salesTax),
             accountant: num(month.accountant),
             expenses,
-            net: netRevenue + receivablesTotal - expenses,
+            net: netRevenue + receivablesTotal + monthAdj.credit - expenses,
             totalRevenue,
             netRevenue,
             totalOverShort: registerOverShort + lotteryOverShort + pulltabOverShort,
@@ -2002,6 +2064,10 @@
         normalizePayrollLine,
         payrollTotalFrom,
         defaultMonthDoc,
+        normalizeMonthDoc,
+        isMonthClosed,
+        normalizeMonthAdjustment,
+        monthAdjustmentsTotals,
         defaultDayDoc,
         monthIdFromDate,
         dayIdFromDate,

@@ -1434,6 +1434,87 @@
     font-weight: 600;
 }
 
+.books-month-banner {
+    margin-bottom: 12px;
+}
+
+.books-month-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.books-month-section {
+    margin-bottom: 16px;
+}
+
+.books-month-checklist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.books-month-checklist-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.9rem;
+}
+
+.books-month-check-icon {
+    width: 1.25rem;
+    flex-shrink: 0;
+    font-weight: 700;
+}
+
+.books-month-checklist-item--ok .books-month-check-icon {
+    color: #059669;
+}
+
+.books-month-checklist-item--warn {
+    color: #b45309;
+}
+
+.books-month-kpis {
+    margin-top: 0;
+}
+
+.books-month-pnl-info td {
+    color: #64748b;
+    font-size: 0.9rem;
+}
+
+.books-month-adj-head,
+.books-month-adj-row {
+    display: grid;
+    grid-template-columns: minmax(160px, 2fr) 120px minmax(100px, 1fr) 32px;
+    gap: 8px;
+    align-items: center;
+}
+
+.books-month-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.books-textarea {
+    min-height: 4rem;
+    resize: vertical;
+}
+
+.books-month-locked-hint {
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid #fcd34d;
+    background: #fffbeb;
+}
+
 .books-lines-head--checks,
 .books-lines-row--checks {
     display: grid;

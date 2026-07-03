@@ -121,16 +121,27 @@
     }
 
     async function saveMonth(userId, locationId, monthId, month) {
+        const ref = monthRef(userId, locationId, monthId);
+        const snap = await ref.get();
+        const existing = snap.exists ? snap.data() : null;
+        if (existing?.closed && month.closed !== false) {
+            throw new Error("This month is closed. Reopen it from Monthly books before saving changes.");
+        }
         const payload = {
             ...month,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         };
-        await monthRef(userId, locationId, monthId).set(payload, { merge: true });
+        await ref.set(payload, { merge: true });
         invalidateMonth(userId, locationId, monthId);
     }
 
     async function saveDay(userId, locationId, monthId, dayId, day) {
         const ref = dayRef(userId, locationId, monthId, dayId);
+        const monthSnap = await monthRef(userId, locationId, monthId).get();
+        const monthData = monthSnap.exists ? monthSnap.data() : null;
+        if (monthData?.closed) {
+            throw new Error("This month is closed. Reopen it from Monthly books before saving changes.");
+        }
         const snap = await ref.get();
         const existing = snap.exists ? snap.data() : null;
         if (existing?.closed && day.closed !== false) {
