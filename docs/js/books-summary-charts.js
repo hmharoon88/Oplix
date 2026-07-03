@@ -462,6 +462,18 @@
                 : []),
         ];
 
+        const trackRows = [
+            ...(M.num(agg.pulltabCash) ? [keyMetricCell("Pulltab (track)", money(agg.pulltabCash), opt)] : []),
+            ...(M.num(agg.lotteryCash) ? [keyMetricCell("Lottery (track)", money(agg.lotteryCash), opt)] : []),
+            ...(M.num(agg.windStationCash)
+                ? [keyMetricCell("Wind station (track)", money(agg.windStationCash), opt)]
+                : []),
+            ...(M.num(agg.kenoStationCash)
+                ? [keyMetricCell("Keno station (track)", money(agg.kenoStationCash), opt)]
+                : []),
+            ...(M.num(agg.waynePass) ? [keyMetricCell("Wayne Pass (track)", money(agg.waynePass), opt)] : []),
+        ];
+
         return `
             <section class="bs-panel bs-panel--key-metrics">
                 <div class="bs-panel-head">
@@ -471,6 +483,13 @@
                     </div>
                 </div>
                 <div class="bs-key-metrics-grid">${rows.join("")}</div>
+                ${
+                    trackRows.length
+                        ? `<h4 class="bs-track-only-title">Track only</h4>
+                <p class="books-hint bs-track-only-hint">Recorded for reference — not included in sales or net.</p>
+                <div class="bs-key-metrics-grid bs-key-metrics-grid--track">${trackRows.join("")}</div>`
+                        : ""
+                }
             </section>`;
     }
 
@@ -480,10 +499,11 @@
         const cols = [
             { label: "Register — card", get: (a) => a.registerCard },
             { label: "Register — cash", get: (a) => a.registerCash },
-            { label: "Lottery", get: (a) => a.lotteryCash },
-            { label: "Pulltab", get: (a) => a.pulltabCash },
-            { label: "Wind station", get: (a) => a.windStationCash },
-            { label: "Keno station", get: (a) => a.kenoStationCash },
+            { label: "Lottery (track only)", get: (a) => a.lotteryCash },
+            { label: "Pulltab (track only)", get: (a) => a.pulltabCash },
+            { label: "Wind station (track only)", get: (a) => a.windStationCash },
+            { label: "Keno station (track only)", get: (a) => a.kenoStationCash },
+            { label: "Wayne Pass (track only)", get: (a) => a.waynePass },
             { label: "Credit card (pump)", get: (a) => a.creditCard },
             { label: "Fuel ($)", get: (a) => a.fuelDollars },
             { label: "Fuel (gal.)", get: (a) => a.fuelGallons, format: "number" },

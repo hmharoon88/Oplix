@@ -604,43 +604,28 @@
         const add = (label, value, fmt, subRow) =>
             rows.push({ label, value, fmt, subRow: !!subRow });
 
-        const trackOnlyFields = new Set([
-            "pulltabs",
-            "lottery",
-            "windStations",
-            "kenoStations",
-            "waynePass",
-            "registerPayouts",
-        ]);
         if (agg.hasGasStation) {
             add("Total sales (merch)", agg.sales);
-            (M.gasSalesDetailBreakdownFromAggregate
-                ? M.gasSalesDetailBreakdownFromAggregate(agg)
-                : agg.salesBreakdown || M.salesBreakdownFromAggregate(agg)
-            ).forEach((r) => {
+            (agg.salesBreakdown || M.salesBreakdownFromAggregate(agg)).forEach((r) => {
                 if (r.label === "Merch sale") return;
-                if (num(r.amount) === 0) return;
-                const label = trackOnlyFields.has(r.fieldId)
-                    ? `${r.label} (track only)`
-                    : r.label;
-                add(label, r.amount, r.format);
+                if (num(r.amount) !== 0) add(r.label, r.amount, r.format);
             });
         } else {
             add("Total sales", agg.sales);
             (agg.salesBreakdown || M.salesBreakdownFromAggregate(agg)).forEach((r) => {
-                if (num(r.amount) === 0) return;
-                const label = trackOnlyFields.has(r.fieldId)
-                    ? `${r.label} (track only)`
-                    : r.label;
-                add(label, r.amount);
+                if (num(r.amount) !== 0) add(r.label, r.amount);
             });
-            if (num(agg.lotteryCash) !== 0) add("Lottery (track only)", agg.lotteryCash);
-            if (num(agg.pulltabCash) !== 0) add("Pulltab (track only)", agg.pulltabCash);
-            if (num(agg.windStationCash) !== 0) add("Wind station (track only)", agg.windStationCash);
-            if (num(agg.kenoStationCash) !== 0) add("Keno station (track only)", agg.kenoStationCash);
         }
 
         add("Receivables", agg.receivablesTotal);
+
+        const trackOnly = agg.trackOnlyBreakdown || M.trackOnlyBreakdownFromAggregate?.(agg) || [];
+        if (trackOnly.length) {
+            rows.push({ label: "Track only", value: null, section: true });
+            trackOnly.forEach((r) => {
+                if (num(r.amount) !== 0) add(`${r.label} (track only)`, r.amount, r.format);
+            });
+        }
         rows.push({ label: "—", value: null, section: true });
         add("Cash expense", agg.cashExpense);
         add("Checks / ACH", agg.checksAch);

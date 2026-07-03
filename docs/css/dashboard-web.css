@@ -3463,6 +3463,30 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     text-transform: lowercase;
 }
 
+.bs-review-block--track {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px dashed #cbd5e1;
+    background: #f8fafc;
+}
+
+.bs-track-only-title {
+    margin: 16px 0 4px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #475569;
+}
+
+.bs-track-only-hint {
+    margin: 0 0 10px;
+}
+
+.bs-key-metrics-grid--track .bs-key-metric {
+    background: #f8fafc;
+    border-style: dashed;
+}
+
 .an-day-closed {
     margin-left: 4px;
     font-size: 0.85em;
@@ -4851,6 +4875,15 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     height: 8px;
     padding: 0;
     border: none;
+}
+
+.rpt-section-head td {
+    padding-top: 14px;
+    font-size: 0.8rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #64748b;
+    border-top: 1px dashed #e2e8f0;
 }
 
 .rpt-footer-hint {

@@ -227,7 +227,12 @@
     }
 
     function renderMonthlyRow(r) {
-        if (r.section) return `<tr class="rpt-section-row"><td colspan="2"></td></tr>`;
+        if (r.section) {
+            if (r.label && r.label !== "—") {
+                return `<tr class="rpt-section-head"><td colspan="2"><strong>${escapeHtml(r.label)}</strong></td></tr>`;
+            }
+            return `<tr class="rpt-section-row"><td colspan="2"></td></tr>`;
+        }
         const val =
             r.fmt === "number" ? formatValue(r.value, "number") : money(r.value);
         const labelCls = r.subRow ? "rpt-sub-row-label" : "";

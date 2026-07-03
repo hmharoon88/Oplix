@@ -839,26 +839,56 @@
         ];
     }
 
+    const TRACK_ONLY_FIELD_IDS = new Set([
+        "pulltabs",
+        "lottery",
+        "windStations",
+        "kenoStations",
+        "waynePass",
+        "registerPayouts",
+    ]);
+
+    function isTrackOnlyBreakdownLine(line) {
+        return !!(line?.fieldId && TRACK_ONLY_FIELD_IDS.has(line.fieldId));
+    }
+
+    /** Track-only amounts — recorded but not in sales or net. */
+    function trackOnlyBreakdownFromAggregate(agg) {
+        const FC = window.OplixBooksFieldConfig;
+        const config = agg?.booksFieldConfig;
+        const hasGas = !!agg?.hasGasStation;
+        const lines = [
+            { fieldId: "pulltabs", label: "Pulltab", amount: num(agg?.pulltabCash) },
+            { fieldId: "lottery", label: "Lottery", amount: num(agg?.lotteryCash) },
+            { fieldId: "windStations", label: "Wind station", amount: num(agg?.windStationCash) },
+            { fieldId: "kenoStations", label: "Keno station", amount: num(agg?.kenoStationCash) },
+            { fieldId: "waynePass", label: "Wayne Pass", amount: num(agg?.waynePass) },
+            { fieldId: "registerPayouts", label: "In house account", amount: num(agg?.inHouseAccount) },
+            { fieldId: "registerPayouts", label: "Lottery pay out", amount: num(agg?.lotteryPayOut) },
+            { fieldId: "registerPayouts", label: "Pull tab payout", amount: num(agg?.pullTabPayout) },
+            { fieldId: "registerPayouts", label: "Other cash pay out", amount: num(agg?.otherCashPayOut) },
+        ].filter((r) => num(r.amount) !== 0);
+        return FC && config ? FC.filterBreakdownLines(lines, config, hasGas) : lines;
+    }
+
     function salesBreakdownFromAggregate(agg) {
         const FC = window.OplixBooksFieldConfig;
         const config = agg?.booksFieldConfig;
         const hasGas = !!agg?.hasGasStation;
         let lines;
         if (agg.hasGasStation) {
-            lines = gasSalesDetailBreakdownFromAggregate(agg);
+            lines = gasSalesDetailBreakdownFromAggregate(agg).filter(
+                (r) => !isTrackOnlyBreakdownLine(r)
+            );
         } else {
             lines = [
                 { fieldId: "registers", label: "Register — card", amount: num(agg.registerCard) },
                 { fieldId: "registers", label: "Register — cash", amount: num(agg.registerCash) },
-                ...(num(agg.windStationCash) !== 0
-                    ? [{ fieldId: "windStations", label: "Wind station", amount: num(agg.windStationCash) }]
-                    : []),
-                ...(num(agg.kenoStationCash) !== 0
-                    ? [{ fieldId: "kenoStations", label: "Keno station", amount: num(agg.kenoStationCash) }]
-                    : []),
             ];
         }
-        lines = appendCustomBreakdownLines(lines, agg);
+        lines = appendCustomBreakdownLines(lines, agg).filter(
+            (r) => r.custom || !isTrackOnlyBreakdownLine(r)
+        );
         return FC && config ? FC.filterBreakdownLines(lines, config, hasGas) : lines;
     }
 
@@ -1531,6 +1561,7 @@
         return {
             ...aggCore,
             salesBreakdown: salesBreakdownFromAggregate(aggCore),
+            trackOnlyBreakdown: trackOnlyBreakdownFromAggregate(aggCore),
             expenseDetail: buildExpenseDetail(month, daysById, aggCore),
             cashReconciliation: aggregateCashReconciliation(daysById),
         };
@@ -2307,6 +2338,9 @@
         gasSalesSlicesFromAggregate,
         gasSalesDetailBreakdownFromAggregate,
         salesBreakdownFromAggregate,
+        trackOnlyBreakdownFromAggregate,
+        isTrackOnlyBreakdownLine,
+        TRACK_ONLY_FIELD_IDS,
         buildExpenseDetail,
         aggregateMonth,
         compareAggregates,

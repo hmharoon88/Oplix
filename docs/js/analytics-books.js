@@ -880,6 +880,17 @@
                 .map((a) => reviewAmountRow(`Adjustment — ${a.description || "Credit"}`, a.amount, { credit: true })),
         ].filter(Boolean);
 
+        const trackOnlyRows = (
+            agg.trackOnlyBreakdown || M().trackOnlyBreakdownFromAggregate(agg)
+        )
+            .filter((r) => M().num(r.amount) !== 0)
+            .map((r) =>
+                reviewAmountRow(r.label, r.amount, {
+                    note: r.format === "number" ? "count" : "track only",
+                })
+            )
+            .filter(Boolean);
+
         const expenseRows = [
             reviewAmountRow("Cash expenses (daily)", agg.cashExpense, { expense: true }),
             reviewAmountRow("Checks / ACH", agg.checksAch, { expense: true }),
@@ -982,6 +993,15 @@
                         }
                     </div>
                 </div>
+                ${
+                    trackOnlyRows.length
+                        ? `<div class="bs-review-block bs-review-block--track">
+                    <h4 class="bs-review-subtitle">Track only</h4>
+                    <p class="books-hint">Recorded for reference — not included in sales or net.</p>
+                    <table class="home-cc-table bs-review-table"><tbody>${trackOnlyRows.join("")}</tbody></table>
+                </div>`
+                        : ""
+                }
                 ${payoutsHtml}
                 ${payrollHtml}
                 ${apArHtml}
