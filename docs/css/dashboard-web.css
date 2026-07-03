@@ -2652,7 +2652,6 @@
 .bs-month-badge {
     display: inline-flex;
     align-items: center;
-    align-self: center;
     padding: 4px 10px;
     border-radius: 999px;
     font-size: 0.75rem;
@@ -4063,12 +4062,80 @@
 }
 
 .an-compare-toggle {
-    align-self: end;
     white-space: nowrap;
 }
 
-.an-month-toolbar .bs-toolbar-fields {
+.an-month-toolbar-fields {
+    display: grid;
+    grid-template-columns: auto auto;
+    grid-template-rows: auto auto;
+    column-gap: 16px;
+    row-gap: 8px;
     align-items: end;
+}
+
+.an-month-toolbar-fields--with-facility {
+    grid-template-columns: auto auto auto;
+}
+
+.an-month-toolbar-fields .an-tb-month {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.an-month-toolbar-fields--with-facility .an-tb-facility {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.an-month-toolbar-fields--with-facility .an-tb-month {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.an-month-toolbar-fields:not(.an-month-toolbar-fields--with-facility) .an-tb-action {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.an-month-toolbar-fields--with-facility .an-tb-action {
+    grid-column: 3;
+    grid-row: 1;
+}
+
+.an-month-toolbar-fields:not(.an-month-toolbar-fields--with-facility) .an-tb-badge {
+    grid-column: 1;
+    grid-row: 2;
+}
+
+.an-month-toolbar-fields--with-facility .an-tb-badge {
+    grid-column: 2;
+    grid-row: 2;
+}
+
+.an-month-toolbar .books-label {
+    margin: 0;
+}
+
+.an-month-toolbar .an-compare-toggle {
+    padding: 8px 14px;
+    font-size: 0.9rem;
+    line-height: 1.25;
+    border-radius: 8px;
+    height: auto;
+}
+
+.an-month-status {
+    display: flex;
+    align-items: center;
+}
+
+.an-month-status:empty {
+    display: none;
+}
+
+.an-month-toolbar .bs-month-badge {
+    align-self: auto;
 }
 
 .rpt-section-row td {

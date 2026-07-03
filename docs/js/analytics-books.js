@@ -801,23 +801,27 @@
         const locId = locControlId();
         const compareId = compareControlId();
 
+        const fieldsClass = showFacility
+            ? "bs-toolbar-fields an-month-toolbar-fields an-month-toolbar-fields--with-facility"
+            : "bs-toolbar-fields an-month-toolbar-fields";
+
         return `
             <div class="bs-toolbar an-month-toolbar">
-                <div class="bs-toolbar-fields">
+                <div class="${fieldsClass}">
                     ${
                         showFacility
-                            ? `<label class="books-label">Facility
+                            ? `<label class="books-label an-tb-field an-tb-facility">Facility
                         <select id="${locId}" class="books-select">${locOpts}</select>
                     </label>`
                             : ""
                     }
-                    <label class="books-label">Month
+                    <label class="books-label an-tb-field an-tb-month">Month
                         <select id="${monthId}" class="books-select">${monthOptions(state.monthId)}</select>
                     </label>
-                    ${renderMonthStatusBadge()}
-                    <button type="button" class="btn btn-nav-outline an-compare-toggle" id="${compareId}">
+                    <button type="button" class="btn btn-nav-outline an-compare-toggle an-tb-field an-tb-action" id="${compareId}">
                         ${state.showCompare ? "Hide month compare" : "Compare to previous month"}
                     </button>
+                    <div class="an-month-status an-tb-badge">${renderMonthStatusBadge()}</div>
                 </div>
                 ${state.showCompare && window.OplixBooksTrendLegend ? OplixBooksTrendLegend.legendHtml("month") : ""}
             </div>`;
@@ -838,14 +842,9 @@
     }
 
     function refreshMonthStatusBadge() {
-        const host = scopeRoot()?.querySelector(".an-month-toolbar .bs-toolbar-fields");
-        if (!host) return;
-        const monthSelect = host.querySelector(`#${monthControlId()}`);
-        if (!monthSelect) return;
-        const html = renderMonthStatusBadge();
-        const existing = host.querySelector(".bs-month-badge");
-        if (existing) existing.remove();
-        if (html) monthSelect.insertAdjacentHTML("afterend", html);
+        const slot = scopeRoot()?.querySelector(".an-month-status");
+        if (!slot) return;
+        slot.innerHTML = renderMonthStatusBadge();
     }
 
     function reviewAmountRow(label, amount, opts = {}) {
