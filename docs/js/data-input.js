@@ -1976,13 +1976,52 @@
             </div>`;
     }
 
+    function renderStationCards(listKey, columns, addLabel, itemLabel) {
+        const list = state.day[listKey] || [];
+        const cards = list
+            .map((row, index) => {
+                const fields = columns
+                    .map((c) => {
+                        const type = c.type || "text";
+                        const val = row[c.name] ?? "";
+                        if (type === "number") {
+                            return `<label class="books-label">${escapeHtml(c.label)}
+                                <input ${amountInputAttrs(c.name, val)}>
+                            </label>`;
+                        }
+                        return `<label class="books-label">${escapeHtml(c.label)}
+                            <input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}">
+                        </label>`;
+                    })
+                    .join("");
+                return `
+                <div class="books-station-card" data-di-row="${escapeHtml(row.id)}">
+                    <div class="books-station-card-head">
+                        <strong>${escapeHtml(itemLabel || "Item")} ${index + 1}</strong>
+                        <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="${listKey}" title="Remove">×</button>
+                    </div>
+                    <div class="books-station-card-fields">${fields}</div>
+                </div>`;
+            })
+            .join("");
+        return `
+            <div class="books-station-cards" data-di-list="${listKey}">
+                ${cards}
+                ${
+                    addLabel !== false
+                        ? `<button type="button" class="books-add-line" data-di-add="${listKey}">${escapeHtml(addLabel || "+ Add")}</button>`
+                        : ""
+                }
+            </div>`;
+    }
+
     function renderLotteryDaily() {
         const lot = state.day.lottery || { shift1: M().emptyGamingShift(), shift2: M().emptyGamingShift() };
         const total = M().lotteryDayTotal(state.day);
-        const shiftFields = (prefix, data) => `
-            <fieldset class="books-fieldset">
-                <legend>${escapeHtml(prefix.replace("lot_", "").replace("_", " "))}</legend>
-                <div class="books-grid-2">
+        const shiftCard = (label, prefix, data) => `
+            <div class="books-station-card books-station-card--shift">
+                <div class="books-station-card-head"><strong>${escapeHtml(label)}</strong></div>
+                <div class="books-station-card-fields books-station-card-fields--2">
                     <label class="books-label">Cash
                         <input ${amountInputAttrs(`${prefix}_cash`, data.cash)}>
                     </label>
@@ -1990,33 +2029,42 @@
                         <input ${amountInputAttrs(`${prefix}_overShort`, data.overShort)}>
                     </label>
                 </div>
-            </fieldset>`;
+            </div>`;
         return `
-            <h3 class="books-subtitle">Lottery</h3>
-            <p class="books-hint">Lottery cash collected per shift. Reconcile received amounts on <strong>Cash reconciliation</strong>.</p>
-            ${shiftFields("lot_shift1", lot.shift1 || M().emptyGamingShift())}
-            ${shiftFields("lot_shift2", lot.shift2 || M().emptyGamingShift())}
-            <p class="books-total-line">Lottery total: ${money(total.cash)} cash · O/S ${money(total.overShort)}</p>`;
+            <section class="books-gaming-panel">
+                <div class="books-gaming-panel-head">
+                    <h3 class="books-subtitle">Lottery</h3>
+                    <p class="books-total-line">Total: <strong>${money(total.cash)}</strong></p>
+                </div>
+                <p class="books-hint">Cash per shift. Count received on Cash reconciliation.</p>
+                <div class="books-station-cards books-station-cards--shifts">
+                    ${shiftCard("Shift 1", "lot_shift1", lot.shift1 || M().emptyGamingShift())}
+                    ${shiftCard("Shift 2", "lot_shift2", lot.shift2 || M().emptyGamingShift())}
+                </div>
+            </section>`;
     }
 
     function renderPulltabs() {
         const total = M().pulltabDayTotal(state.day);
         return `
-            <h3 class="books-subtitle">Pulltab</h3>
-            <p class="books-hint">One row per pulltab machine — enter the ticket number and amounts from each machine report.</p>
-            ${renderLineList(
-                "pulltabs",
-                [
-                    { name: "ticketNumber", label: "Ticket #" },
-                    { name: "cash", label: "Cash", type: "number" },
-                    { name: "winner", label: "Winners", type: "number" },
-                    { name: "overShort", label: "O/S", type: "number" },
-                ],
-                null,
-                false,
-                "+ Add pulltab machine"
-            )}
-            <p class="books-total-line">Pulltab total: ${money(total.cash)} cash · Winners ${money(total.winner)} · O/S ${money(total.overShort)}</p>`;
+            <section class="books-gaming-panel">
+                <div class="books-gaming-panel-head">
+                    <h3 class="books-subtitle">Pulltab</h3>
+                    <p class="books-total-line">Total: <strong>${money(total.cash)}</strong></p>
+                </div>
+                <p class="books-hint">One card per machine.</p>
+                ${renderStationCards(
+                    "pulltabs",
+                    [
+                        { name: "ticketNumber", label: "Ticket #" },
+                        { name: "cash", label: "Cash", type: "number" },
+                        { name: "winner", label: "Winners", type: "number" },
+                        { name: "overShort", label: "O/S", type: "number" },
+                    ],
+                    "+ Add machine",
+                    "Machine"
+                )}
+            </section>`;
     }
 
     function renderWindStations() {
@@ -2024,19 +2072,22 @@
         const count = (state.day.windStations || []).length;
         const canAdd = count < 3;
         return `
-            <h3 class="books-subtitle">Wind station</h3>
-            <p class="books-hint">Cash collected at each wind station (add up to 3 stations per day).</p>
-            ${renderLineList(
-                "windStations",
-                [
-                    { name: "station", label: "Station" },
-                    { name: "cash", label: "Cash", type: "number" },
-                ],
-                null,
-                false,
-                canAdd ? "+ Add wind station" : false
-            )}
-            <p class="books-total-line">Wind station total: ${money(total)} cash</p>`;
+            <section class="books-gaming-panel">
+                <div class="books-gaming-panel-head">
+                    <h3 class="books-subtitle">Wind station</h3>
+                    <p class="books-total-line">Total: <strong>${money(total)}</strong></p>
+                </div>
+                <p class="books-hint">Up to 3 stations.</p>
+                ${renderStationCards(
+                    "windStations",
+                    [
+                        { name: "station", label: "Station" },
+                        { name: "cash", label: "Cash", type: "number" },
+                    ],
+                    canAdd ? "+ Add station" : false,
+                    "Station"
+                )}
+            </section>`;
     }
 
     function renderKenoStations() {
@@ -2044,19 +2095,32 @@
         const count = (state.day.kenoStations || []).length;
         const canAdd = count < 3;
         return `
-            <h3 class="books-subtitle">Keno station</h3>
-            <p class="books-hint">Cash collected at each keno station (add up to 3 stations per day).</p>
-            ${renderLineList(
-                "kenoStations",
-                [
-                    { name: "station", label: "Station" },
-                    { name: "cash", label: "Cash", type: "number" },
-                ],
-                null,
-                false,
-                canAdd ? "+ Add keno station" : false
-            )}
-            <p class="books-total-line">Keno station total: ${money(total)} cash</p>`;
+            <section class="books-gaming-panel">
+                <div class="books-gaming-panel-head">
+                    <h3 class="books-subtitle">Keno station</h3>
+                    <p class="books-total-line">Total: <strong>${money(total)}</strong></p>
+                </div>
+                <p class="books-hint">Up to 3 stations.</p>
+                ${renderStationCards(
+                    "kenoStations",
+                    [
+                        { name: "station", label: "Station" },
+                        { name: "cash", label: "Cash", type: "number" },
+                    ],
+                    canAdd ? "+ Add station" : false,
+                    "Station"
+                )}
+            </section>`;
+    }
+
+    function renderGamingStationsGrid() {
+        const panels = [];
+        if (showField("pulltabs")) panels.push(renderPulltabs());
+        if (showField("windStations")) panels.push(renderWindStations());
+        if (showField("kenoStations")) panels.push(renderKenoStations());
+        if (showField("lottery")) panels.push(renderLotteryDaily());
+        if (!panels.length) return "";
+        return `<div class="books-gaming-grid">${panels.join("\n")}</div>`;
     }
 
     function renderUtilitiesPayroll() {
@@ -2332,10 +2396,8 @@
         if (wayne) bodyParts.push(wayne);
         const payouts = renderRegisterPayoutFields();
         if (payouts) bodyParts.push(payouts);
-        if (showField("pulltabs")) bodyParts.push(renderPulltabs());
-        if (showField("windStations")) bodyParts.push(renderWindStations());
-        if (showField("kenoStations")) bodyParts.push(renderKenoStations());
-        if (showField("lottery")) bodyParts.push(renderLotteryDaily());
+        const gaming = renderGamingStationsGrid();
+        if (gaming) bodyParts.push(gaming);
         const expenses = renderDailyExpensesBlock();
         if (expenses) bodyParts.push(expenses);
 
@@ -2362,10 +2424,8 @@
             <p class="books-total-line">All registers (1 + 2): ${money(reg.card + reg.cash)} card+cash</p>`
             );
         }
-        if (showField("pulltabs")) parts.push(renderPulltabs());
-        if (showField("windStations")) parts.push(renderWindStations());
-        if (showField("kenoStations")) parts.push(renderKenoStations());
-        if (showField("lottery")) parts.push(renderLotteryDaily());
+        const gaming = renderGamingStationsGrid();
+        if (gaming) parts.push(gaming);
         const expenses = renderDailyExpensesBlock();
         if (expenses) parts.push(expenses);
         return parts.join("\n");

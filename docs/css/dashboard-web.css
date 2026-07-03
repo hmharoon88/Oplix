@@ -2050,15 +2050,99 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     height: 1px;
 }
 
+.books-gaming-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin: 0 0 16px;
+    align-items: start;
+}
+
+.books-gaming-panel {
+    padding: 14px 16px;
+    border: 1px solid var(--dash-border, #e2e8f0);
+    border-radius: 12px;
+    background: #fff;
+}
+
+.books-gaming-panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 12px;
+    margin-bottom: 4px;
+}
+
+.books-gaming-panel-head .books-subtitle,
+.books-gaming-panel-head .books-total-line {
+    margin: 0;
+}
+
+.books-station-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 10px 0 0;
+}
+
+.books-station-cards--shifts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.books-station-cards .books-add-line {
+    grid-column: 1 / -1;
+    justify-self: start;
+}
+
+.books-station-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--dash-border, #e2e8f0);
+    border-radius: 10px;
+    background: var(--dash-bg, #f8fafc);
+}
+
+.books-station-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.books-station-card-head strong {
+    font-size: 0.875rem;
+    color: #0f172a;
+}
+
+.books-station-card-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.books-station-card-fields--2 {
+    grid-template-columns: 1fr 1fr;
+}
+
+.books-station-card-fields .books-label {
+    margin: 0;
+}
+
 @media (max-width: 900px) {
-    .books-util-payroll-grid {
+    .books-util-payroll-grid,
+    .books-gaming-grid {
         grid-template-columns: 1fr;
     }
 }
 
 @media (max-width: 520px) {
     .books-util-cards,
-    .books-payroll-cards {
+    .books-payroll-cards,
+    .books-station-cards,
+    .books-station-cards--shifts {
         grid-template-columns: 1fr;
     }
 }
