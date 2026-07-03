@@ -1263,6 +1263,128 @@
     cursor: default;
 }
 
+.books-day-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--dash-border);
+    background: var(--dash-surface, #fff);
+}
+
+.books-day-banner--closed {
+    border-color: #c9a227;
+    background: #fffbeb;
+}
+
+.books-day-banner-text {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+.books-day-banner-meta {
+    font-size: 0.8rem;
+    color: var(--dash-muted);
+    font-weight: 400;
+}
+
+.books-day-banner-tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--dash-bg, #eef0f3);
+    color: var(--dash-muted);
+}
+
+.books-day-banner-tag--entry {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.books-day-banner--closed .books-day-banner-tag {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.books-day-banner-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.books-day-fields {
+    border: none;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}
+
+.books-day-fields:disabled {
+    opacity: 0.92;
+}
+
+.books-day-fields:disabled .books-input,
+.books-day-fields:disabled .books-select,
+.books-day-fields:disabled .books-input-amount {
+    background: var(--dash-bg, #f4f5f7);
+    color: var(--dash-text);
+    cursor: default;
+}
+
+.books-closed-days {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--dash-border);
+}
+
+.books-closed-days-title {
+    margin-top: 0;
+}
+
+.books-closed-days-tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.books-closed-day-tile {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 12px;
+    border: 1px solid var(--dash-border);
+    border-radius: 8px;
+    background: var(--dash-surface, #fff);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--dash-text);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.books-closed-day-tile:hover {
+    border-color: #c9a227;
+    background: #fffbeb;
+}
+
+.books-closed-day-tile--active {
+    border-color: #c9a227;
+    background: #fef3c7;
+    box-shadow: 0 0 0 1px #c9a227;
+}
+
 .payroll-books-table {
     margin-bottom: 8px;
 }

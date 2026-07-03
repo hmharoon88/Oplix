@@ -130,11 +130,17 @@
     }
 
     async function saveDay(userId, locationId, monthId, dayId, day) {
+        const ref = dayRef(userId, locationId, monthId, dayId);
+        const snap = await ref.get();
+        const existing = snap.exists ? snap.data() : null;
+        if (existing?.closed && day.closed !== false) {
+            throw new Error("This day is closed. Reopen it before saving changes.");
+        }
         const payload = {
             ...day,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         };
-        await dayRef(userId, locationId, monthId, dayId).set(payload, { merge: true });
+        await ref.set(payload, { merge: true });
         invalidateMonth(userId, locationId, monthId);
     }
 

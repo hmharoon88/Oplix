@@ -314,8 +314,54 @@
             otherExpenses: [],
             customAmounts: {},
             cashReconciliation: defaultCashReconciliation(),
+            closed: false,
+            closedAt: null,
+            closedBy: null,
             updatedAt: null,
         };
+    }
+
+    function isDayClosed(day) {
+        return !!(day && day.closed);
+    }
+
+    function dayHasEntryData(rawDay, options) {
+        if (!rawDay) return false;
+        const hasGasStation = !!(options && options.hasGasStation);
+        const dayId = rawDay._dayId || "2000-01-01";
+        return dailySalesExpenseRow(dayId, rawDay, { hasGasStation }).hasData;
+    }
+
+    /** First open day for entry: today in month, else latest unclosed day, else day 1. */
+    function defaultEntryDayId(monthId, daysById) {
+        const map = daysById || {};
+        const today = dayIdFromDate(new Date());
+        if (today.startsWith(`${monthId}-`)) {
+            if (!isDayClosed(map[today])) return today;
+        }
+        const n = daysInMonth(monthId);
+        const anchor = parseMonthId(monthId);
+        for (let d = n; d >= 1; d--) {
+            const dt = new Date(anchor.getFullYear(), anchor.getMonth(), d);
+            const id = dayIdFromDate(dt);
+            if (!isDayClosed(map[id])) return id;
+        }
+        if (today.startsWith(`${monthId}-`)) return today;
+        return `${monthId}-01`;
+    }
+
+    /** Closed days in calendar order for tile strip. */
+    function listClosedDayIds(monthId, daysById) {
+        const map = daysById || {};
+        const n = daysInMonth(monthId);
+        const anchor = parseMonthId(monthId);
+        const ids = [];
+        for (let d = 1; d <= n; d++) {
+            const dt = new Date(anchor.getFullYear(), anchor.getMonth(), d);
+            const id = dayIdFromDate(dt);
+            if (isDayClosed(map[id])) ids.push(id);
+        }
+        return ids;
     }
 
     function monthIdFromDate(d) {
@@ -501,6 +547,9 @@
         d.otherExpenses = day.otherExpenses || [];
         d.customAmounts = normalizeCustomAmounts(day.customAmounts);
         d.cashReconciliation = normalizeCashReconciliation(day.cashReconciliation, d);
+        d.closed = !!day.closed;
+        d.closedAt = day.closedAt || null;
+        d.closedBy = day.closedBy || null;
         delete d._dayId;
         return d;
     }
@@ -1978,5 +2027,9 @@
         lotteryFormsCashByDay,
         dailySalesExpenseRow,
         dailySalesExpenseRows,
+        isDayClosed,
+        dayHasEntryData,
+        defaultEntryDayId,
+        listClosedDayIds,
     };
 })();

@@ -22,7 +22,167 @@
         payables: [],
         dirty: false,
         expenseDescriptions: [],
+        entryDayId: M().dayIdFromDate(new Date()),
     };
+
+    function currentUserLabel() {
+        const authUser = window.oplixAuth?.currentUser;
+        return authUser?.email || authUser?.displayName || userId || "unknown";
+    }
+
+    function formatDayLabel(dayId) {
+        const [y, m, d] = String(dayId).split("-").map(Number);
+        const date = new Date(y, m - 1, d);
+        return date.toLocaleDateString("en-US", {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+        });
+    }
+
+    function refreshEntryDayId() {
+        state.entryDayId = M().defaultEntryDayId(state.monthId, state.daysById);
+    }
+
+    function isViewingClosedDay() {
+        return M().isDayClosed(state.day);
+    }
+
+    function confirmDiscardDirty() {
+        if (!state.dirty) return true;
+        return window.confirm("You have unsaved changes on this day. Discard them?");
+    }
+
+    function switchDay(dayId) {
+        if (dayId === state.dayId) return true;
+        if (!confirmDiscardDirty()) return false;
+        state.dayId = dayId;
+        state.day = M().normalizeDayDoc(state.daysById[state.dayId]);
+        state.dirty = false;
+        render();
+        return true;
+    }
+
+    async function closeCurrentDay() {
+        if (isViewingClosedDay()) return;
+        if (state.dirty) {
+            normalizeAllAmountFields();
+            syncFromForm();
+        }
+        const hasData = M().dayHasEntryData({ ...state.day, _dayId: state.dayId }, { hasGasStation: hasGasStation() });
+        if (!hasData) {
+            const ok = window.confirm(
+                "This day has no entry data yet. Close it anyway? You can reopen later to enter numbers."
+            );
+            if (!ok) return;
+        } else if (
+            !window.confirm(
+                "Close this day? It will be read-only until you reopen it. Use this after entry is complete."
+            )
+        ) {
+            return;
+        }
+        if (state.dirty) await saveDay({ silent: true });
+        state.day.closed = true;
+        state.day.closedAt = new Date().toISOString();
+        state.day.closedBy = currentUserLabel();
+        $("di-status").textContent = "Closing day…";
+        await Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day);
+        state.daysById[state.dayId] = { ...state.day, _dayId: state.dayId };
+        window.OplixAnalytics?.invalidateCache?.();
+        refreshEntryDayId();
+        state.dirty = false;
+        switchDay(state.entryDayId);
+        $("di-status").textContent = "Day closed.";
+        setTimeout(() => {
+            if ($("di-status")?.textContent === "Day closed.") $("di-status").textContent = "";
+        }, 2000);
+    }
+
+    async function reopenCurrentDay() {
+        if (!isViewingClosedDay()) return;
+        if (
+            !window.confirm(
+                "Reopen this day for editing? Anyone with access can change numbers until it is closed again."
+            )
+        ) {
+            return;
+        }
+        state.day.closed = false;
+        state.day.closedAt = null;
+        state.day.closedBy = null;
+        $("di-status").textContent = "Reopening…";
+        await Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day);
+        state.daysById[state.dayId] = { ...state.day, _dayId: state.dayId };
+        window.OplixAnalytics?.invalidateCache?.();
+        refreshEntryDayId();
+        state.dirty = false;
+        render();
+        $("di-status").textContent = "Day reopened.";
+        setTimeout(() => {
+            if ($("di-status")?.textContent === "Day reopened.") $("di-status").textContent = "";
+        }, 2000);
+    }
+
+    function renderDayStatusBanner() {
+        const label = formatDayLabel(state.dayId);
+        if (isViewingClosedDay()) {
+            const at = state.day.closedAt
+                ? new Date(state.day.closedAt).toLocaleString("en-US", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                  })
+                : "";
+            const by = state.day.closedBy || "";
+            return `<div class="books-day-banner books-day-banner--closed" role="status">
+                <div class="books-day-banner-text">
+                    <strong>${escapeHtml(label)}</strong>
+                    <span class="books-day-banner-tag">Closed</span>
+                    ${at ? `<span class="books-day-banner-meta">Closed ${escapeHtml(at)}${by ? ` · ${escapeHtml(by)}` : ""}</span>` : ""}
+                </div>
+                <div class="books-day-banner-actions">
+                    <button type="button" class="btn btn-nav-outline" id="di-return-entry">Return to entry day</button>
+                    <button type="button" class="btn" id="di-reopen-day">Reopen day</button>
+                </div>
+            </div>`;
+        }
+        const showReturn = state.dayId !== state.entryDayId;
+        return `<div class="books-day-banner books-day-banner--open" role="status">
+            <div class="books-day-banner-text">
+                <span class="books-day-banner-tag books-day-banner-tag--entry">Entry</span>
+                <strong>${escapeHtml(label)}</strong>
+            </div>
+            <div class="books-day-banner-actions">
+                ${showReturn ? `<button type="button" class="btn btn-nav-outline" id="di-return-entry">Return to entry day</button>` : ""}
+                <button type="button" class="btn btn-nav-outline" id="di-close-day">Close day</button>
+            </div>
+        </div>`;
+    }
+
+    function renderClosedDayTiles() {
+        const closedIds = M().listClosedDayIds(state.monthId, state.daysById);
+        if (!closedIds.length) {
+            return `<section class="books-closed-days" aria-label="Closed days">
+                <h3 class="books-subtitle books-closed-days-title">Closed days</h3>
+                <p class="books-hint">No closed days this month. Use <strong>Close day</strong> after saving entry to lock a day.</p>
+            </section>`;
+        }
+        const tiles = closedIds
+            .map((id) => {
+                const [y, m, d] = id.split("-").map(Number);
+                const date = new Date(y, m - 1, d);
+                const short = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+                const active = id === state.dayId ? " books-closed-day-tile--active" : "";
+                return `<button type="button" class="books-closed-day-tile${active}" data-di-closed-tile="${escapeHtml(id)}" title="${escapeHtml(formatDayLabel(id))}">${escapeHtml(short)}</button>`;
+            })
+            .join("");
+        return `<section class="books-closed-days" aria-label="Closed days">
+            <h3 class="books-subtitle books-closed-days-title">Closed days</h3>
+            <p class="books-hint">Tap a closed day to view. Reopen to edit.</p>
+            <div class="books-closed-days-tiles">${tiles}</div>
+        </section>`;
+    }
 
     const EXPENSE_DESC_LISTS = new Set(["cashExpenses", "checksAch", "otherExpenses"]);
     const EXPENSE_DESC_DATALIST_ID = "di-expense-desc-list";
@@ -340,15 +500,17 @@
 
         panel.addEventListener("change", async (e) => {
             if (e.target.id === "di-location") {
+                if (!confirmDiscardDirty()) {
+                    e.target.value = state.locationId;
+                    return;
+                }
                 state.locationId = e.target.value;
                 await loadCurrent();
                 return;
             }
             if (e.target.id === "di-month") state.monthId = e.target.value;
             if (e.target.id === "di-day") {
-                state.dayId = e.target.value;
-                state.day = M().normalizeDayDoc(state.daysById[state.dayId]);
-                render();
+                if (!switchDay(e.target.value)) e.target.value = state.dayId;
                 return;
             }
             if (
@@ -365,13 +527,32 @@
         panel.addEventListener("click", (e) => {
             const tab = e.target.closest("[data-di-tab]");
             if (tab) {
+                if (!confirmDiscardDirty()) return;
                 syncFromForm();
                 state.tab = tab.dataset.diTab;
                 render();
                 return;
             }
             if (e.target.id === "di-reload") {
+                if (!confirmDiscardDirty()) return;
                 loadCurrent();
+                return;
+            }
+            if (e.target.id === "di-close-day") {
+                closeCurrentDay();
+                return;
+            }
+            if (e.target.id === "di-reopen-day") {
+                reopenCurrentDay();
+                return;
+            }
+            if (e.target.id === "di-return-entry") {
+                switchDay(state.entryDayId);
+                return;
+            }
+            const closedTile = e.target.closest("[data-di-closed-tile]");
+            if (closedTile) {
+                switchDay(closedTile.dataset.diClosedTile);
                 return;
             }
             if (e.target.id === "di-save-month") {
@@ -393,12 +574,14 @@
             }
             const add = e.target.closest("[data-di-add]");
             if (add) {
+                if (isViewingClosedDay()) return;
                 addLine(add.dataset.diAdd);
                 render();
                 return;
             }
             const rm = e.target.closest("[data-di-rm]");
             if (rm) {
+                if (isViewingClosedDay()) return;
                 removeLine(rm.dataset.diList, rm.dataset.diRm);
                 render();
                 return;
@@ -453,6 +636,7 @@
 
         panel.addEventListener("input", (e) => {
             if (!e.target.closest(".data-input-form")) return;
+            if (isViewingClosedDay()) return;
             if (e.target.name === "fuel_gallons") {
                 const root = $("data-input-root");
                 ["fuel_regular", "fuel_mid_grade", "fuel_premium", "fuel_diesel"].forEach((name) => {
@@ -862,6 +1046,10 @@
                 M().mergeUtilityKeys(state.utilityProviders, state.month.utilities)
             );
             state.daysById = daysById;
+            refreshEntryDayId();
+            if (!String(state.dayId).startsWith(`${state.monthId}-`)) {
+                state.dayId = state.entryDayId;
+            }
             state.day = M().normalizeDayDoc(daysById[state.dayId]);
             refreshExpenseDescriptions();
             state.dirty = false;
@@ -890,11 +1078,15 @@
         }, 2000);
     }
 
-    async function saveDay() {
+    async function saveDay(options = {}) {
+        if (isViewingClosedDay()) {
+            $("di-status").textContent = "Day is closed — reopen to save.";
+            return;
+        }
         normalizeAllAmountFields();
         syncFromForm();
         pruneAllReconPayOuts();
-        $("di-status").textContent = "Saving…";
+        if (!options.silent) $("di-status").textContent = "Saving…";
         await Promise.all([
             Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day),
             Store().saveMonth(userId, state.locationId, state.monthId, state.month),
@@ -903,11 +1095,13 @@
         state.daysById[state.dayId] = { ...state.day, _dayId: state.dayId };
         rememberExpenseDescriptionsFromDay(state.day);
         state.dirty = false;
-        $("di-status").textContent = "Day saved.";
-        if (state.tab === "cash-recon") render();
-        setTimeout(() => {
-            if ($("di-status").textContent === "Day saved.") $("di-status").textContent = "";
-        }, 2000);
+        if (!options.silent) {
+            $("di-status").textContent = "Day saved.";
+            if (state.tab === "cash-recon") render();
+            setTimeout(() => {
+                if ($("di-status").textContent === "Day saved.") $("di-status").textContent = "";
+            }, 2000);
+        }
     }
 
     function monthOptions() {
@@ -929,14 +1123,17 @@
         for (let d = 1; d <= n; d++) {
             const date = new Date(y, m - 1, d);
             const id = M().dayIdFromDate(date);
-            const has = !!state.daysById[id];
+            const raw = state.daysById[id];
+            const has = !!raw;
+            const closed = M().isDayClosed(raw);
             const label = date.toLocaleDateString("en-US", {
                 weekday: "short",
                 month: "short",
                 day: "numeric",
             });
+            const prefix = closed ? "🔒 " : has ? "● " : "";
             opts.push(
-                `<option value="${id}"${id === state.dayId ? " selected" : ""}>${has ? "● " : ""}${label}</option>`
+                `<option value="${id}"${id === state.dayId ? " selected" : ""}>${prefix}${label}</option>`
             );
         }
         return opts.join("");
@@ -1404,36 +1601,38 @@
         const reg = M().registerDayTotal(state.day);
         const gas = hasGasStation();
         const fuelSale = M().normalizeFuelSale(state.day.fuelSale);
+        const closed = isViewingClosedDay();
+        const fieldsetAttr = closed ? " disabled" : "";
 
         if (gas) {
             const gasSales = renderDailyGasSales(fuelSale);
             const detail = renderDailyDetailSheet(reg);
             return `
             <div class="books-panel data-input-form">
+                ${renderDayStatusBanner()}
                 <label class="books-label">Day
                     <select id="di-day" class="books-select">${dayOptions()}</select>
                 </label>
-
-                ${gasSales}
-                ${detail}
-
-                ${renderCustomBooksFields("daily", state.day.customAmounts)}
-
-                <button type="button" class="btn books-save" id="di-save-day">Save this day</button>
+                <fieldset class="books-day-fields"${fieldsetAttr}>
+                    ${gasSales}
+                    ${detail}
+                    ${renderCustomBooksFields("daily", state.day.customAmounts)}
+                </fieldset>
+                ${closed ? "" : `<button type="button" class="btn books-save" id="di-save-day">Save this day</button>`}
             </div>`;
         }
 
         return `
             <div class="books-panel data-input-form">
+                ${renderDayStatusBanner()}
                 <label class="books-label">Day
                     <select id="di-day" class="books-select">${dayOptions()}</select>
                 </label>
-
-                ${renderDailyCStore()}
-
-                ${renderCustomBooksFields("daily", state.day.customAmounts)}
-
-                <button type="button" class="btn books-save" id="di-save-day">Save this day</button>
+                <fieldset class="books-day-fields"${fieldsetAttr}>
+                    ${renderDailyCStore()}
+                    ${renderCustomBooksFields("daily", state.day.customAmounts)}
+                </fieldset>
+                ${closed ? "" : `<button type="button" class="btn books-save" id="di-save-day">Save this day</button>`}
             </div>`;
     }
 
@@ -1720,9 +1919,12 @@
                    </div>`);
         }
         const registerExtra = registerExtraParts.join("");
+        const closed = isViewingClosedDay();
+        const fieldsetAttr = closed ? " disabled" : "";
 
         return `
             <div class="books-panel data-input-form">
+                ${renderDayStatusBanner()}
                 <label class="books-label">Day
                     <select id="di-day" class="books-select">${dayOptions()}</select>
                 </label>
@@ -1733,6 +1935,7 @@
 
                 <p class="books-hint">Per shift: <strong>Expected</strong> = cash sale from the Daily sheet. <strong>Received + pay out</strong> should equal Expected. <strong>Cash expenses</strong> and <strong>other cash pay out</strong> lower expected cash. In house account, lottery pay out, and pull tab payout are <strong>track only</strong> — listed below but not subtracted.</p>
 
+                <fieldset class="books-day-fields"${fieldsetAttr}>
                 ${
                     sections.length === 0
                         ? `<p class="data-list-empty">Nothing to reconcile for this day yet.</p>`
@@ -1793,8 +1996,9 @@
                 <label class="books-label">Day notes
                     <input type="text" class="books-input" name="cr_day_note" value="${escapeHtml(state.day.cashReconciliation?.note || "")}" placeholder="Optional">
                 </label>
+                </fieldset>
 
-                <button type="button" class="btn books-save" id="di-save-day">Save cash reconciliation</button>
+                ${closed ? "" : `<button type="button" class="btn books-save" id="di-save-day">Save cash reconciliation</button>`}
             </div>`;
     }
 
@@ -1891,7 +2095,8 @@
                 ${tabs.map((t) => `<button type="button" class="books-tab${state.tab === t.id ? " active" : ""}" data-di-tab="${t.id}">${t.label}</button>`).join("")}
             </nav>
             ${renderExpenseDescDatalist()}
-            ${body}`;
+            ${body}
+            ${state.tab === "daily" || state.tab === "cash-recon" ? renderClosedDayTiles() : ""}`;
 
         if (state.tab === "payables" && window.OplixPayablesUI) {
             const payRoot = root.querySelector("[data-pay-section]");
