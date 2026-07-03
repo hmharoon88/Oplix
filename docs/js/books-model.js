@@ -20,7 +20,30 @@
     }));
 
     function emptyShiftRegister() {
-        return { cardSale: 0, cashSale: 0, overShort: 0 };
+        return {
+            cardSale: 0,
+            cashSale: 0,
+            overShort: 0,
+            cashPayOut: 0,
+            cashPayOutExpense: false,
+        };
+    }
+
+    function normalizeShiftRegister(raw) {
+        const r = raw || {};
+        let cashPayOutExpense = false;
+        if (r.cashPayOutExpense === true || r.cashPayOutExpense === "expense") {
+            cashPayOutExpense = true;
+        } else if (r.cashPayOutExpense === false || r.cashPayOutExpense === "track_only") {
+            cashPayOutExpense = false;
+        }
+        return {
+            cardSale: num(r.cardSale),
+            cashSale: num(r.cashSale),
+            overShort: num(r.overShort),
+            cashPayOut: num(r.cashPayOut),
+            cashPayOutExpense,
+        };
     }
 
     function defaultRegisterUnit() {
@@ -586,12 +609,12 @@
         const src1 = day.register1 || legacyRegister || {};
         const src2 = day.register2 || {};
         d.register1 = {
-            shift1: { ...emptyShiftRegister(), ...(src1.shift1 || {}) },
-            shift2: { ...emptyShiftRegister(), ...(src1.shift2 || {}) },
+            shift1: normalizeShiftRegister(src1.shift1),
+            shift2: normalizeShiftRegister(src1.shift2),
         };
         d.register2 = {
-            shift1: { ...emptyShiftRegister(), ...(src2.shift1 || {}) },
-            shift2: { ...emptyShiftRegister(), ...(src2.shift2 || {}) },
+            shift1: normalizeShiftRegister(src2.shift1),
+            shift2: normalizeShiftRegister(src2.shift2),
         };
         delete d.register;
         d.lottery = {
@@ -1081,7 +1104,7 @@
         const pull = pulltabDayTotal(day);
         const dayMerch = num(day.merchSale);
         const dayCredit = num(day.creditCard);
-        const dayCash = sumLines(day.cashExpenses, "amount");
+        const dayCash = sumLines(day.cashExpenses, "amount") + registerShiftPayoutsExpenseTotal(day);
         const dayChecks = sumLines(day.checksAch, "amount");
         const dayOther = sumLines(day.otherExpenses, "amount");
         const expenses = dayCash + dayChecks + dayOther;
@@ -1108,7 +1131,8 @@
             num(day.waynePass) !== 0 ||
             num(day.lotteryPayOut) !== 0 ||
             num(day.pullTabPayout) !== 0 ||
-            num(day.otherCashPayOut) !== 0;
+            num(day.otherCashPayOut) !== 0 ||
+            registerShiftPayoutsTotal(day) !== 0;
 
         return {
             dayId,
@@ -1227,6 +1251,7 @@
             const dayMerch = num(normalized.merchSale);
             const dayCredit = num(normalized.creditCard);
             const dayCash = sumLines(normalized.cashExpenses, "amount");
+            const dayShiftPayOutExpense = registerShiftPayoutsExpenseTotal(normalized);
             const dayChecks = sumLines(normalized.checksAch, "amount");
             const dayOther = sumLines(normalized.otherExpenses, "amount");
 
@@ -1254,7 +1279,7 @@
             lotteryPayOut += num(normalized.lotteryPayOut);
             pullTabPayout += num(normalized.pullTabPayout);
             otherCashPayOut += num(normalized.otherCashPayOut);
-            cashExpense += dayCash;
+            cashExpense += dayCash + dayShiftPayOutExpense;
             checksAch += dayChecks;
             otherExpense += dayOther;
 
@@ -1544,9 +1569,38 @@
         return base;
     }
 
-    /** Total cash paid from registers on a day (Daily sheet → Cash expense). */
-    function dayCashExpensesTotal(day) {
+    /** Total cash paid from registers on a day (Daily sheet → Cash expense lines). */
+    function dayManualCashExpensesTotal(day) {
         return sumLines(normalizeDayDoc(day).cashExpenses, "amount");
+    }
+
+    /** Per-shift register payouts marked as store expense (Daily sheet → register shifts). */
+    function registerShiftPayoutsExpenseTotal(day) {
+        let total = 0;
+        const normalized = normalizeDayDoc(day);
+        ["register1", "register2"].forEach((regKey) => {
+            ["shift1", "shift2"].forEach((sh) => {
+                const shift = normalized[regKey]?.[sh] || {};
+                if (shift.cashPayOutExpense) total += num(shift.cashPayOut);
+            });
+        });
+        return total;
+    }
+
+    /** All per-shift register payouts on the Daily sheet. */
+    function registerShiftPayoutsTotal(day) {
+        let total = 0;
+        const normalized = normalizeDayDoc(day);
+        ["register1", "register2"].forEach((regKey) => {
+            ["shift1", "shift2"].forEach((sh) => {
+                total += num(normalized[regKey]?.[sh]?.cashPayOut);
+            });
+        });
+        return total;
+    }
+
+    function dayCashExpensesTotal(day) {
+        return dayManualCashExpensesTotal(day) + registerShiftPayoutsExpenseTotal(day);
     }
 
     /** Track-only register payouts — recorded on Daily sheet but do not reduce expected cash on reconciliation. */
@@ -1569,8 +1623,13 @@
         return dayRegisterPayoutsTrackOnlyTotal(day) + dayRegisterPayoutsReconTotal(day);
     }
 
-    /** Expected register cash for one shift — cash sale from the Daily sheet. */
+    /** Expected register cash for one shift — cash sale minus pay out from Daily sheet. */
     function expectedRegisterCash(day, regKey, shiftKey) {
+        const sh = normalizeShiftRegister(day?.[regKey]?.[shiftKey]);
+        return Math.max(0, num(sh.cashSale) - num(sh.cashPayOut));
+    }
+
+    function registerShiftGrossCash(day, regKey, shiftKey) {
         const sh = day?.[regKey]?.[shiftKey] || {};
         return num(sh.cashSale);
     }
@@ -1628,7 +1687,7 @@
     /** True when Daily sheet has register shift data worth reconciling. */
     function registerShiftHasBooksData(day, regKey, shiftKey) {
         const sh = day?.[regKey]?.[shiftKey] || {};
-        return num(sh.cashSale) !== 0 || num(sh.overShort) !== 0;
+        return num(sh.cashSale) !== 0 || num(sh.overShort) !== 0 || num(sh.cashPayOut) !== 0;
     }
 
     function lotteryShiftHasBooksData(day, shiftKey) {
@@ -1676,11 +1735,12 @@
 
         rows.forEach((row) => {
             const received = num(row.counted);
-            const payOut = sumPayOuts(row.payOuts);
+            const isRegister = row.kind === "register";
+            const payOut = isRegister ? num(row.payOut) : sumPayOuts(row.payOuts);
             expectedTotal += num(row.expected);
             receivedTotal += received;
             payOutTotal += payOut;
-            countedTotal += received + payOut;
+            countedTotal += isRegister ? received : received + payOut;
             if (row.verified) verifiedCount += 1;
         });
 
@@ -1729,11 +1789,12 @@
         const registerRowsAll = [];
         ["register1", "register2"].forEach((regKey, regIdx) => {
             ["shift1", "shift2"].forEach((sh, shIdx) => {
+                const shift = normalized[regKey][sh];
+                const expectedGross = registerShiftGrossCash(normalized, regKey, sh);
+                const payOut = num(shift.cashPayOut);
                 const expected = expectedRegisterCash(normalized, regKey, sh);
                 const entry = recon[regKey][sh];
                 const counted = num(entry.countedCash);
-                const payOuts = entry.payOuts || [];
-                const payOut = sumPayOuts(payOuts);
                 registerRowsAll.push({
                     kind: "register",
                     regKey,
@@ -1741,11 +1802,13 @@
                     rowLabel: `Register ${regIdx + 1}`,
                     shiftLabel: `Shift ${shIdx + 1}`,
                     namePrefix: `cr_${regKey}_${sh}`,
+                    expectedGross,
                     expected,
                     counted,
-                    payOuts,
+                    payOuts: entry.payOuts || [],
                     payOut,
-                    variance: counted + payOut - expected,
+                    cashPayOutExpense: !!shift.cashPayOutExpense,
+                    variance: counted - expected,
                     verified: entry.verified === true,
                     note: entry.note || "",
                 });
@@ -1862,19 +1925,19 @@
             return ks ? kenoRowHasBooksData(ks) : false;
         });
 
-        const cashExpensesTotal = dayCashExpensesTotal(normalized);
+        const manualCashExpenses = dayManualCashExpensesTotal(normalized);
         const dailyRegisterPayoutsRecon = dayRegisterPayoutsReconTotal(normalized);
         const dailyRegisterPayoutsTrackOnly = dayRegisterPayoutsTrackOnlyTotal(normalized);
-        const registerCashExpected = registerRows.reduce((s, r) => s + r.expected, 0);
+        const registerGrossCash = registerRows.reduce((s, r) => s + num(r.expectedGross), 0);
+        const registerNetExpected = registerRows.reduce((s, r) => s + r.expected, 0);
         const registerExpectedNet =
             registerRows.length > 0
-                ? registerCashExpected -
-                  cashExpensesTotal -
+                ? registerNetExpected -
+                  manualCashExpenses -
                   dailyRegisterPayoutsRecon -
                   dailyRegisterPayoutsTrackOnly
                 : 0;
-        const registerExpenses =
-            registerRows.length > 0 ? cashExpensesTotal : 0;
+        const registerExpenses = registerRows.length > 0 ? manualCashExpenses : 0;
 
         const register = finalizeRegisterReconSection(
             summarizeReconSection(
@@ -1883,8 +1946,8 @@
                 registerExpectedNet,
                 registerExpenses
             ),
-            registerCashExpected,
-            cashExpensesTotal,
+            registerGrossCash,
+            manualCashExpenses,
             dailyRegisterPayoutsRecon,
             dailyRegisterPayoutsTrackOnly
         );
@@ -2098,12 +2161,17 @@
         aggregateMonth,
         compareAggregates,
         dayCashExpensesTotal,
+        dayManualCashExpensesTotal,
+        registerShiftPayoutsTotal,
+        registerShiftPayoutsExpenseTotal,
         dayRegisterPayoutsTotal,
         dayRegisterPayoutsReconTotal,
         dayRegisterPayoutsTrackOnlyTotal,
         defaultCashReconciliation,
         normalizeCashReconciliation,
         expectedRegisterCash,
+        registerShiftGrossCash,
+        normalizeShiftRegister,
         expectedPulltabCash,
         finalizeRegisterReconSection,
         cashReconciliationSummary,

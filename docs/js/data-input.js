@@ -1418,7 +1418,7 @@
         if (tax) state.month.salesTax = M().num(tax.value);
         if (acct) state.month.accountant = M().num(acct.value);
 
-        const registerFields = ["cardSale", "cashSale"];
+        const registerFields = ["cardSale", "cashSale", "cashPayOut"];
         ["register1", "register2"].forEach((regKey) => {
             if (!state.day[regKey]) state.day[regKey] = M().defaultRegisterUnit();
             ["shift1", "shift2"].forEach((sh) => {
@@ -1426,6 +1426,10 @@
                     const el = root.querySelector(`[name="reg_${regKey}_${sh}_${f}"]`);
                     if (el) state.day[regKey][sh][f] = M().num(el.value);
                 });
+                const expenseEl = root.querySelector(`[name="reg_${regKey}_${sh}_cashPayOutExpense"]`);
+                if (expenseEl) {
+                    state.day[regKey][sh].cashPayOutExpense = expenseEl.value === "expense";
+                }
             });
         });
 
@@ -1782,9 +1786,38 @@
         const total = M().registerBlockTotal(unit);
         return `
             <h3 class="books-subtitle">${escapeHtml(title)}</h3>
-            ${renderShiftBlock("Shift 1", `reg_${regKey}_shift1`, unit.shift1, REGISTER_SHIFT_FIELDS)}
-            ${renderShiftBlock("Shift 2", `reg_${regKey}_shift2`, unit.shift2, REGISTER_SHIFT_FIELDS)}
+            ${renderRegisterShiftBlock("Shift 1", `reg_${regKey}_shift1`, unit.shift1)}
+            ${renderRegisterShiftBlock("Shift 2", `reg_${regKey}_shift2`, unit.shift2)}
             <p class="books-total-line">${escapeHtml(title)} total: ${money(total.card + total.cash)} card+cash</p>`;
+    }
+
+    function renderRegisterShiftBlock(title, prefix, data) {
+        const shift = data || M().emptyShiftRegister();
+        const countAsExpense = !!shift.cashPayOutExpense;
+        return `
+            <fieldset class="books-fieldset">
+                <legend>${escapeHtml(title)}</legend>
+                <div class="books-grid-3">
+                    ${REGISTER_SHIFT_FIELDS.map(
+                        (f) => `
+                    <label class="books-label">${escapeHtml(f.label)}
+                        <input ${amountInputAttrs(`${prefix}_${f.name}`, shift[f.name])}>
+                    </label>`
+                    ).join("")}
+                </div>
+                <div class="books-register-payout-row">
+                    <label class="books-label">Cash pay out ($)
+                        <input ${amountInputAttrs(`${prefix}_cashPayOut`, shift.cashPayOut)}>
+                    </label>
+                    <label class="books-label">Count in store expense?
+                        <select class="books-select" name="${prefix}_cashPayOutExpense">
+                            <option value="expense"${countAsExpense ? " selected" : ""}>Yes — count as cash expense</option>
+                            <option value="track_only"${!countAsExpense ? " selected" : ""}>No — track only</option>
+                        </select>
+                    </label>
+                </div>
+                <p class="books-hint books-register-payout-hint">Pay out reduces <strong>expected cash</strong> for this shift on Cash reconciliation. Choose <strong>Yes</strong> to also include it in daily cash expense totals.</p>
+            </fieldset>`;
     }
 
     function renderShiftBlock(title, prefix, data, fields) {
@@ -2300,8 +2333,14 @@
         return rows
             .map((row) => {
                 const prefix = row.namePrefix;
-                const rowVariance = num(row.counted) + num(row.payOut) - num(row.expected);
+                const isRegister = row.kind === "register";
+                const rowVariance = isRegister
+                    ? num(row.counted) - num(row.expected)
+                    : num(row.counted) + num(row.payOut) - num(row.expected);
                 const varCls = varianceColorClass(rowVariance);
+                const payOutCell = isRegister
+                    ? `<span class="books-cash-recon-payout-readonly" title="${row.cashPayOutExpense ? "Counted as store expense" : "Track only"}">${money(row.payOut)}</span>`
+                    : renderPayOutsCell(prefix, row.payOuts);
                 return `
                     <tr>
                         <td>${escapeHtml(row[col1] || row.rowLabel)}</td>
@@ -2311,7 +2350,7 @@
                             <input ${amountInputAttrs(`${prefix}_counted`, row.counted)} aria-label="Received">
                         </td>
                         <td class="books-cash-recon-payout-col">
-                            ${renderPayOutsCell(prefix, row.payOuts)}
+                            ${payOutCell}
                         </td>
                         <td class="home-cc-num ${varCls}">${money(rowVariance)}</td>
                         <td class="books-cash-recon-verified">
@@ -2464,6 +2503,24 @@
             </section>`;
     }
 
+    function dailyRegisterShiftPayoutLines(day) {
+        const d = M().normalizeDayDoc(day);
+        const lines = [];
+        ["register1", "register2"].forEach((regKey, regIdx) => {
+            ["shift1", "shift2"].forEach((sh, shiftIdx) => {
+                const shift = d[regKey]?.[sh];
+                const amount = M().num(shift?.cashPayOut);
+                if (amount === 0) return;
+                lines.push({
+                    label: `Register ${regIdx + 1} · Shift ${shiftIdx + 1}`,
+                    amount,
+                    expense: !!shift?.cashPayOutExpense,
+                });
+            });
+        });
+        return lines;
+    }
+
     function dailyRegisterPayoutLines(day) {
         const d = M().normalizeDayDoc(day);
         const trackOnly = [];
@@ -2553,6 +2610,20 @@
                     ${renderPayoutLinesList(payoutLines.trackOnly)}
                    </div>`);
         }
+        const shiftPayoutLines = dailyRegisterShiftPayoutLines(state.day);
+        if (shiftPayoutLines.length > 0) {
+            registerExtraParts.push(`<div class="books-cash-recon-expenses">
+                    <h4 class="books-subtitle books-subtitle--sm">Shift pay outs (Daily sheet — under each register shift)</h4>
+                    <ul class="books-cash-recon-expense-list">
+                        ${shiftPayoutLines
+                            .map(
+                                (row) =>
+                                    `<li><span>${escapeHtml(row.label)}</span> <strong>${money(row.amount)}</strong> <em class="books-hint">${row.expense ? "· counts as expense" : "· track only"}</em></li>`
+                            )
+                            .join("")}
+                    </ul>
+                   </div>`);
+        }
         const registerExtra = registerExtraParts.join("");
         const closed = isBooksLocked();
         const fieldsetAttr = closed ? " disabled" : "";
@@ -2568,7 +2639,7 @@
                     <p class="books-cash-recon-summary-title">${escapeHtml(matchLabel)}</p>
                 </div>
 
-                <p class="books-hint">Per shift: <strong>Expected</strong> = cash sale from the Daily sheet. <strong>Received + pay out</strong> should equal Expected. <strong>Cash expenses</strong> and <strong>other cash pay out</strong> lower expected cash. In house account, lottery pay out, and pull tab payout are <strong>track only</strong> — listed below but not subtracted.</p>
+                <p class="books-hint">Per shift: <strong>Expected</strong> = cash sale minus pay out from the Daily sheet. <strong>Received</strong> should match Expected. Register pay outs are entered under each shift on the <strong>Daily sheet</strong>. Other cash expenses lower expected deposit at day level.</p>
 
                 <fieldset class="books-day-fields"${fieldsetAttr}>
                 ${
@@ -2580,7 +2651,7 @@
                 ${showField("registers")
                     ? renderReconSection(
                           "Register cash",
-                          "Expected deposit = cash sales − cash expenses − register payouts (Daily sheet). Cash variance = received counted − expected cash (net), not cash sales alone. Per shift: received + pay out = cash sale.",
+                          "Expected deposit = register cash sales − shift pay outs − cash expenses − day-level register payouts. Per shift: expected = cash sale − pay out (Daily sheet); received should match expected.",
                           reg,
                           "cr_day_deposit",
                           "Register received / deposited ($)",

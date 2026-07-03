@@ -345,6 +345,8 @@
     window.OplixReportsBooksSections = {
         renderBooksSupplement,
         renderCashReconCategories,
+        renderRegisterPayouts,
+        renderBooksPayroll,
         renderPayablesReceivablesReport,
         renderAllLocationsCashReconTable,
         renderBooksPayrollPayoutsReport,
