@@ -1643,11 +1643,10 @@
     }
 
     /**
-     * Register recon: cash sales are gross expected; daily cash expenses and other cash pay out
-     * reduce net expected. In house account, lottery pay out, and pull tab payout are track-only.
-     * Reconciliation pay outs per shift explain cash removed (received + pay out = cash sale).
-     * Net deposit = gross cash sales − daily expenses − all register payouts (track-only + other).
-     * Track-only payouts are labeled separately but still reduce expected deposit.
+     * Register recon: expected deposit is register cash only.
+     * Per-shift pay outs are already in each row's expected (cash sale − pay out).
+     * Day-level gas register payouts (in house, lottery, pull tab, other) also reduce deposit.
+     * Office cash expense lines are P&L only — they do not reduce register expected deposit.
      */
     function finalizeRegisterReconSection(
         section,
@@ -1657,9 +1656,12 @@
         dailyRegisterPayoutsTrackOnly
     ) {
         const allRegisterPayouts = dailyRegisterPayoutsRecon + dailyRegisterPayoutsTrackOnly;
-        const expectedNet = grossCash - cashExpensesTotal - allRegisterPayouts;
+        // cashExpensesTotal is office cash (separate pot) — not subtracted from register deposit.
+        const expectedNet = grossCash - allRegisterPayouts;
         section.expectedGross = grossCash;
         section.expectedNetCash = expectedNet;
+        section.cashExpensesTotal = 0;
+        section.officeCashExpensesTotal = cashExpensesTotal || 0;
         section.dailyRegisterPayouts = dailyRegisterPayoutsRecon;
         section.dailyRegisterPayoutsTrackOnly = dailyRegisterPayoutsTrackOnly;
         section.dailyRegisterPayoutsAll = allRegisterPayouts;
@@ -1925,29 +1927,26 @@
             return ks ? kenoRowHasBooksData(ks) : false;
         });
 
-        const manualCashExpenses = dayManualCashExpensesTotal(normalized);
+        const officeCashExpenses = dayManualCashExpensesTotal(normalized);
         const dailyRegisterPayoutsRecon = dayRegisterPayoutsReconTotal(normalized);
         const dailyRegisterPayoutsTrackOnly = dayRegisterPayoutsTrackOnlyTotal(normalized);
         const registerGrossCash = registerRows.reduce((s, r) => s + num(r.expectedGross), 0);
         const registerNetExpected = registerRows.reduce((s, r) => s + r.expected, 0);
+        // Office cash expense lines are a separate pot — P&L only, not register deposit.
         const registerExpectedNet =
             registerRows.length > 0
-                ? registerNetExpected -
-                  manualCashExpenses -
-                  dailyRegisterPayoutsRecon -
-                  dailyRegisterPayoutsTrackOnly
+                ? registerNetExpected - dailyRegisterPayoutsRecon - dailyRegisterPayoutsTrackOnly
                 : 0;
-        const registerExpenses = registerRows.length > 0 ? manualCashExpenses : 0;
 
         const register = finalizeRegisterReconSection(
             summarizeReconSection(
                 registerRows,
                 registerRows.length > 0 ? recon.dayDeposit : null,
                 registerExpectedNet,
-                registerExpenses
+                0
             ),
             registerGrossCash,
-            manualCashExpenses,
+            officeCashExpenses,
             dailyRegisterPayoutsRecon,
             dailyRegisterPayoutsTrackOnly
         );

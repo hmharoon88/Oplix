@@ -2287,7 +2287,8 @@
     function renderDailyExpensesBlock() {
         const parts = [];
         if (showField("cashExpenses")) {
-            parts.push(`<h3 class="books-subtitle">Cash expense</h3>
+            parts.push(`<h3 class="books-subtitle">Cash expense (office)</h3>
+                    <p class="books-hint">Paid from <strong>office cash</strong> (separate from the register drawer). Counts as store expense only — does <strong>not</strong> change register expected cash or day deposit. Paid from the drawer? Use <strong>Cash pay out</strong> on that shift instead.</p>
                     ${renderLineList("cashExpenses", [
                         { name: "description", label: "Description" },
                         { name: "amount", label: "Amount", type: "number" },
@@ -2517,8 +2518,8 @@
                                 : ""
                         }
                         ${
-                            section.cashExpensesTotal > 0
-                                ? `<span><em>Cash expenses</em> <strong>− ${money(section.cashExpensesTotal)}</strong></span>`
+                            section.officeCashExpensesTotal > 0
+                                ? `<span><em>Office cash expenses</em> <strong>${money(section.officeCashExpensesTotal)}</strong> <span class="books-cash-recon-var-hint">(P&amp;L only)</span></span>`
                                 : ""
                         }
                         ${
@@ -2598,6 +2599,78 @@
             </section>`;
     }
 
+    /** Register section on Cash reconciliation tab — day deposit only; per-shift entry is on Daily sheet. */
+    function renderRegisterDepositSection(section, extraHtml) {
+        if (!section.applicable) return "";
+        const depositVal = section.deposit == null ? "" : amountValue(section.deposit);
+        const depositVarCls =
+            section.deposit == null ? "" : varianceColorClass(section.depositVariance);
+        const summaryCls = reconSummaryClass(section);
+        const shiftRows = (section.rows || [])
+            .map(
+                (row) => `
+                <tr>
+                    <td>${escapeHtml(row.rowLabel)}</td>
+                    <td>${escapeHtml(row.shiftLabel)}</td>
+                    <td class="home-cc-num">${money(row.expected)}</td>
+                    <td class="home-cc-num">${money(row.counted)}</td>
+                    <td class="home-cc-num">${money(row.payOut)}</td>
+                    <td class="home-cc-num ${varianceColorClass(row.variance)}">${money(row.variance)}</td>
+                    <td>${row.verified ? "Verified" : "—"}</td>
+                </tr>`
+            )
+            .join("");
+
+        return `
+            <section class="books-cash-recon-block">
+                <h3 class="books-subtitle">Register day deposit</h3>
+                <p class="books-hint">Count and verify each shift on the <strong>Daily sheet</strong>. Enter the bank deposit for the day here.</p>
+                <div class="${summaryCls}">
+                    <div class="books-cash-recon-totals">
+                        <span><em>Received (shifts)</em> <strong>${money(section.receivedTotal)}</strong></span>
+                        <span><em>Cash sales</em> <strong>${money(section.expectedGross)}</strong></span>
+                        <span><em>Expected deposit</em> <strong>${money(section.expectedDeposit)}</strong></span>
+                        <span><em>Verified</em> <strong>${section.verifiedCount} / ${section.shiftCount}</strong></span>
+                        ${
+                            section.deposit != null
+                                ? `<span><em>Deposited</em> <strong>${money(section.deposit)}</strong></span>
+                                   <span><em>Cash variance</em> <strong class="${depositVarCls}">${money(section.depositVariance)}</strong></span>`
+                                : ""
+                        }
+                    </div>
+                </div>
+                ${
+                    shiftRows
+                        ? `<div class="home-card home-cc-table-wrap">
+                    <table class="home-cc-table books-cash-recon-table books-cash-recon-table--readonly">
+                        <thead>
+                            <tr>
+                                <th>Register</th>
+                                <th>Shift</th>
+                                <th class="home-cc-num">Expected</th>
+                                <th class="home-cc-num">Received</th>
+                                <th class="home-cc-num">Pay out</th>
+                                <th class="home-cc-num">Variance</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>${shiftRows}</tbody>
+                    </table>
+                </div>`
+                        : `<p class="books-hint">Enter register sales and received cash on the <strong>Daily sheet</strong> first.</p>`
+                }
+                ${extraHtml || ""}
+                <label class="books-label">Register received / deposited ($)
+                    <input ${amountInputAttrs("cr_day_deposit", depositVal)}>
+                </label>
+                ${
+                    section.deposit != null
+                        ? `<p class="books-total-line books-cash-recon-deposit-check ${depositVarCls}">Cash variance: ${money(section.depositVariance)}${section.depositMatch ? " — matches expected" : ""}</p>`
+                        : ""
+                }
+            </section>`;
+    }
+
     function dailyRegisterShiftPayoutLines(day) {
         const d = M().normalizeDayDoc(day);
         const lines = [];
@@ -2668,7 +2741,7 @@
                 ? "No cash to reconcile — enter shift or machine data on the Daily sheet first"
                 : summary.matched
                   ? "All cash reconciled for this day"
-                  : `Complete ${sections.length} section${sections.length === 1 ? "" : "s"} below`;
+                  : "Finish shift counts on Daily sheet, then enter day deposit below";
 
         const cashExpenseLines = (state.day.cashExpenses || []).filter(
             (row) => M().num(row.amount) !== 0 || (row.description && String(row.description).trim())
@@ -2686,9 +2759,9 @@
                    </ul>`;
         const payoutLines = dailyRegisterPayoutLines(state.day);
         const registerExtraParts = [];
-        if (reg.cashExpensesTotal > 0) {
+        if ((reg.officeCashExpensesTotal || reg.cashExpensesTotal) > 0) {
             registerExtraParts.push(`<div class="books-cash-recon-expenses">
-                    <h4 class="books-subtitle books-subtitle--sm">Cash expenses (Daily sheet — lowers expected cash)</h4>
+                    <h4 class="books-subtitle books-subtitle--sm">Office cash expenses (P&amp;L only — not in register deposit)</h4>
                     ${cashExpenseList}
                    </div>`);
         }
@@ -2734,7 +2807,7 @@
                     <p class="books-cash-recon-summary-title">${escapeHtml(matchLabel)}</p>
                 </div>
 
-                <p class="books-hint">Register cash can be reconciled under each shift on the <strong>Daily sheet</strong> (expected, received, verified). This tab shows the full day, lottery/pulltab/stations, and deposit totals. Per shift: <strong>Expected</strong> = cash sale − pay out; <strong>Received</strong> should match expected.</p>
+                <p class="books-hint">Reconcile each <strong>register shift</strong> on the Daily sheet. Use this tab for the <strong>day deposit</strong> and for lottery, pulltab, and station cash.</p>
 
                 <fieldset class="books-day-fields"${fieldsetAttr}>
                 ${
@@ -2743,16 +2816,7 @@
                         : ""
                 }
 
-                ${showField("registers")
-                    ? renderReconSection(
-                          "Register cash",
-                          "Enter received cash under each register shift on the Daily sheet, or here. Expected deposit = register cash sales − shift pay outs − cash expenses − day-level register payouts.",
-                          reg,
-                          "cr_day_deposit",
-                          "Register received / deposited ($)",
-                          registerExtra
-                      )
-                    : ""}
+                ${showField("registers") ? renderRegisterDepositSection(reg, registerExtra) : ""}
 
                 ${showField("lottery")
                     ? renderReconSection(
