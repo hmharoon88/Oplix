@@ -462,7 +462,7 @@
         }
 
         const salesHint = hasGas
-            ? "Merch, credit card, and fuel are separate columns. Net uses merch + pulltab minus daily expenses — credit card and fuel are not included in net."
+            ? "Merch, credit card, and fuel are separate columns. Net uses merch minus daily expenses — credit card, fuel, pulltab, lottery, wind, and keno are not included in net."
             : "Sales = register card + cash for each day.";
 
         const tableRows = rows
@@ -572,7 +572,7 @@
                 </div>
                 <p class="books-hint an-daily-footnote">Daily expenses are from the Daily sheet only. Monthly utilities, payroll, sales tax, and accountant fees are included in the month totals above, not in this table.${
                     hasGas
-                        ? " For gas stations, <strong>Net</strong> uses merch and pulltab only — credit card and fuel are not counted toward net."
+                        ? " For gas stations, <strong>Net</strong> uses merch only — credit card, fuel, pulltab, lottery, wind, and keno are track only."
                         : ""
                 }</p>
             </section>`;

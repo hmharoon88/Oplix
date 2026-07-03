@@ -2239,6 +2239,7 @@
                     <h4 class="books-register-group-title">Lottery</h4>
                     <span class="books-register-group-total">${money(total.cash)}</span>
                 </div>
+                <p class="books-hint">Track only — not in sales or net.</p>
                 <div class="books-station-cards books-station-cards--shifts">
                     ${shiftCard("Shift 1", "lot_shift1", lot.shift1 || M().emptyGamingShift())}
                     ${shiftCard("Shift 2", "lot_shift2", lot.shift2 || M().emptyGamingShift())}
@@ -2256,6 +2257,7 @@
                     <h4 class="books-register-group-title">Pulltab</h4>
                     <span class="books-register-group-total">${money(total.cash)}</span>
                 </div>
+                <p class="books-hint">Track only — not in sales or net.</p>
                 ${renderStationCards(
                     "pulltabs",
                     [
@@ -2281,6 +2283,7 @@
                     <h4 class="books-register-group-title">Wind station</h4>
                     <span class="books-register-group-total">${money(total)}</span>
                 </div>
+                <p class="books-hint">Track only — not in sales or net.</p>
                 ${renderStationCards(
                     "windStations",
                     [
@@ -2303,6 +2306,7 @@
                     <h4 class="books-register-group-title">Keno station</h4>
                     <span class="books-register-group-total">${money(total)}</span>
                 </div>
+                <p class="books-hint">Track only — not in sales or net.</p>
                 ${renderStationCards(
                     "kenoStations",
                     [
@@ -2594,7 +2598,7 @@
             `<label class="books-label">Amount ($)
                 <input ${amountInputAttrs("wayne_pass", state.day.waynePass)}>
             </label>`,
-            "Sales — not a payout"
+            "Track only"
         );
     }
 
@@ -2799,7 +2803,7 @@
             parts.push(
                 options.gas
                     ? `<p class="books-hint">Register card/cash is for shift reconciliation only — not added to merch, credit card, or fuel.</p>`
-                    : `<p class="books-hint"><strong>Total sales</strong> in Books summary uses register card + cash (both registers, both shifts). Lottery and pulltab are tracked separately.</p>`
+                    : `<p class="books-hint"><strong>Total sales</strong> uses register card + cash. Pulltab, lottery, wind, and keno are track only.</p>`
             );
             parts.push(renderAllRegisters());
         }

@@ -604,6 +604,14 @@
         const add = (label, value, fmt, subRow) =>
             rows.push({ label, value, fmt, subRow: !!subRow });
 
+        const trackOnlyFields = new Set([
+            "pulltabs",
+            "lottery",
+            "windStations",
+            "kenoStations",
+            "waynePass",
+            "registerPayouts",
+        ]);
         if (agg.hasGasStation) {
             add("Total sales (merch)", agg.sales);
             (M.gasSalesDetailBreakdownFromAggregate
@@ -611,15 +619,25 @@
                 : agg.salesBreakdown || M.salesBreakdownFromAggregate(agg)
             ).forEach((r) => {
                 if (r.label === "Merch sale") return;
-                if (num(r.amount) !== 0) add(r.label, r.amount, r.format);
+                if (num(r.amount) === 0) return;
+                const label = trackOnlyFields.has(r.fieldId)
+                    ? `${r.label} (track only)`
+                    : r.label;
+                add(label, r.amount, r.format);
             });
         } else {
             add("Total sales", agg.sales);
             (agg.salesBreakdown || M.salesBreakdownFromAggregate(agg)).forEach((r) => {
-                if (num(r.amount) !== 0) add(r.label, r.amount);
+                if (num(r.amount) === 0) return;
+                const label = trackOnlyFields.has(r.fieldId)
+                    ? `${r.label} (track only)`
+                    : r.label;
+                add(label, r.amount);
             });
-            if (num(agg.lotteryCash) !== 0) add("Lottery (not in total sales)", agg.lotteryCash);
-            if (num(agg.pulltabCash) !== 0) add("Pulltab (not in total sales)", agg.pulltabCash);
+            if (num(agg.lotteryCash) !== 0) add("Lottery (track only)", agg.lotteryCash);
+            if (num(agg.pulltabCash) !== 0) add("Pulltab (track only)", agg.pulltabCash);
+            if (num(agg.windStationCash) !== 0) add("Wind station (track only)", agg.windStationCash);
+            if (num(agg.kenoStationCash) !== 0) add("Keno station (track only)", agg.kenoStationCash);
         }
 
         add("Receivables", agg.receivablesTotal);
@@ -783,12 +801,17 @@
             lines.push({ label: "Register — cash", get: (a) => a.registerCash, group: "sales" });
             lines.push({ label: "Credit card", get: (a) => a.creditCard, group: "sales" });
             lines.push({ label: "Fuel ($)", get: (a) => a.fuelDollars, group: "sales" });
-            lines.push({ label: "Pulltab", get: (a) => a.pulltabCash, group: "sales" });
+            lines.push({ label: "Pulltab (track only)", get: (a) => a.pulltabCash, group: "track" });
+            lines.push({ label: "Lottery (track only)", get: (a) => a.lotteryCash, group: "track" });
+            lines.push({ label: "Wind station (track only)", get: (a) => a.windStationCash, group: "track" });
+            lines.push({ label: "Keno station (track only)", get: (a) => a.kenoStationCash, group: "track" });
         } else {
             lines.push({ label: "Register — card", get: (a) => a.registerCard, group: "sales" });
             lines.push({ label: "Register — cash", get: (a) => a.registerCash, group: "sales" });
-            lines.push({ label: "Lottery", get: (a) => a.lotteryCash, group: "sales" });
-            lines.push({ label: "Pulltab", get: (a) => a.pulltabCash, group: "sales" });
+            lines.push({ label: "Lottery (track only)", get: (a) => a.lotteryCash, group: "track" });
+            lines.push({ label: "Pulltab (track only)", get: (a) => a.pulltabCash, group: "track" });
+            lines.push({ label: "Wind station (track only)", get: (a) => a.windStationCash, group: "track" });
+            lines.push({ label: "Keno station (track only)", get: (a) => a.kenoStationCash, group: "track" });
             lines.push({ label: "Total sales", get: (a) => a.sales, group: "sales" });
         }
         lines.push({ label: "Total revenue", get: (a) => a.totalRevenue ?? a.sales, group: "sales" });

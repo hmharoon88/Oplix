@@ -1197,14 +1197,14 @@
         };
     }
 
-    /** Gas station total revenue (all streams) — for display only. */
-    function gasTotalRevenue(merchSale, creditCard, fuelDollars, pulltabCash) {
-        return num(merchSale) + num(creditCard) + num(fuelDollars) + num(pulltabCash);
+    /** Gas station total revenue — merch, pump credit, fuel. Pulltab/lottery/wind/keno are track only. */
+    function gasTotalRevenue(merchSale, creditCard, fuelDollars) {
+        return num(merchSale) + num(creditCard) + num(fuelDollars);
     }
 
-    /** Gas station revenue counted toward net — merch + pulltab only; pump credit and fuel excluded. */
-    function gasRevenueForNet(merchSale, pulltabCash) {
-        return num(merchSale) + num(pulltabCash);
+    /** Gas station revenue counted toward net — merch only; pump credit, fuel, and gaming are excluded. */
+    function gasRevenueForNet(merchSale) {
+        return num(merchSale);
     }
 
     /** One calendar day's sales and expenses from Daily books. */
@@ -1232,6 +1232,9 @@
         const reg = registerDayTotal(day);
         const fuel = fuelDayTotal(day);
         const pull = pulltabDayTotal(day);
+        const lot = lotteryDayTotal(day);
+        const wind = windStationDayTotal(day);
+        const keno = kenoStationDayTotal(day);
         const dayMerch = num(day.merchSale);
         const dayCredit = num(day.creditCard);
         const dayCash = sumLines(day.cashExpenses, "amount") + registerShiftPayoutsExpenseTotal(day);
@@ -1244,8 +1247,8 @@
         let netRevenue;
         if (hasGasStation) {
             sales = dayMerch;
-            totalRevenue = gasTotalRevenue(dayMerch, dayCredit, fuel.dollars, pull.cash);
-            netRevenue = gasRevenueForNet(dayMerch, pull.cash);
+            totalRevenue = gasTotalRevenue(dayMerch, dayCredit, fuel.dollars);
+            netRevenue = gasRevenueForNet(dayMerch);
         } else {
             sales = reg.card + reg.cash;
             totalRevenue = sales;
@@ -1257,6 +1260,10 @@
             expenses !== 0 ||
             fuel.gallons !== 0 ||
             reg.overShort !== 0 ||
+            pull.cash !== 0 ||
+            lot.cash !== 0 ||
+            wind !== 0 ||
+            keno !== 0 ||
             num(day.inHouseAccount) !== 0 ||
             num(day.waynePass) !== 0 ||
             num(day.lotteryPayOut) !== 0 ||
@@ -1452,10 +1459,10 @@
 
         const sales = hasGasStation ? merchSale : registerCard + registerCash;
         const totalRevenue = hasGasStation
-            ? gasTotalRevenue(merchSale, creditCard, fuelDollars, pulltabCash)
+            ? gasTotalRevenue(merchSale, creditCard, fuelDollars)
             : sales;
         const netRevenue = hasGasStation
-            ? gasRevenueForNet(merchSale, pulltabCash)
+            ? gasRevenueForNet(merchSale)
             : sales;
         const expenses =
             cashExpense +

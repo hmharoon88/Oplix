@@ -171,7 +171,7 @@
         if (agg && agg.hasGasStation) {
             return "Merch sale, credit card, and fuel ($) are tracked separately — not combined into each other.";
         }
-        return "Total sales from register card and cash (both registers, both shifts). Lottery and pulltab are tracked separately.";
+        return "Total sales from register card and cash (both registers, both shifts). Pulltab, lottery, wind, and keno are track only.";
     }
 
     /** Grouped vertical bars: each row is a location or month with Card + Cash bars. */
