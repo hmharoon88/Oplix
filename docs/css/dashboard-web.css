@@ -1225,24 +1225,80 @@
     min-height: 0;
 }
 
+.books-register-unit {
+    margin: 0 0 20px;
+    padding: 14px 16px 16px;
+    border: 1px solid var(--dash-border, #e2e8f0);
+    border-radius: 12px;
+    background: #fff;
+}
+
+.books-register-unit-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 16px;
+    margin-bottom: 12px;
+}
+
+.books-register-unit-title {
+    margin: 0;
+}
+
+.books-register-unit-total {
+    margin: 0;
+    font-size: 0.875rem;
+}
+
+.books-register-shifts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: stretch;
+}
+
+.books-register-shift {
+    margin: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 12px;
+    border-radius: 10px;
+    background: var(--dash-bg, #f8fafc);
+}
+
+.books-register-shift legend {
+    padding: 0 4px;
+    font-weight: 700;
+}
+
+.books-register-shift-sales {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
+}
+
 .books-register-payout-row {
     display: grid;
-    grid-template-columns: minmax(120px, 1fr) minmax(180px, 1.2fr);
-    gap: 10px 12px;
+    grid-template-columns: 1fr;
+    gap: 8px;
     margin-top: 10px;
     padding-top: 10px;
-    border-top: 1px dashed var(--border, #e2e8f0);
+    border-top: 1px dashed var(--dash-border, #e2e8f0);
 }
 
 .books-register-payout-hint {
     margin: 6px 0 0;
-    font-size: 0.78rem;
+    font-size: 0.75rem;
+    line-height: 1.35;
 }
 
 .books-register-recon {
-    margin-top: 12px;
-    padding: 12px;
-    border-radius: 10px;
+    margin-top: auto;
+    padding: 10px;
+    border-radius: 8px;
     border: 1px solid #dbeafe;
     background: #f8fbff;
 }
@@ -1276,16 +1332,16 @@
 
 .books-register-recon-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 10px 12px;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
     align-items: end;
 }
 
 .books-register-recon-stat {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    min-height: 58px;
+    gap: 2px;
+    min-height: 0;
     justify-content: flex-end;
 }
 
@@ -1325,6 +1381,12 @@
 .books-register-recon-hint {
     margin: 8px 0 0;
     font-size: 0.78rem;
+}
+
+@media (max-width: 820px) {
+    .books-register-shifts {
+        grid-template-columns: 1fr;
+    }
 }
 
 .books-cash-recon-payout-readonly {

@@ -1788,10 +1788,16 @@
     function renderRegisterUnit(title, regKey, unit) {
         const total = M().registerBlockTotal(unit);
         return `
-            <h3 class="books-subtitle">${escapeHtml(title)}</h3>
-            ${renderRegisterShiftBlock("Shift 1", `reg_${regKey}_shift1`, unit.shift1, regKey, "shift1")}
-            ${renderRegisterShiftBlock("Shift 2", `reg_${regKey}_shift2`, unit.shift2, regKey, "shift2")}
-            <p class="books-total-line">${escapeHtml(title)} total: ${money(total.card + total.cash)} card+cash</p>`;
+            <section class="books-register-unit">
+                <div class="books-register-unit-head">
+                    <h3 class="books-subtitle books-register-unit-title">${escapeHtml(title)}</h3>
+                    <p class="books-total-line books-register-unit-total">${escapeHtml(title)} total: ${money(total.card + total.cash)} card+cash</p>
+                </div>
+                <div class="books-register-shifts">
+                    ${renderRegisterShiftBlock("Shift 1", `reg_${regKey}_shift1`, unit.shift1, regKey, "shift1")}
+                    ${renderRegisterShiftBlock("Shift 2", `reg_${regKey}_shift2`, unit.shift2, regKey, "shift2")}
+                </div>
+            </section>`;
     }
 
     function registerShiftReconEntry(regKey, shiftKey) {
@@ -1826,7 +1832,7 @@
         return `
             <fieldset class="books-fieldset books-register-shift">
                 <legend>${escapeHtml(title)}</legend>
-                <div class="books-grid-3">
+                <div class="books-register-shift-sales">
                     ${REGISTER_SHIFT_FIELDS.map(
                         (f) => `
                     <label class="books-label">${escapeHtml(f.label)}
@@ -1840,12 +1846,12 @@
                     </label>
                     <label class="books-label">Count in store expense?
                         <select class="books-select" name="${prefix}_cashPayOutExpense">
-                            <option value="expense"${countAsExpense ? " selected" : ""}>Yes — count as cash expense</option>
+                            <option value="expense"${countAsExpense ? " selected" : ""}>Yes — expense</option>
                             <option value="track_only"${!countAsExpense ? " selected" : ""}>No — track only</option>
                         </select>
                     </label>
                 </div>
-                <p class="books-hint books-register-payout-hint">Pay out reduces <strong>expected cash</strong> for this shift. Choose <strong>Yes</strong> to also include it in daily cash expense totals.</p>
+                <p class="books-hint books-register-payout-hint">Pay out lowers expected cash. <strong>Yes</strong> also counts as store expense.</p>
                 ${
                     showRecon
                         ? `<div class="books-register-recon" data-reg-recon="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}">
@@ -1860,13 +1866,13 @@
                             <span>Expected</span>
                             <strong data-reg-recon-expected>${money(expected)}</strong>
                         </div>
-                        <label class="books-label books-register-recon-received">Received (counted)
-                            <input ${amountInputAttrs(`${crPrefix}_counted`, recon.countedCash)} data-reg-recon-input="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}" aria-label="Received cash">
-                        </label>
                         <div class="books-register-recon-stat">
                             <span>Variance</span>
                             <strong class="${varCls}" data-reg-recon-variance>${money(variance)}</strong>
                         </div>
+                        <label class="books-label books-register-recon-received">Received
+                            <input ${amountInputAttrs(`${crPrefix}_counted`, recon.countedCash)} data-reg-recon-input="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}" aria-label="Received cash">
+                        </label>
                         <label class="books-check-label books-register-recon-verified">
                             <input type="checkbox" name="${crPrefix}_verified"${recon.verified ? " checked" : ""}>
                             Verified
@@ -1875,7 +1881,6 @@
                     <label class="books-label books-register-recon-note">Note
                         <input type="text" class="books-input" name="${crPrefix}_note" value="${escapeHtml(recon.note || "")}" placeholder="Optional">
                     </label>
-                    <p class="books-hint books-register-recon-hint">Expected = cash sale − pay out. Received should match expected.</p>
                 </div>`
                         : ""
                 }
