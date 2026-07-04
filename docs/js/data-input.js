@@ -126,6 +126,12 @@
         return window.confirm("You have unsaved changes on this day. Discard them?");
     }
 
+    function captureFormToState() {
+        if (isBooksLocked()) return;
+        normalizeAllAmountFields();
+        syncFromForm();
+    }
+
     function getStationLayout() {
         const loc = currentLocation();
         return M().normalizeStationLayout(loc?.booksStationLayout);
@@ -181,6 +187,7 @@
     }
 
     async function removeRegisterShift(regKey, shiftKey) {
+        captureFormToState();
         const registers = getRegisterLayout().map((reg) => ({
             ...reg,
             shifts: [...reg.shifts],
@@ -190,13 +197,14 @@
         reg.shifts = reg.shifts.filter((s) => s !== shiftKey);
         const next = registers.filter((r) => r.shifts.length > 0);
         if (!(await setRegisterLayout(next))) return;
-        render();
+        render({ skipSync: true });
     }
 
     async function removeRegister(regKey) {
+        captureFormToState();
         const next = getRegisterLayout().filter((r) => r.key !== regKey);
         if (!(await setRegisterLayout(next))) return;
-        render();
+        render({ skipSync: true });
     }
 
     async function saveRegisterLayoutFromCustomize(root) {
@@ -1075,7 +1083,15 @@
                 return;
             }
             if (isMonthSelect(e.target.id)) {
-                state.monthId = e.target.value;
+                const next = e.target.value;
+                if (next === state.monthId) return;
+                if (!confirmDiscardDirty()) {
+                    e.target.value = state.monthId;
+                    return;
+                }
+                captureFormToState();
+                state.monthId = next;
+                await loadCurrent();
                 return;
             }
             if (e.target.id === "di-day") {
@@ -1102,14 +1118,14 @@
             const tab = e.target.closest("[data-di-tab]");
             if (tab) {
                 if (!confirmDiscardDirty()) return;
-                syncFromForm();
+                captureFormToState();
                 state.tab = tab.dataset.diTab;
-                render();
+                render({ skipSync: true });
                 return;
             }
             if (isReloadButton(e.target.id)) {
                 if (!confirmDiscardDirty()) return;
-                loadCurrent();
+                loadCurrent({ bypassCache: true, force: true });
                 return;
             }
             if (e.target.id === "di-close-day") {
@@ -1159,13 +1175,15 @@
                 return;
             }
             if (e.target.closest("[data-layout-toggle]")) {
+                captureFormToState();
                 state.showLayoutCustomize = !state.showLayoutCustomize;
-                render();
+                render({ skipSync: true });
                 return;
             }
             if (e.target.closest("[data-layout-cancel]")) {
+                captureFormToState();
                 state.showLayoutCustomize = false;
-                render();
+                render({ skipSync: true });
                 return;
             }
             if (e.target.closest("[data-layout-save]")) {
@@ -1186,29 +1204,25 @@
             const add = e.target.closest("[data-di-add]");
             if (add) {
                 if (isViewingClosedDay() || isViewingClosedMonth()) return;
+                captureFormToState();
                 const listKey = add.dataset.diAdd;
-                if (["pulltabs", "windStations", "kenoStations"].includes(listKey)) {
-                    syncFromForm();
-                }
                 addLine(listKey);
                 if (["pulltabs", "windStations", "kenoStations"].includes(listKey)) {
                     persistStationLayout();
                 }
-                render();
+                render({ skipSync: true });
                 return;
             }
             const rm = e.target.closest("[data-di-rm]");
             if (rm) {
                 if (isViewingClosedDay() || isViewingClosedMonth()) return;
+                captureFormToState();
                 const listKey = rm.dataset.diList;
-                if (["pulltabs", "windStations", "kenoStations"].includes(listKey)) {
-                    syncFromForm();
-                }
                 removeLine(listKey, rm.dataset.diRm);
                 if (["pulltabs", "windStations", "kenoStations"].includes(listKey)) {
                     persistStationLayout();
                 }
-                render();
+                render({ skipSync: true });
                 return;
             }
             if (e.target.closest("[data-di-util-add]")) {
@@ -1528,9 +1542,9 @@
             });
         });
 
-        syncLinesFromDom("pulltabs", ["ticketNumber", "cash", "winner", "overShort"]);
-        syncLinesFromDom("windStations", ["station", "cash"]);
-        syncLinesFromDom("kenoStations", ["station", "cash"]);
+        syncLinesFromDom(root, "pulltabs", ["ticketNumber", "cash", "winner", "overShort"]);
+        syncLinesFromDom(root, "windStations", ["station", "cash"]);
+        syncLinesFromDom(root, "kenoStations", ["station", "cash"]);
         ["shift1", "shift2"].forEach((sh) => {
             const cash = root.querySelector(`[name="lot_shift${sh === "shift1" ? "1" : "2"}_cash"]`);
             const os = root.querySelector(`[name="lot_shift${sh === "shift1" ? "1" : "2"}_overShort"]`);
@@ -1576,10 +1590,10 @@
             state.day.otherCashPayOut = 0;
         }
 
-        syncLinesFromDom("cashExpenses", ["description", "amount", "overShort"]);
-        syncChecksAchFromDom();
-        syncLinesFromDom("otherExpenses", ["description", "amount"]);
-        syncLinesFromDom("receivables", ["description", "amount"], true);
+        syncLinesFromDom(root, "cashExpenses", ["description", "amount", "overShort"]);
+        syncChecksAchFromDom(root);
+        syncLinesFromDom(root, "otherExpenses", ["description", "amount"]);
+        syncLinesFromDom(root, "receivables", ["description", "amount"], true);
         syncCustomAmountsFromDom(root, state.day, "daily");
         syncCustomAmountsFromDom(root, state.month, "month");
 
@@ -1670,8 +1684,8 @@
         state.month.monthAdjustments = updated;
     }
 
-    function syncLinesFromDom(listKey, fields, isMonth) {
-        const root = $("data-input-root");
+    function syncLinesFromDom(root, listKey, fields, isMonth) {
+        root = root || $("data-input-root");
         if (!root?.querySelector(`[data-di-list="${listKey}"]`)) return;
         const target = isMonth ? state.month[listKey] : state.day[listKey];
         const rows = root.querySelectorAll(`[data-di-list="${listKey}"] [data-di-row]`);
@@ -1755,8 +1769,8 @@
         pruneEmptyExpenseLines("otherExpenses");
     }
 
-    function syncChecksAchFromDom() {
-        const root = $("data-input-root");
+    function syncChecksAchFromDom(root) {
+        root = root || $("data-input-root");
         if (!root?.querySelector('[data-di-list="checksAch"]')) return;
         const rows = root.querySelectorAll('[data-di-list="checksAch"] [data-di-row]');
         const updated = [];
@@ -1793,14 +1807,17 @@
         render();
     }
 
-    async function loadCurrent() {
+    async function loadCurrent(options = {}) {
         if (!state.locationId) return;
+        if (!options.force && state.dirty) return;
         setBooksStatus("Loading…");
         try {
+            const loadOpts = options.bypassCache ? { bypassCache: true } : {};
             const { month, daysById } = await Store().loadMonth(
                 userId,
                 state.locationId,
-                state.monthId
+                state.monthId,
+                loadOpts
             );
             await Promise.all([loadUtilityProviders(), loadPayables(), loadReceivables()]);
             state.month = M().normalizeMonthDoc(month);
@@ -1817,7 +1834,7 @@
             refreshExpenseDescriptions();
             state.dirty = false;
             setBooksStatus("");
-            render();
+            render({ skipSync: true });
         } catch (err) {
             console.error("[Oplix] Daily books load failed:", err);
             setBooksStatus("");
@@ -1833,10 +1850,16 @@
             setBooksStatus("Month is closed — reopen to save.");
             return;
         }
-        normalizeAllAmountFields();
-        syncFromForm();
+        captureFormToState();
         if (!options.silent) setBooksStatus("Saving…");
-        await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
+        try {
+            await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
+        } catch (err) {
+            console.error("[Oplix] Month save failed:", err);
+            setBooksStatus("Save failed — try again.");
+            window.alert(err.message || "Could not save month. Check your connection and try again.");
+            return;
+        }
         window.OplixAnalytics?.invalidateCache?.();
         state.dirty = false;
         if (!options.silent) {
@@ -1845,6 +1868,10 @@
                 if (getBooksStatus() === "Month saved.") setBooksStatus("");
             }, 2000);
         }
+    }
+
+    function refreshExpenseRowsAfterSave() {
+        ["checksAch", "cashExpenses", "otherExpenses"].forEach((key) => ensureExpenseLineMinRows(key));
     }
 
     async function saveDay(options = {}) {
@@ -1856,43 +1883,39 @@
             setBooksStatus("Day is closed — reopen to save.");
             return;
         }
-        normalizeAllAmountFields();
-        syncFromForm();
+        captureFormToState();
         pruneEmptyDailyExpenseLines();
         pruneAllReconPayOuts();
-        await syncPayablesFromChecks();
+        try {
+            await syncPayablesFromChecks();
+        } catch (err) {
+            console.warn("[Oplix] Payables sync during save:", err);
+        }
         if (!options.silent) setBooksStatus("Saving…");
-        await Promise.all([
-            Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day),
-            Store().saveMonth(userId, state.locationId, state.monthId, state.month),
-            persistStationLayout(),
-        ]);
+        try {
+            await Promise.all([
+                Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day),
+                Store().saveMonth(userId, state.locationId, state.monthId, state.month),
+                persistStationLayout(),
+            ]);
+        } catch (err) {
+            console.error("[Oplix] Day save failed:", err);
+            setBooksStatus("Save failed — try again.");
+            window.alert(err.message || "Could not save day. Check your connection and try again.");
+            state.dirty = true;
+            return;
+        }
         window.OplixAnalytics?.invalidateCache?.();
         state.daysById[state.dayId] = { ...state.day, _dayId: state.dayId };
         rememberExpenseDescriptionsFromDay(state.day);
+        refreshExpenseRowsAfterSave();
         state.dirty = false;
         if (!options.silent) {
             setBooksStatus("Day saved.");
-            if (state.tab === "cash-recon") render();
+            render({ skipSync: true });
             setTimeout(() => {
                 if (getBooksStatus() === "Day saved.") setBooksStatus("");
             }, 2000);
-        }
-        if (
-            !options.silent &&
-            !options.skipClosePrompt &&
-            !M().isDayClosed(state.day) &&
-            M().dayHasEntryData({ ...state.day, _dayId: state.dayId }, { hasGasStation: hasGasStation() })
-        ) {
-            setTimeout(() => {
-                if (
-                    window.confirm(
-                        "Entry saved. Close this day now to lock it from accidental changes?"
-                    )
-                ) {
-                    closeCurrentDay({ skipConfirm: true });
-                }
-            }, 50);
         }
     }
 
@@ -3434,9 +3457,9 @@
         }
     }
 
-    function render() {
-        renderDailyPanel();
-        renderMonthlyPanel();
+    function render(options = {}) {
+        renderDailyPanel(options);
+        renderMonthlyPanel(options);
     }
 
     function renderInner(root) {
@@ -3560,8 +3583,10 @@
         },
         onShow() {
             viewMode = "daily";
-            if (userId && state.locationId) loadCurrent();
-            else render();
+            if (userId && state.locationId) {
+                if (!state.dirty) loadCurrent();
+                else render({ skipSync: true });
+            } else render({ skipSync: true });
         },
         resetToRoot() {
             state.tab = "daily";
@@ -3607,8 +3632,10 @@
         },
         onShow() {
             viewMode = "monthly";
-            if (userId && state.locationId) loadCurrent();
-            else render();
+            if (userId && state.locationId) {
+                if (!state.dirty) loadCurrent();
+                else render({ skipSync: true });
+            } else render({ skipSync: true });
         },
         resetToRoot() {
             viewMode = "monthly";

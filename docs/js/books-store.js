@@ -6,6 +6,8 @@
 
     const monthCache = new Map();
     const inflight = new Map();
+    /** Bumped on save so in-flight background refreshes cannot repopulate stale cache. */
+    const cacheGeneration = new Map();
     const LOAD_TIMEOUT_MS = 15000;
 
     function cacheKey(userId, locationId, monthId) {
@@ -22,7 +24,9 @@
     }
 
     function invalidateMonth(userId, locationId, monthId) {
-        monthCache.delete(cacheKey(userId, locationId, monthId));
+        const key = cacheKey(userId, locationId, monthId);
+        monthCache.delete(key);
+        cacheGeneration.set(key, (cacheGeneration.get(key) || 0) + 1);
     }
 
     function monthRef(userId, locationId, monthId) {
@@ -71,9 +75,11 @@
 
     function refreshMonthFromServer(userId, locationId, monthId) {
         const key = cacheKey(userId, locationId, monthId);
+        const generation = cacheGeneration.get(key) || 0;
         const ref = monthRef(userId, locationId, monthId);
         readMonthFromFirestore(ref)
             .then((payload) => {
+                if ((cacheGeneration.get(key) || 0) !== generation) return;
                 monthCache.set(key, payload);
             })
             .catch(() => {});
