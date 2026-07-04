@@ -2711,36 +2711,33 @@
             .join("\n");
     }
 
-    function renderExpenseGroupCards(listKey, title, columns, addLabel, hint, fieldClass) {
+    function renderExpenseGroupCards(listKey, title, columns, addLabel, hint) {
         ensureExpenseLineMinRows(listKey);
         const list = state.day[listKey] || [];
         const total = list.reduce((s, row) => s + M().num(row.amount), 0);
-        const fieldsClass = fieldClass || "books-station-card-fields--expense";
-        const cards = list
+        const colCount = columns.length + 1;
+        const header = columns
+            .map((c) => `<span class="books-expense-col-head">${escapeHtml(c.label)}</span>`)
+            .join("");
+        const rows = list
             .map((row) => {
                 const fields = columns
                     .map((c) => {
                         const type = c.type || "text";
                         const val = row[c.name] ?? "";
                         if (type === "number") {
-                            return `<label class="books-label">${escapeHtml(c.label)}
-                                <input ${amountInputAttrs(c.name, val)}>
-                            </label>`;
+                            return `<input ${amountInputAttrs(c.name, val)} aria-label="${escapeHtml(c.label)}">`;
                         }
                         if (c.name === "description") {
-                            return `<label class="books-label">${escapeHtml(c.label)}
-                                <input type="text" class="books-input" name="${c.name}" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(val)}" placeholder="${escapeHtml(c.placeholder || "Description")}">
-                            </label>`;
+                            return `<input type="text" class="books-input" name="${c.name}" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(val)}" placeholder="${escapeHtml(c.placeholder || "")}" aria-label="${escapeHtml(c.label)}">`;
                         }
-                        return `<label class="books-label">${escapeHtml(c.label)}
-                            <input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}" placeholder="${escapeHtml(c.placeholder || "")}">
-                        </label>`;
+                        return `<input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}" placeholder="${escapeHtml(c.placeholder || "")}" aria-label="${escapeHtml(c.label)}">`;
                     })
                     .join("");
                 return `
-                <div class="books-station-card books-station-card--flow" data-di-row="${escapeHtml(row.id)}">
-                    <button type="button" class="books-rm books-station-card-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="${listKey}" title="Remove">×</button>
-                    <div class="books-station-card-fields ${fieldsClass}">${fields}</div>
+                <div class="books-expense-row" data-di-row="${escapeHtml(row.id)}" style="--expense-cols: ${colCount}">
+                    ${fields}
+                    <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="${listKey}" title="Remove">×</button>
                 </div>`;
             })
             .join("");
@@ -2751,8 +2748,12 @@
                     <span class="books-register-group-total">${money(total)}</span>
                 </div>
                 ${hint ? `<p class="books-hint">${hint}</p>` : ""}
-                <div class="books-station-cards books-station-cards--flow" data-di-list="${listKey}">
-                    ${cards}
+                <div class="books-expense-table" data-di-list="${listKey}">
+                    <div class="books-expense-head" style="--expense-cols: ${colCount}">
+                        ${header}
+                        <span class="books-expense-col-head books-expense-col-head--action"></span>
+                    </div>
+                    ${rows}
                     <button type="button" class="books-add-line" data-di-add="${listKey}">${escapeHtml(addLabel || "+ Add line")}</button>
                 </div>
             </div>`;
@@ -2768,8 +2769,7 @@
                 { name: "amount", label: "Amount", type: "number" },
             ],
             "+ Add check / ACH",
-            "Five rows are ready; use + if you need more.",
-            "books-station-card-fields--checks"
+            "Five rows ready; use + if you need more."
         );
     }
 
@@ -2786,7 +2786,7 @@
                         { name: "overShort", label: "O/S", type: "number" },
                     ],
                     "+ Add line",
-                    "Office cash only — not register drawer. Five rows ready; use + for more. Descriptions are shared across facilities."
+                    "Office cash only — not register drawer. Five rows ready; use + for more."
                 )
             );
         }
@@ -2803,8 +2803,7 @@
                         { name: "amount", label: "Amount", type: "number" },
                     ],
                     "+ Add line",
-                    "Five rows ready; use + for more. Descriptions are shared across facilities.",
-                    "books-station-card-fields--expense2"
+                    "Five rows ready; use + for more."
                 )
             );
         }

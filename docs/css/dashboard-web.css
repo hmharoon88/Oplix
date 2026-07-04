@@ -2311,23 +2311,69 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     grid-template-columns: minmax(0, 1fr);
 }
 
-.books-station-card-fields--checks {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.8fr);
+.books-expense-table {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
 }
 
-.books-station-card-fields--expense {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr) minmax(0, 0.6fr);
+.books-expense-head,
+.books-expense-row {
+    display: grid;
+    grid-template-columns: repeat(calc(var(--expense-cols, 3) - 1), minmax(0, 1fr)) 28px;
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
 }
 
-.books-station-card-fields--expense2 {
-    grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.8fr);
+.books-expense-col-head {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.books-expense-col-head--action {
+    width: 28px;
+}
+
+.books-expense-row .books-input,
+.books-expense-row .books-select,
+.books-expense-row input {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.books-expense-table .books-add-line {
+    align-self: start;
+    margin-top: 4px;
 }
 
 @media (max-width: 700px) {
-    .books-station-card-fields--checks,
-    .books-station-card-fields--expense,
-    .books-station-card-fields--expense2 {
-        grid-template-columns: minmax(0, 1fr);
+    .books-expense-head {
+        display: none;
+    }
+
+    .books-expense-row {
+        grid-template-columns: minmax(0, 1fr) 28px;
+        gap: 6px;
+        padding: 8px;
+        border: 1px solid var(--dash-border, #e2e8f0);
+        border-radius: 8px;
+        background: var(--dash-bg, #f8fafc);
+    }
+
+    .books-expense-row .books-rm {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .books-expense-row input {
+        grid-column: 1;
     }
 }
 
