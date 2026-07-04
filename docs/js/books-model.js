@@ -26,6 +26,7 @@
             overShort: 0,
             cashPayOut: 0,
             cashPayOutExpense: false,
+            cashRefund: 0,
         };
     }
 
@@ -43,6 +44,7 @@
             overShort: num(r.overShort),
             cashPayOut: num(r.cashPayOut),
             cashPayOutExpense,
+            cashRefund: num(r.cashRefund),
         };
     }
 
@@ -870,6 +872,7 @@
             { fieldId: "registerPayouts", label: "In house account", amount: num(agg?.inHouseAccount) },
             { fieldId: "registerPayouts", label: "Lottery pay out", amount: num(agg?.lotteryPayOut) },
             { fieldId: "registerPayouts", label: "Other cash pay out", amount: num(agg?.otherCashPayOut) },
+            { fieldId: "registers", label: "Cash refunds", amount: num(agg?.registerShiftRefundsTotal) },
         ].filter((r) => num(r.amount) !== 0);
         return FC && config ? FC.filterBreakdownLines(lines, config, hasGas) : lines;
     }
@@ -1302,7 +1305,8 @@
             num(day.lotteryPayOut) !== 0 ||
             num(day.pullTabPayout) !== 0 ||
             num(day.otherCashPayOut) !== 0 ||
-            registerShiftPayoutsTotal(day) !== 0;
+            registerShiftPayoutsTotal(day) !== 0 ||
+            registerShiftRefundsTotal(day) !== 0;
 
         return {
             dayId,
@@ -1405,6 +1409,7 @@
         let lotteryPayOut = 0;
         let pullTabPayout = 0;
         let otherCashPayOut = 0;
+        let registerShiftRefunds = 0;
 
         const dailySeries = [];
 
@@ -1449,6 +1454,7 @@
             lotteryPayOut += num(normalized.lotteryPayOut);
             pullTabPayout += num(normalized.pullTabPayout);
             otherCashPayOut += num(normalized.otherCashPayOut);
+            registerShiftRefunds += registerShiftRefundsTotal(normalized);
             cashExpense += dayCash + dayShiftPayOutExpense;
             checksAch += dayChecks;
             otherExpense += dayOther;
@@ -1536,6 +1542,7 @@
             lotteryPayOut,
             pullTabPayout,
             otherCashPayOut,
+            registerShiftRefundsTotal: registerShiftRefunds,
             cashExpense,
             checksAch,
             otherExpense,
@@ -1746,6 +1753,17 @@
     }
 
     /** Per-shift register payouts marked as store expense (Daily sheet → register shifts). */
+    function registerShiftRefundsTotal(day) {
+        let total = 0;
+        const normalized = normalizeDayDoc(day);
+        ["register1", "register2"].forEach((regKey) => {
+            ["shift1", "shift2"].forEach((sh) => {
+                total += num(normalized[regKey]?.[sh]?.cashRefund);
+            });
+        });
+        return total;
+    }
+
     function registerShiftPayoutsExpenseTotal(day) {
         let total = 0;
         const normalized = normalizeDayDoc(day);
@@ -1794,10 +1812,10 @@
         return dayRegisterPayoutsTrackOnlyTotal(day) + dayRegisterPayoutsReconTotal(day);
     }
 
-    /** Expected register cash for one shift — cash sale minus pay out from Daily sheet. */
+    /** Expected register cash for one shift — cash sale minus pay out and refunds from Daily sheet. */
     function expectedRegisterCash(day, regKey, shiftKey) {
         const sh = normalizeShiftRegister(day?.[regKey]?.[shiftKey]);
-        return Math.max(0, num(sh.cashSale) - num(sh.cashPayOut));
+        return Math.max(0, num(sh.cashSale) - num(sh.cashPayOut) - num(sh.cashRefund));
     }
 
     function registerShiftGrossCash(day, regKey, shiftKey) {
@@ -1860,7 +1878,7 @@
     /** True when Daily sheet has register shift data worth reconciling. */
     function registerShiftHasBooksData(day, regKey, shiftKey) {
         const sh = day?.[regKey]?.[shiftKey] || {};
-        return num(sh.cashSale) !== 0 || num(sh.overShort) !== 0 || num(sh.cashPayOut) !== 0;
+        return num(sh.cashSale) !== 0 || num(sh.overShort) !== 0 || num(sh.cashPayOut) !== 0 || num(sh.cashRefund) !== 0;
     }
 
     function lotteryShiftHasBooksData(day, shiftKey) {
@@ -1971,6 +1989,7 @@
                 const shift = normalized[regKey][sh];
                 const expectedGross = registerShiftGrossCash(normalized, regKey, sh);
                 const payOut = num(shift.cashPayOut);
+                const cashRefund = num(shift.cashRefund);
                 const expected = expectedRegisterCash(normalized, regKey, sh);
                 const entry = recon[regKey][sh];
                 const counted = num(entry.countedCash);
@@ -1986,6 +2005,7 @@
                     counted,
                     payOuts: entry.payOuts || [],
                     payOut,
+                    cashRefund,
                     cashPayOutExpense: !!shift.cashPayOutExpense,
                     variance: counted - expected,
                     verified: entry.verified === true,
@@ -2351,6 +2371,7 @@
         dayManualCashExpensesTotal,
         registerShiftPayoutsTotal,
         registerShiftPayoutsExpenseTotal,
+        registerShiftRefundsTotal,
         dayRegisterPayoutsTotal,
         dayRegisterPayoutsReconTotal,
         dayRegisterPayoutsTrackOnlyTotal,

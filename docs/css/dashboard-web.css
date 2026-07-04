@@ -1410,10 +1410,27 @@
     border-top: 1px dashed var(--dash-border, #e2e8f0);
 }
 
-.books-register-payout-hint {
+.books-register-payout-hint,
+.books-register-refund-hint {
     margin: 6px 0 0;
     font-size: 0.75rem;
     line-height: 1.35;
+}
+
+.books-register-refund-row {
+    margin-top: 8px;
+    padding-top: 8px;
+}
+
+.books-cash-recon-register-deduct {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.85rem;
+}
+
+.books-cash-recon-refund-readonly {
+    color: var(--dash-muted, #64748b);
 }
 
 .books-register-recon {

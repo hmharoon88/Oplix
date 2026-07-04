@@ -482,6 +482,9 @@
             ...(M.num(agg.lotteryPayOut)
                 ? [keyMetricCell("Lottery pay out (track)", money(agg.lotteryPayOut), opt)]
                 : []),
+            ...(M.num(agg.registerShiftRefundsTotal)
+                ? [keyMetricCell("Cash refunds (track)", money(agg.registerShiftRefundsTotal), opt)]
+                : []),
         ];
 
         return `
@@ -520,6 +523,7 @@
             { label: "Wayne Pass (track only)", get: (a) => a.waynePass },
             { label: "In house (track only)", get: (a) => a.inHouseAccount },
             { label: "Lottery pay out (track only)", get: (a) => a.lotteryPayOut },
+            { label: "Cash refunds (track only)", get: (a) => a.registerShiftRefundsTotal },
             { label: "Credit card (pump)", get: (a) => a.creditCard },
             { label: "Fuel ($)", get: (a) => a.fuelDollars },
             { label: "Fuel (gal.)", get: (a) => a.fuelGallons, format: "number" },

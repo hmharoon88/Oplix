@@ -1527,7 +1527,7 @@
         if (tax) state.month.salesTax = M().num(tax.value);
         if (acct) state.month.accountant = M().num(acct.value);
 
-        const registerFields = ["cardSale", "cashSale", "cashPayOut"];
+        const registerFields = ["cardSale", "cashSale", "cashPayOut", "cashRefund"];
         ["register1", "register2"].forEach((regKey) => {
             if (!state.day[regKey]) state.day[regKey] = M().defaultRegisterUnit();
             ["shift1", "shift2"].forEach((sh) => {
@@ -2089,7 +2089,8 @@
         const countAsExpense = !!shift.cashPayOutExpense;
         const cashSale = M().num(shift.cashSale);
         const payOut = M().num(shift.cashPayOut);
-        const expected = Math.max(0, cashSale - payOut);
+        const cashRefund = M().num(shift.cashRefund);
+        const expected = Math.max(0, cashSale - payOut - cashRefund);
         const showRecon = showField("cashReconciliation") && showField("registers");
         const recon = showRecon ? registerShiftReconEntry(regKey, shiftKey) : null;
         const counted = recon ? M().num(recon.countedCash) : 0;
@@ -2127,6 +2128,12 @@
                     </label>
                 </div>
                 <p class="books-hint books-register-payout-hint">Pay out lowers expected cash. <strong>Yes</strong> also counts as store expense.</p>
+                <div class="books-register-payout-row books-register-refund-row">
+                    <label class="books-label">Cash refund ($)
+                        <input ${amountInputAttrs(`${prefix}_cashRefund`, shift.cashRefund)} data-reg-recon-input="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}">
+                    </label>
+                </div>
+                <p class="books-hint books-register-refund-hint">Refunds lower expected cash (tracked — not a store expense).</p>
                 ${
                     showRecon
                         ? `<div class="books-register-recon" data-reg-recon="${escapeHtml(regKey)}:${escapeHtml(shiftKey)}">
@@ -2171,10 +2178,12 @@
             const prefix = `reg_${regKey}_${shiftKey}`;
             const cashSaleEl = root.querySelector(`[name="${prefix}_cashSale"]`);
             const payOutEl = root.querySelector(`[name="${prefix}_cashPayOut"]`);
+            const refundEl = root.querySelector(`[name="${prefix}_cashRefund"]`);
             const countedEl = root.querySelector(`[name="cr_${regKey}_${shiftKey}_counted"]`);
             const cashSale = M().num(cashSaleEl?.value);
             const payOut = M().num(payOutEl?.value);
-            const expected = Math.max(0, cashSale - payOut);
+            const cashRefund = M().num(refundEl?.value);
+            const expected = Math.max(0, cashSale - payOut - cashRefund);
             const counted = M().num(countedEl?.value);
             const variance = counted - expected;
             const expectedEl = block.querySelector("[data-reg-recon-expected]");
@@ -2918,7 +2927,19 @@
                     : num(row.counted) + num(row.payOut) - num(row.expected);
                 const varCls = varianceColorClass(rowVariance);
                 const payOutCell = isRegister
-                    ? `<span class="books-cash-recon-payout-readonly" title="${row.cashPayOutExpense ? "Counted as store expense" : "Track only"}">${money(row.payOut)}</span>`
+                    ? `<div class="books-cash-recon-register-deduct">
+                        ${
+                            num(row.payOut) !== 0
+                                ? `<span class="books-cash-recon-payout-readonly" title="${row.cashPayOutExpense ? "Counted as store expense" : "Track only"}">Pay out: ${money(row.payOut)}</span>`
+                                : ""
+                        }
+                        ${
+                            num(row.cashRefund) !== 0
+                                ? `<span class="books-cash-recon-payout-readonly books-cash-recon-refund-readonly">Refund: ${money(row.cashRefund)}</span>`
+                                : ""
+                        }
+                        ${num(row.payOut) === 0 && num(row.cashRefund) === 0 ? money(0) : ""}
+                    </div>`
                     : renderPayOutsCell(prefix, row.payOuts);
                 return `
                     <tr>
@@ -3217,6 +3238,23 @@
             </section>`;
     }
 
+    function dailyRegisterShiftRefundLines(day) {
+        const d = M().normalizeDayDoc(day);
+        const lines = [];
+        ["register1", "register2"].forEach((regKey, regIdx) => {
+            ["shift1", "shift2"].forEach((sh, shiftIdx) => {
+                const shift = d[regKey]?.[sh];
+                const amount = M().num(shift?.cashRefund);
+                if (amount === 0) return;
+                lines.push({
+                    label: `Register ${regIdx + 1} · Shift ${shiftIdx + 1}`,
+                    amount,
+                });
+            });
+        });
+        return lines;
+    }
+
     function dailyRegisterShiftPayoutLines(day) {
         const d = M().normalizeDayDoc(day);
         const lines = [];
@@ -3338,6 +3376,14 @@
                             )
                             .join("")}
                     </ul>
+                   </div>`);
+        }
+        const shiftRefundLines = dailyRegisterShiftRefundLines(state.day);
+        if (shiftRefundLines.length > 0) {
+            registerExtraParts.push(`<div class="books-cash-recon-expenses books-cash-recon-track-only">
+                    <h4 class="books-subtitle books-subtitle--sm">Shift cash refunds (Daily sheet — under each register shift)</h4>
+                    <p class="books-hint">Refunds reduce expected register cash. They are tracked but not counted as store expense.</p>
+                    ${renderPayoutLinesList(shiftRefundLines)}
                    </div>`);
         }
         const registerExtra = registerExtraParts.join("");
