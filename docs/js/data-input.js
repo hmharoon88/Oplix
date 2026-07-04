@@ -463,17 +463,32 @@
     const EXPENSE_DESC_DATALIST_ID = "di-expense-desc-list";
 
     function expenseDescStorageKey() {
-        return `oplix.expenseDescriptions.${userId || "anon"}.${state.locationId || "none"}`;
+        return `oplix.expenseDescriptions.${userId || "anon"}`;
+    }
+
+    function legacyExpenseDescStorageKey(locationId) {
+        return `oplix.expenseDescriptions.${userId || "anon"}.${locationId || "none"}`;
     }
 
     function loadStoredExpenseDescriptions() {
+        const sources = [];
         try {
             const raw = localStorage.getItem(expenseDescStorageKey());
             const parsed = raw ? JSON.parse(raw) : [];
-            return Array.isArray(parsed) ? parsed : [];
+            if (Array.isArray(parsed)) sources.push(parsed);
         } catch {
-            return [];
+            /* ignore */
         }
+        (locations || []).forEach((loc) => {
+            try {
+                const raw = localStorage.getItem(legacyExpenseDescStorageKey(loc.id));
+                const parsed = raw ? JSON.parse(raw) : [];
+                if (Array.isArray(parsed)) sources.push(parsed);
+            } catch {
+                /* ignore */
+            }
+        });
+        return mergeExpenseDescriptions(...sources);
     }
 
     function saveStoredExpenseDescriptions(list) {
@@ -1300,18 +1315,11 @@
 
     function addLine(list) {
         if (list === "cashExpenses") {
-            state.day.cashExpenses.push({ id: lineId(), description: "", amount: 0, overShort: 0 });
+            state.day.cashExpenses.push(emptyCashExpenseRow());
         } else if (list === "checksAch") {
-            state.day.checksAch.push({
-                id: lineId(),
-                date: state.dayId,
-                description: "",
-                checkNo: "",
-                amount: 0,
-                payableId: null,
-            });
+            state.day.checksAch.push(emptyChecksAchRow());
         } else if (list === "otherExpenses") {
-            state.day.otherExpenses.push({ id: lineId(), description: "", amount: 0 });
+            state.day.otherExpenses.push(emptyOtherExpenseRow());
         } else if (list === "pulltabs") {
             state.day.pulltabs.push({
                 id: lineId(),
@@ -1689,6 +1697,64 @@
         else state.day[listKey] = updated;
     }
 
+    const EXPENSE_LINE_MIN_ROWS = 5;
+
+    function emptyChecksAchRow() {
+        return {
+            id: lineId(),
+            date: state.dayId,
+            description: "",
+            checkNo: "",
+            amount: 0,
+            payableId: null,
+        };
+    }
+
+    function emptyCashExpenseRow() {
+        return { id: lineId(), description: "", amount: 0, overShort: 0 };
+    }
+
+    function emptyOtherExpenseRow() {
+        return { id: lineId(), description: "", amount: 0 };
+    }
+
+    function isExpenseLineEmpty(row, listKey) {
+        const noDesc = !String(row?.description || "").trim();
+        const noAmount = M().num(row?.amount) === 0;
+        if (listKey === "checksAch") {
+            return noDesc && !String(row?.checkNo || "").trim() && noAmount;
+        }
+        if (listKey === "cashExpenses") {
+            return noDesc && noAmount && M().num(row?.overShort) === 0;
+        }
+        return noDesc && noAmount;
+    }
+
+    function ensureExpenseLineMinRows(listKey, min = EXPENSE_LINE_MIN_ROWS) {
+        if (!state.day[listKey]) state.day[listKey] = [];
+        const emptyRow =
+            listKey === "checksAch"
+                ? emptyChecksAchRow
+                : listKey === "cashExpenses"
+                  ? emptyCashExpenseRow
+                  : emptyOtherExpenseRow;
+        while (state.day[listKey].length < min) {
+            state.day[listKey].push(emptyRow());
+        }
+    }
+
+    function pruneEmptyExpenseLines(listKey) {
+        state.day[listKey] = (state.day[listKey] || []).filter(
+            (row) => !isExpenseLineEmpty(row, listKey)
+        );
+    }
+
+    function pruneEmptyDailyExpenseLines() {
+        pruneEmptyExpenseLines("checksAch");
+        pruneEmptyExpenseLines("cashExpenses");
+        pruneEmptyExpenseLines("otherExpenses");
+    }
+
     function syncChecksAchFromDom() {
         const root = $("data-input-root");
         if (!root?.querySelector('[data-di-list="checksAch"]')) return;
@@ -1792,6 +1858,7 @@
         }
         normalizeAllAmountFields();
         syncFromForm();
+        pruneEmptyDailyExpenseLines();
         pruneAllReconPayOuts();
         await syncPayablesFromChecks();
         if (!options.silent) setBooksStatus("Saving…");
@@ -2644,11 +2711,13 @@
             .join("\n");
     }
 
-    function renderExpenseGroupCards(listKey, title, columns, addLabel, hint) {
+    function renderExpenseGroupCards(listKey, title, columns, addLabel, hint, fieldClass) {
+        ensureExpenseLineMinRows(listKey);
         const list = state.day[listKey] || [];
         const total = list.reduce((s, row) => s + M().num(row.amount), 0);
+        const fieldsClass = fieldClass || "books-station-card-fields--expense";
         const cards = list
-            .map((row, index) => {
+            .map((row) => {
                 const fields = columns
                     .map((c) => {
                         const type = c.type || "text";
@@ -2660,21 +2729,18 @@
                         }
                         if (c.name === "description") {
                             return `<label class="books-label">${escapeHtml(c.label)}
-                                <input type="text" class="books-input" name="${c.name}" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(val)}" placeholder="Start typing…">
+                                <input type="text" class="books-input" name="${c.name}" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(val)}" placeholder="${escapeHtml(c.placeholder || "Description")}">
                             </label>`;
                         }
                         return `<label class="books-label">${escapeHtml(c.label)}
-                            <input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}">
+                            <input type="${type}" class="books-input" name="${c.name}" value="${escapeHtml(val)}" placeholder="${escapeHtml(c.placeholder || "")}">
                         </label>`;
                     })
                     .join("");
                 return `
-                <div class="books-station-card" data-di-row="${escapeHtml(row.id)}">
-                    <div class="books-station-card-head">
-                        <strong>Line ${index + 1}</strong>
-                        <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="${listKey}" title="Remove">×</button>
-                    </div>
-                    <div class="books-station-card-fields">${fields}</div>
+                <div class="books-station-card books-station-card--flow" data-di-row="${escapeHtml(row.id)}">
+                    <button type="button" class="books-rm books-station-card-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="${listKey}" title="Remove">×</button>
+                    <div class="books-station-card-fields ${fieldsClass}">${fields}</div>
                 </div>`;
             })
             .join("");
@@ -2685,7 +2751,7 @@
                     <span class="books-register-group-total">${money(total)}</span>
                 </div>
                 ${hint ? `<p class="books-hint">${hint}</p>` : ""}
-                <div class="books-station-cards" data-di-list="${listKey}">
+                <div class="books-station-cards books-station-cards--flow" data-di-list="${listKey}">
                     ${cards}
                     <button type="button" class="books-add-line" data-di-add="${listKey}">${escapeHtml(addLabel || "+ Add line")}</button>
                 </div>
@@ -2693,39 +2759,18 @@
     }
 
     function renderChecksAchList() {
-        const list = state.day.checksAch || [];
-        const total = list.reduce((s, row) => s + M().num(row.amount), 0);
-        const cards = list
-            .map((row) => {
-                return `
-                <div class="books-station-card books-station-card--flow" data-di-row="${escapeHtml(row.id)}">
-                    <button type="button" class="books-rm books-station-card-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="checksAch" title="Remove">×</button>
-                    <div class="books-station-card-fields books-station-card-fields--checks">
-                        <label class="books-label">Description
-                            <input type="text" class="books-input" name="description" list="${EXPENSE_DESC_DATALIST_ID}" autocomplete="off" value="${escapeHtml(row.description || "")}" placeholder="Payee / description">
-                        </label>
-                        <label class="books-label">Check # / ACH
-                            <input type="text" class="books-input" name="checkNo" value="${escapeHtml(row.checkNo || "")}" placeholder="Check # or ACH">
-                        </label>
-                        <label class="books-label">Amount
-                            <input ${amountInputAttrs("amount", row.amount)}>
-                        </label>
-                    </div>
-                </div>`;
-            })
-            .join("");
-        return `
-            <div class="books-register-group">
-                <div class="books-register-group-head">
-                    <h4 class="books-register-group-title">Checks / ACH</h4>
-                    <span class="books-register-group-total">${money(total)}</span>
-                </div>
-                <p class="books-hint">Enter payee, check number or ACH, and amount.</p>
-                <div class="books-station-cards books-station-cards--flow" data-di-list="checksAch">
-                    ${cards}
-                    <button type="button" class="books-add-line" data-di-add="checksAch">+ Add check / ACH</button>
-                </div>
-            </div>`;
+        return renderExpenseGroupCards(
+            "checksAch",
+            "Checks / ACH",
+            [
+                { name: "description", label: "Description", placeholder: "Payee / description" },
+                { name: "checkNo", label: "Check # / ACH", placeholder: "Check # or ACH" },
+                { name: "amount", label: "Amount", type: "number" },
+            ],
+            "+ Add check / ACH",
+            "Five rows are ready; use + if you need more.",
+            "books-station-card-fields--checks"
+        );
     }
 
     function renderDailyExpensesBlock() {
@@ -2736,12 +2781,12 @@
                     "cashExpenses",
                     "Cash expense (office)",
                     [
-                        { name: "description", label: "Description" },
+                        { name: "description", label: "Description", placeholder: "Description" },
                         { name: "amount", label: "Amount", type: "number" },
                         { name: "overShort", label: "O/S", type: "number" },
                     ],
                     "+ Add line",
-                    "Office cash only — not register drawer. Drawer cash → shift Cash pay out."
+                    "Office cash only — not register drawer. Five rows ready; use + for more. Descriptions are shared across facilities."
                 )
             );
         }
@@ -2754,11 +2799,12 @@
                     "otherExpenses",
                     "Other expense",
                     [
-                        { name: "description", label: "Description" },
+                        { name: "description", label: "Description", placeholder: "Description" },
                         { name: "amount", label: "Amount", type: "number" },
                     ],
                     "+ Add line",
-                    ""
+                    "Five rows ready; use + for more. Descriptions are shared across facilities.",
+                    "books-station-card-fields--expense2"
                 )
             );
         }

@@ -2315,8 +2315,18 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.8fr);
 }
 
+.books-station-card-fields--expense {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr) minmax(0, 0.6fr);
+}
+
+.books-station-card-fields--expense2 {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.8fr);
+}
+
 @media (max-width: 700px) {
-    .books-station-card-fields--checks {
+    .books-station-card-fields--checks,
+    .books-station-card-fields--expense,
+    .books-station-card-fields--expense2 {
         grid-template-columns: minmax(0, 1fr);
     }
 }
