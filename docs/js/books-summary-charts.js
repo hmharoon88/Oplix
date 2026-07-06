@@ -45,7 +45,6 @@
         const s = String(label || "");
         const map = {
             "Merch sale (store)": "Merch",
-            "Credit card (pump)": "Credit card",
             "Register card": "Reg card",
             "Credit card": "Credit card",
             "Fuel sales ($)": "Fuel",
@@ -524,7 +523,7 @@
             { label: "In house (track only)", get: (a) => a.inHouseAccount },
             { label: "Lottery pay out (track only)", get: (a) => a.lotteryPayOut },
             { label: "Cash refunds (track only)", get: (a) => a.registerShiftRefundsTotal },
-            { label: "Credit card (pump)", get: (a) => a.creditCard },
+            { label: "Credit card", get: (a) => a.creditCard },
             { label: "Fuel ($)", get: (a) => a.fuelDollars },
             { label: "Fuel (gal.)", get: (a) => a.fuelGallons, format: "number" },
         ];
