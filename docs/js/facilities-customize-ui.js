@@ -564,36 +564,38 @@
             setProfileDocStatus(root, slotId, "Uploading…");
             if (globalStatus) globalStatus.textContent = "";
             try {
-                if (existingDoc) {
-                    await DocStore().remove(userId, locationId, existingDoc);
-                }
-                const created = await DocStore().create(userId, locationId, {
-                    name: profileSlotLabelFromForm(form, slotId),
-                    file,
-                    expiryDate: expiryDateFromRow(form, slotId),
-                    uploadedBy: userId,
-                    profileSlot: slotId,
-                });
-                if (Store()?.setProfileDocumentId) {
-                    await Store().setProfileDocumentId(userId, locationId, slotId, created.id);
-                }
-                if (form.querySelector(`[name="profile_${slotId}_compliance"]`)?.checked) {
-                    const payload = {
-                        profileSlotConfig: readProfileSlotConfigFromForm(form),
-                        facilityProfile: readProfileFromForm(form, location?.facilityProfile),
-                    };
-                    const nextDocs = (documents || []).filter((d) => d.id !== existingDoc?.id);
-                    nextDocs.push({
-                        id: created.id,
-                        name: created.name || profileSlotLabelFromForm(form, slotId),
-                        fileURL: created.fileURL,
-                        fileType: created.fileType,
+                await OplixSaveBusy.run(async () => {
+                    if (existingDoc) {
+                        await DocStore().remove(userId, locationId, existingDoc);
+                    }
+                    const created = await DocStore().create(userId, locationId, {
+                        name: profileSlotLabelFromForm(form, slotId),
+                        file,
+                        expiryDate: expiryDateFromRow(form, slotId),
+                        uploadedBy: userId,
                         profileSlot: slotId,
                     });
-                    await syncProfileCompliance(userId, locationId, payload, nextDocs, complianceItems);
-                }
+                    if (Store()?.setProfileDocumentId) {
+                        await Store().setProfileDocumentId(userId, locationId, slotId, created.id);
+                    }
+                    if (form.querySelector(`[name="profile_${slotId}_compliance"]`)?.checked) {
+                        const payload = {
+                            profileSlotConfig: readProfileSlotConfigFromForm(form),
+                            facilityProfile: readProfileFromForm(form, location?.facilityProfile),
+                        };
+                        const nextDocs = (documents || []).filter((d) => d.id !== existingDoc?.id);
+                        nextDocs.push({
+                            id: created.id,
+                            name: created.name || profileSlotLabelFromForm(form, slotId),
+                            fileURL: created.fileURL,
+                            fileType: created.fileType,
+                            profileSlot: slotId,
+                        });
+                        await syncProfileCompliance(userId, locationId, payload, nextDocs, complianceItems);
+                    }
+                    if (onRefresh) await onRefresh();
+                }, "Uploading…");
                 setProfileDocStatus(root, slotId, "Uploaded.");
-                if (onRefresh) await onRefresh();
             } catch (err) {
                 setProfileDocStatus(root, slotId, err.message || "Upload failed.");
             }
@@ -611,20 +613,22 @@
 
             setProfileDocStatus(root, slotId, "Removing…");
             try {
-                await DocStore().remove(userId, locationId, existingDoc);
-                if (Store()?.setProfileDocumentId) {
-                    await Store().setProfileDocumentId(userId, locationId, slotId, "");
-                }
-                if (form.querySelector(`[name="profile_${slotId}_compliance"]`)?.checked) {
-                    const payload = {
-                        profileSlotConfig: readProfileSlotConfigFromForm(form),
-                        facilityProfile: readProfileFromForm(form, location?.facilityProfile),
-                    };
-                    const nextDocs = (documents || []).filter((d) => d.id !== existingDoc?.id);
-                    await syncProfileCompliance(userId, locationId, payload, nextDocs, complianceItems);
-                }
+                await OplixSaveBusy.run(async () => {
+                    await DocStore().remove(userId, locationId, existingDoc);
+                    if (Store()?.setProfileDocumentId) {
+                        await Store().setProfileDocumentId(userId, locationId, slotId, "");
+                    }
+                    if (form.querySelector(`[name="profile_${slotId}_compliance"]`)?.checked) {
+                        const payload = {
+                            profileSlotConfig: readProfileSlotConfigFromForm(form),
+                            facilityProfile: readProfileFromForm(form, location?.facilityProfile),
+                        };
+                        const nextDocs = (documents || []).filter((d) => d.id !== existingDoc?.id);
+                        await syncProfileCompliance(userId, locationId, payload, nextDocs, complianceItems);
+                    }
+                    if (onRefresh) await onRefresh();
+                }, "Removing…");
                 setProfileDocStatus(root, slotId, "");
-                if (onRefresh) await onRefresh();
             } catch (err) {
                 setProfileDocStatus(root, slotId, err.message || "Remove failed.");
             }
@@ -681,8 +685,10 @@
             }
             if (status) status.textContent = "Saving…";
             try {
-                await Store().updateFacilityCustomization(userId, location.id, payload);
-                await syncProfileCompliance(userId, location.id, payload, documents, complianceItems);
+                await OplixSaveBusy.run(async () => {
+                    await Store().updateFacilityCustomization(userId, location.id, payload);
+                    await syncProfileCompliance(userId, location.id, payload, documents, complianceItems);
+                }, "Saving…");
                 if (status) status.textContent = "Saved.";
                 if (onRefresh) await onRefresh();
             } catch (err) {

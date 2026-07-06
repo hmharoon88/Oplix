@@ -426,7 +426,9 @@
                 patch.completedAt !== undefined ? patch.completedAt : base.completedAt,
         };
         if (base.createdAt) payload.createdAt = base.createdAt;
-        await Store.save(userId, id, payload);
+        await OplixSaveBusy.run(async () => {
+            await Store.save(userId, id, payload);
+        }, "Saving…");
     }
 
     async function refreshOrgTodosOnHome(userId) {
@@ -497,7 +499,9 @@
             const deleteId = e.target.closest("[data-todo-delete]")?.dataset.todoDelete;
             if (deleteId) {
                 if (!confirm("Delete this to-do?")) return;
-                await OplixOrgTodosStore.remove(userId, deleteId);
+                await OplixSaveBusy.run(async () => {
+                    await OplixOrgTodosStore.remove(userId, deleteId);
+                }, "Deleting…");
                 const slot = card.querySelector("[data-todo-form-slot]");
                 if (slot) {
                     slot.hidden = true;

@@ -620,17 +620,19 @@
         setStatus("Saving…", "info");
         renderPanel();
         try {
-            const terminalNumber = state.terminal <= 1 ? null : state.terminal;
-            await Store().saveTemplate(userId, embeddedLocationId, {
-                locationId: embeddedLocationId,
-                rows: state.editRows,
-                lotteryRegisterAmount: state.editRegister,
-                reverseOrder: state.editReverse,
-                terminalNumber,
-            });
+            await OplixSaveBusy.run(async () => {
+                const terminalNumber = state.terminal <= 1 ? null : state.terminal;
+                await Store().saveTemplate(userId, embeddedLocationId, {
+                    locationId: embeddedLocationId,
+                    rows: state.editRows,
+                    lotteryRegisterAmount: state.editRegister,
+                    reverseOrder: state.editReverse,
+                    terminalNumber,
+                });
+                await loadData();
+            }, "Saving…");
             setStatus("Template saved.", "success");
             state.saving = false;
-            await loadData();
         } catch (err) {
             setStatus(err.message || "Could not save template.", "error");
             state.saving = false;
@@ -652,26 +654,28 @@
         renderPanel();
 
         try {
-            const template = currentTemplate();
-            const terminalNumber = state.terminal <= 1 ? null : state.terminal;
-            const result = await Store().closeShift(userId, embeddedLocationId, {
-                template,
-                endingByRowId: state.closeEnding,
-                onlineTotals: state.closeOnlineTotals.filter(Boolean),
-                onlineCashes: state.closeOnlineCashes.filter(Boolean),
-                instantCashes: state.closeInstantCashes.filter(Boolean),
-                cashInHand,
-                shiftId: state.closeShiftId || undefined,
-                imageFile: state.closeImageFile,
-                terminalNumber,
-            });
+            await OplixSaveBusy.run(async () => {
+                const template = currentTemplate();
+                const terminalNumber = state.terminal <= 1 ? null : state.terminal;
+                const result = await Store().closeShift(userId, embeddedLocationId, {
+                    template,
+                    endingByRowId: state.closeEnding,
+                    onlineTotals: state.closeOnlineTotals.filter(Boolean),
+                    onlineCashes: state.closeOnlineCashes.filter(Boolean),
+                    instantCashes: state.closeInstantCashes.filter(Boolean),
+                    cashInHand,
+                    shiftId: state.closeShiftId || undefined,
+                    imageFile: state.closeImageFile,
+                    terminalNumber,
+                });
 
-            state.lastCloseSummary = result.summary;
-            state.selectedFormId = result.form.id;
+                state.lastCloseSummary = result.summary;
+                state.selectedFormId = result.form.id;
+                state.view = "detail";
+                await loadData();
+            }, "Closing shift…");
             setStatus("Shift closed successfully.", "success");
-            state.view = "detail";
             state.saving = false;
-            await loadData();
         } catch (err) {
             setStatus(err.message || "Could not close shift.", "error");
             state.saving = false;

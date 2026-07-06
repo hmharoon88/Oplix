@@ -11,6 +11,9 @@
     let profileCache = null;
     let activePanelId = null;
     const initializedPanels = new Set();
+    let panelLoadGen = 0;
+
+    const Busy = () => window.OplixAppBusy || window.OplixSaveBusy;
 
     const PLACEHOLDER_SECTIONS = [];
     const PANEL_KEY = "oplix.dashboard.panel";
@@ -179,27 +182,28 @@
         if (panelId === "reports" && window.OplixReports) {
             OplixReports.onShow();
         }
-        if (panelId === "payroll" && window.OplixPayrollUI) {
-            OplixPayrollUI.onShow();
+        if (panelId === "payroll" && window.OplixPayrollUI?.onShow) {
+            await OplixPayrollUI.onShow();
         }
-        if (panelId === "tasks" && window.OplixTaskCheckUI) {
-            OplixTaskCheckUI.onShow();
+        if (panelId === "tasks" && window.OplixTaskCheckUI?.onShow) {
+            await OplixTaskCheckUI.onShow();
         }
-        if (panelId === "settings" && window.OplixSettingsUI) {
-            OplixSettingsUI.onShow();
+        if (panelId === "settings" && window.OplixSettingsUI?.onShow) {
+            await OplixSettingsUI.onShow();
         }
-        if (panelId === "vendors" && window.OplixVendorsUI) {
-            OplixVendorsUI.onShow();
+        if (panelId === "vendors" && window.OplixVendorsUI?.onShow) {
+            await OplixVendorsUI.onShow();
         }
-        if (panelId === "compliance" && window.OplixComplianceHubUI) {
-            OplixComplianceHubUI.onShow();
+        if (panelId === "compliance" && window.OplixComplianceHubUI?.onShow) {
+            await OplixComplianceHubUI.onShow();
         }
-        if (panelId === "employees" && window.OplixEmployeesUI) {
-            OplixEmployeesUI.onShow();
+        if (panelId === "employees" && window.OplixEmployeesUI?.onShow) {
+            await OplixEmployeesUI.onShow();
         }
     }
 
     async function showPanel(panelId) {
+        const loadGen = ++panelLoadGen;
         const reselect = activePanelId === panelId;
         if (reselect) {
             resetPanelToRoot(panelId);
@@ -214,11 +218,23 @@
             btn.classList.toggle("active", btn.dataset.panel === panelId);
         });
 
-        await ensurePanelInitialized(panelId);
-        await panelOnShow(panelId);
+        const load = async () => {
+            await ensurePanelInitialized(panelId);
+            if (loadGen !== panelLoadGen) return;
+            await panelOnShow(panelId);
+            if (loadGen !== panelLoadGen) return;
+            activePanelId = panelId;
+            savePanel(panelId);
+        };
 
-        activePanelId = panelId;
-        savePanel(panelId);
+        const busy = Busy();
+        if (busy?.runLoad) {
+            await busy.runLoad(load);
+        } else if (busy?.run) {
+            await busy.run(load, "Loading — please wait", "load");
+        } else {
+            await load();
+        }
     }
 
     window.showDashboardPanel = showPanel;

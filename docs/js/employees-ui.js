@@ -472,15 +472,17 @@
         renderPanel();
 
         try {
-            const info = await Store().createEmployee(userId, form);
-            await loadData();
+            await OplixSaveBusy.run(async () => {
+                const info = await Store().createEmployee(userId, form);
+                await loadData();
+                state.createdInfo = info;
+                if (window.OplixDashboard?.reloadLocations) {
+                    await OplixDashboard.reloadLocations();
+                }
+            }, "Creating employee…");
             state.saving = false;
-            state.createdInfo = info;
             state.status = "";
             renderPanel();
-            if (window.OplixDashboard?.reloadLocations) {
-                await OplixDashboard.reloadLocations();
-            }
         } catch (err) {
             state.saving = false;
             state.status = err.message || "Failed to create employee.";
@@ -569,39 +571,41 @@
         attachSaveReady();
 
         try {
-            const isSupervisor = form.role === "supervisor";
-            const updated = {
-                ...emp,
-                name: form.name,
-                password: form.password || emp.password,
-                hourlyRate: form.hourlyRate,
-                assignedLocationIds: form.assignedLocationIds,
-                is24Hours: form.is24Hours,
-                canTakeRegister: form.canTakeRegister,
-                canSubmitLottery: form.canSubmitLottery,
-                canViewEmployeeData: isSupervisor ? form.canViewEmployeeData : false,
-                canManageTasks: isSupervisor ? form.canManageTasks : false,
-                canManageDocuments: isSupervisor ? form.canManageDocuments : false,
-                canViewRegisterData: isSupervisor ? form.canViewRegisterData : false,
-                canViewLotteryData: isSupervisor ? form.canViewLotteryData : false,
-                canEditSchedules: isSupervisor ? form.canEditSchedules : false,
-                canViewReports: isSupervisor ? form.canViewReports : false,
-            };
+            await OplixSaveBusy.run(async () => {
+                const isSupervisor = form.role === "supervisor";
+                const updated = {
+                    ...emp,
+                    name: form.name,
+                    password: form.password || emp.password,
+                    hourlyRate: form.hourlyRate,
+                    assignedLocationIds: form.assignedLocationIds,
+                    is24Hours: form.is24Hours,
+                    canTakeRegister: form.canTakeRegister,
+                    canSubmitLottery: form.canSubmitLottery,
+                    canViewEmployeeData: isSupervisor ? form.canViewEmployeeData : false,
+                    canManageTasks: isSupervisor ? form.canManageTasks : false,
+                    canManageDocuments: isSupervisor ? form.canManageDocuments : false,
+                    canViewRegisterData: isSupervisor ? form.canViewRegisterData : false,
+                    canViewLotteryData: isSupervisor ? form.canViewLotteryData : false,
+                    canEditSchedules: isSupervisor ? form.canEditSchedules : false,
+                    canViewReports: isSupervisor ? form.canViewReports : false,
+                };
 
-            await Store().updateEmployee(userId, updated, editOriginalAssigned);
+                await Store().updateEmployee(userId, updated, editOriginalAssigned);
 
-            if (form.role !== editOriginalRole) {
-                await Store().updateUserRole(emp.id, form.role);
-            }
+                if (form.role !== editOriginalRole) {
+                    await Store().updateUserRole(emp.id, form.role);
+                }
 
-            await loadData();
+                await loadData();
+                if (window.OplixDashboard?.reloadLocations) {
+                    await OplixDashboard.reloadLocations();
+                }
+            }, "Saving…");
             state.saving = false;
             state.status = "Saved.";
             state.statusKind = "success";
             closeEdit();
-            if (window.OplixDashboard?.reloadLocations) {
-                await OplixDashboard.reloadLocations();
-            }
         } catch (err) {
             state.saving = false;
             state.status = err.message || "Failed to save.";
@@ -622,13 +626,15 @@
         renderPanel();
 
         try {
-            await Store().deleteEmployee(userId, emp);
-            await loadData();
+            await OplixSaveBusy.run(async () => {
+                await Store().deleteEmployee(userId, emp);
+                await loadData();
+                if (window.OplixDashboard?.reloadLocations) {
+                    await OplixDashboard.reloadLocations();
+                }
+            }, "Deleting…");
             state.saving = false;
             closeEdit();
-            if (window.OplixDashboard?.reloadLocations) {
-                await OplixDashboard.reloadLocations();
-            }
         } catch (err) {
             state.saving = false;
             state.status = err.message || "Failed to delete.";

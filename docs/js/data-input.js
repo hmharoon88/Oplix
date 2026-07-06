@@ -11,6 +11,7 @@
     let userId = null;
     let locations = [];
     let viewMode = "daily";
+    const SaveBusy = () => window.OplixSaveBusy;
     let state = {
         locationId: "",
         monthId: M().monthIdFromDate(new Date()),
@@ -32,15 +33,61 @@
         return viewMode === "monthly" ? $("monthly-books-root") : $("data-input-root");
     }
 
-    function setBooksStatus(text) {
+    function isBooksSaveInFlight() {
+        return SaveBusy()?.isActive?.() || false;
+    }
+
+    function syncBooksToolbarBusy(busy) {
+        ["di", "mb"].forEach((prefix) => {
+            ["location", "month"].forEach((part) => {
+                const el = document.getElementById(`${prefix}-${part}`);
+                if (el) el.disabled = busy;
+            });
+            const reload = document.getElementById(`${prefix}-reload`);
+            if (reload) reload.disabled = busy;
+        });
+        const daySelect = document.getElementById("di-day");
+        if (daySelect) daySelect.disabled = busy;
+        document.querySelectorAll("#di-save-day, #di-save-month, .books-save").forEach((btn) => {
+            btn.disabled = busy || btn.dataset.booksLockedSave === "1";
+        });
+    }
+
+    function beginBooksSave(msg = "Saving — please wait") {
+        SaveBusy()?.begin(msg);
+        syncBooksToolbarBusy(true);
+    }
+
+    function endBooksSave() {
+        SaveBusy()?.end();
+        if (!isBooksSaveInFlight()) syncBooksToolbarBusy(false);
+    }
+
+    function setBooksStatus(text, options = {}) {
+        const saving =
+            options.saving === true || /^Saving/i.test(String(text || ""));
+        const loading =
+            options.loading === true || (/^Loading/i.test(String(text || "")) && !saving);
         ["di-status", "mb-status"].forEach((id) => {
             const el = document.getElementById(id);
-            if (el) el.textContent = text;
+            if (!el) return;
+            el.textContent = text;
+            el.classList.toggle("books-status--saving", saving);
+            el.classList.toggle("books-status--loading", loading);
         });
+        if (saving) syncBooksToolbarBusy(true);
+        else if (!isBooksSaveInFlight()) syncBooksToolbarBusy(loading);
     }
 
     function getBooksStatus() {
         return document.getElementById("di-status")?.textContent || document.getElementById("mb-status")?.textContent || "";
+    }
+
+    function blockBooksNavigationWhileSaving(revertEl, revertValue) {
+        if (!isBooksSaveInFlight()) return false;
+        if (revertEl && revertValue != null) revertEl.value = revertValue;
+        setBooksStatus("Saving…", { saving: true });
+        return true;
     }
 
     function isLocationSelect(id) {
@@ -122,6 +169,7 @@
     }
 
     function confirmDiscardDirty() {
+        if (isBooksSaveInFlight()) return false;
         if (!state.dirty) return true;
         return window.confirm("You have unsaved changes on this day. Discard them?");
     }
@@ -1074,10 +1122,12 @@
 
         panel.addEventListener("change", async (e) => {
             if (isLocationSelect(e.target.id)) {
+                if (blockBooksNavigationWhileSaving(e.target, state.locationId)) return;
                 if (!confirmDiscardDirty()) {
                     e.target.value = state.locationId;
                     return;
                 }
+                state.dirty = false;
                 state.locationId = e.target.value;
                 await loadCurrent();
                 return;
@@ -1085,16 +1135,19 @@
             if (isMonthSelect(e.target.id)) {
                 const next = e.target.value;
                 if (next === state.monthId) return;
+                if (blockBooksNavigationWhileSaving(e.target, state.monthId)) return;
                 if (!confirmDiscardDirty()) {
                     e.target.value = state.monthId;
                     return;
                 }
                 captureFormToState();
+                state.dirty = false;
                 state.monthId = next;
                 await loadCurrent();
                 return;
             }
             if (e.target.id === "di-day") {
+                if (blockBooksNavigationWhileSaving(e.target, state.dayId)) return;
                 if (!switchDay(e.target.value)) e.target.value = state.dayId;
                 return;
             }
@@ -1117,6 +1170,7 @@
         panel.addEventListener("click", (e) => {
             const tab = e.target.closest("[data-di-tab]");
             if (tab) {
+                if (isBooksSaveInFlight()) return;
                 if (!confirmDiscardDirty()) return;
                 captureFormToState();
                 state.tab = tab.dataset.diTab;
@@ -1124,6 +1178,7 @@
                 return;
             }
             if (isReloadButton(e.target.id)) {
+                if (isBooksSaveInFlight()) return;
                 if (!confirmDiscardDirty()) return;
                 loadCurrent({ bypassCache: true, force: true });
                 return;
@@ -1162,7 +1217,7 @@
                 return;
             }
             if (e.target.id === "di-save-day") {
-                saveDay();
+                if (!isBooksSaveInFlight()) saveDay();
                 return;
             }
             if (e.target.id === "di-open-books-config" && state.locationId) {
@@ -1810,7 +1865,7 @@
     async function loadCurrent(options = {}) {
         if (!state.locationId) return;
         if (!options.force && state.dirty) return;
-        setBooksStatus("Loading…");
+        setBooksStatus("Loading…", { loading: true });
         try {
             const loadOpts = options.bypassCache ? { bypassCache: true } : {};
             const { month, daysById } = await Store().loadMonth(
@@ -1851,7 +1906,8 @@
             return;
         }
         captureFormToState();
-        if (!options.silent) setBooksStatus("Saving…");
+        beginBooksSave();
+        if (!options.silent) setBooksStatus("Saving…", { saving: true });
         try {
             await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
         } catch (err) {
@@ -1859,6 +1915,8 @@
             setBooksStatus("Save failed — try again.");
             window.alert(err.message || "Could not save month. Check your connection and try again.");
             return;
+        } finally {
+            endBooksSave();
         }
         window.OplixAnalytics?.invalidateCache?.();
         state.dirty = false;
@@ -1886,13 +1944,14 @@
         captureFormToState();
         pruneEmptyDailyExpenseLines();
         pruneAllReconPayOuts();
+        beginBooksSave();
+        if (!options.silent) setBooksStatus("Saving…", { saving: true });
         try {
-            await syncPayablesFromChecks();
-        } catch (err) {
-            console.warn("[Oplix] Payables sync during save:", err);
-        }
-        if (!options.silent) setBooksStatus("Saving…");
-        try {
+            try {
+                await syncPayablesFromChecks();
+            } catch (err) {
+                console.warn("[Oplix] Payables sync during save:", err);
+            }
             await Promise.all([
                 Store().saveDay(userId, state.locationId, state.monthId, state.dayId, state.day),
                 Store().saveMonth(userId, state.locationId, state.monthId, state.month),
@@ -1904,6 +1963,8 @@
             window.alert(err.message || "Could not save day. Check your connection and try again.");
             state.dirty = true;
             return;
+        } finally {
+            endBooksSave();
         }
         window.OplixAnalytics?.invalidateCache?.();
         state.daysById[state.dayId] = { ...state.day, _dayId: state.dayId };

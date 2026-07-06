@@ -384,27 +384,29 @@
                     if (st) st.textContent = "Name is required.";
                     return;
                 }
-                if (st) st.textContent = attachState.pendingFile ? "Uploading file…" : "Saving…";
+                const saveMsg = attachState.pendingFile ? "Uploading file…" : "Saving…";
+                if (st) st.textContent = saveMsg;
                 try {
-                    const docId = id || Store().newId();
-                    const attachmentFields = await resolveAttachmentOnSave(
-                        form,
-                        attachState,
-                        docId,
-                        existingItem
-                    );
-                    const payload = readForm(form, attachmentFields);
-                    if (st) st.textContent = "Saving…";
-                    await Store().save(ctx.userId, ctx.locationId, docId, payload);
-                    const loc = ctx.data?.location;
-                    if (loc && window.OplixProfileDocumentSync && attachmentFields.attachmentUrl) {
-                        await OplixProfileDocumentSync.afterComplianceSave(
-                            ctx.userId,
-                            ctx.locationId,
-                            { ...loc, _documentsCache: ctx.data.documents || [] },
-                            { ...payload, id: docId }
+                    await OplixSaveBusy.run(async () => {
+                        const docId = id || Store().newId();
+                        const attachmentFields = await resolveAttachmentOnSave(
+                            form,
+                            attachState,
+                            docId,
+                            existingItem
                         );
-                    }
+                        const payload = readForm(form, attachmentFields);
+                        await Store().save(ctx.userId, ctx.locationId, docId, payload);
+                        const loc = ctx.data?.location;
+                        if (loc && window.OplixProfileDocumentSync && attachmentFields.attachmentUrl) {
+                            await OplixProfileDocumentSync.afterComplianceSave(
+                                ctx.userId,
+                                ctx.locationId,
+                                { ...loc, _documentsCache: ctx.data.documents || [] },
+                                { ...payload, id: docId }
+                            );
+                        }
+                    }, saveMsg);
                     closeForm();
                     setStatus("Saved.");
                     await ctx.onRefresh();

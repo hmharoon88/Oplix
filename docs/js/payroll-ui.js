@@ -172,59 +172,61 @@
         const keptIds = new Set();
 
         try {
-            for (const row of state.rows) {
-                const hours = B().num(row.hours);
-                const rate = B().num(row.hourlyRate);
-                const name = String(row.employeeName || "").trim();
-                if (!name && !row.employeeId) continue;
-                if (hours <= 0 && rate <= 0) continue;
+            await OplixSaveBusy.run(async () => {
+                for (const row of state.rows) {
+                    const hours = B().num(row.hours);
+                    const rate = B().num(row.hourlyRate);
+                    const name = String(row.employeeName || "").trim();
+                    if (!name && !row.employeeId) continue;
+                    if (hours <= 0 && rate <= 0) continue;
 
-                const payload = M().normalizeEntry(
-                    {
-                        id: row.id || undefined,
-                        periodType: state.periodMode,
-                        periodKey: key,
-                        employeeId: row.employeeId,
-                        employeeName: name || "Employee",
-                        hours,
-                        hourlyRate: rate,
-                        notes: row.notes,
-                        active: true,
-                    },
-                    locId
-                );
+                    const payload = M().normalizeEntry(
+                        {
+                            id: row.id || undefined,
+                            periodType: state.periodMode,
+                            periodKey: key,
+                            employeeId: row.employeeId,
+                            employeeName: name || "Employee",
+                            hours,
+                            hourlyRate: rate,
+                            notes: row.notes,
+                            active: true,
+                        },
+                        locId
+                    );
 
-                const id = await Store().save(userId, locId, payload);
-                keptIds.add(id);
-            }
-
-            for (const old of existingForPeriod) {
-                if (old.id && !keptIds.has(old.id)) {
-                    await Store().remove(userId, locId, old.id);
+                    const id = await Store().save(userId, locId, payload);
+                    keptIds.add(id);
                 }
-            }
 
-            state.entries = await Store().list(userId, locId);
-            const booksMonth = M().entryMonthId(
-                { periodType: state.periodMode, periodKey: key },
-                B()
-            );
-            const syncResults = await Store().syncAllBooksMonths(userId, locId, [booksMonth]);
-            const synced = syncResults.find((r) => r.month) || syncResults[0];
-            const monthLabelStr = booksMonth
-                ? B().parseMonthId(booksMonth).toLocaleDateString("en-US", {
-                      month: "long",
-                      year: "numeric",
-                  })
-                : "";
+                for (const old of existingForPeriod) {
+                    if (old.id && !keptIds.has(old.id)) {
+                        await Store().remove(userId, locId, old.id);
+                    }
+                }
 
-            state.status = synced
-                ? `Saved and synced to Daily books${monthLabelStr ? ` (${monthLabelStr})` : ""}.`
-                : "Saved.";
-            await loadEntries();
-            if (window.OplixDataInput?.refreshIfOpen && booksMonth) {
-                OplixDataInput.refreshIfOpen(locId, booksMonth);
-            }
+                state.entries = await Store().list(userId, locId);
+                const booksMonth = M().entryMonthId(
+                    { periodType: state.periodMode, periodKey: key },
+                    B()
+                );
+                const syncResults = await Store().syncAllBooksMonths(userId, locId, [booksMonth]);
+                const synced = syncResults.find((r) => r.month) || syncResults[0];
+                const monthLabelStr = booksMonth
+                    ? B().parseMonthId(booksMonth).toLocaleDateString("en-US", {
+                          month: "long",
+                          year: "numeric",
+                      })
+                    : "";
+
+                state.status = synced
+                    ? `Saved and synced to Daily books${monthLabelStr ? ` (${monthLabelStr})` : ""}.`
+                    : "Saved.";
+                await loadEntries();
+                if (window.OplixDataInput?.refreshIfOpen && booksMonth) {
+                    OplixDataInput.refreshIfOpen(locId, booksMonth);
+                }
+            }, "Saving…");
             setTimeout(() => {
                 if (state.status.includes("Saved")) state.status = "";
                 render();

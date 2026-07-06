@@ -212,21 +212,23 @@
         render();
 
         try {
-            if (!Store()) throw new Error("Task store not loaded. Hard refresh the page.");
-            const payload = M().buildNewTask({
-                description,
-                locationId: locId,
-                assignedEmployeeIds: employeeIds,
-                frequency:
-                    state.category === "corrective" ? "one_time" : frequency,
-                id: Store().newId(),
-            });
-            await Store().create(userId, locId, payload);
-            closeForms();
-            await loadData(true);
+            await OplixSaveBusy.run(async () => {
+                if (!Store()) throw new Error("Task store not loaded. Hard refresh the page.");
+                const payload = M().buildNewTask({
+                    description,
+                    locationId: locId,
+                    assignedEmployeeIds: employeeIds,
+                    frequency:
+                        state.category === "corrective" ? "one_time" : frequency,
+                    id: Store().newId(),
+                });
+                await Store().create(userId, locId, payload);
+                closeForms();
+                await loadData(true);
+                await refreshDashboard();
+                persistView();
+            }, "Saving…");
             setStatus("Task saved to Firebase.", "success");
-            await refreshDashboard();
-            persistView();
         } catch (err) {
             console.error("Task create failed:", err);
             setStatus(err.message || "Failed to save task.", "error");
@@ -258,46 +260,48 @@
         render();
 
         try {
-            const payload = M().mergeTaskUpdate(
-                existing,
-                {
-                    description,
-                    assignedEmployeeIds: employeeIds,
-                    frequency,
-                },
-                locId
-            );
-            await Store().update(userId, locId, payload);
-
-            if (
-                existing.crossLocationGroupId &&
-                locations.length > 1 &&
-                window.confirm(
-                    "This task exists at multiple locations.\n\nApply description and frequency changes to all locations that have this task?\n\n(Assignees always stay per location.)"
-                )
-            ) {
-                const { updated, failed } = await Store().propagateSiblings(
-                    userId,
-                    locId,
-                    existing.crossLocationGroupId,
-                    description,
-                    frequency
+            await OplixSaveBusy.run(async () => {
+                const payload = M().mergeTaskUpdate(
+                    existing,
+                    {
+                        description,
+                        assignedEmployeeIds: employeeIds,
+                        frequency,
+                    },
+                    locId
                 );
-                if (failed > 0) {
-                    setStatus(
-                        `Saved here. ${updated} other location(s) updated; ${failed} could not be updated.`,
-                        "error"
-                    );
-                }
-            }
+                await Store().update(userId, locId, payload);
 
-            closeForms();
-            await loadData(true);
+                if (
+                    existing.crossLocationGroupId &&
+                    locations.length > 1 &&
+                    window.confirm(
+                        "This task exists at multiple locations.\n\nApply description and frequency changes to all locations that have this task?\n\n(Assignees always stay per location.)"
+                    )
+                ) {
+                    const { updated, failed } = await Store().propagateSiblings(
+                        userId,
+                        locId,
+                        existing.crossLocationGroupId,
+                        description,
+                        frequency
+                    );
+                    if (failed > 0) {
+                        setStatus(
+                            `Saved here. ${updated} other location(s) updated; ${failed} could not be updated.`,
+                            "error"
+                        );
+                    }
+                }
+
+                closeForms();
+                await loadData(true);
+                await refreshDashboard();
+                persistView();
+            }, "Saving…");
             if (!state.statusKind || state.statusKind === "info") {
                 setStatus("Task updated.", "success");
             }
-            await refreshDashboard();
-            persistView();
         } catch (err) {
             console.error("Task update failed:", err);
             setStatus(err.message || "Failed to update task.", "error");
@@ -316,11 +320,13 @@
         setStatus("Deleting…", "info");
         render();
         try {
-            await Store().remove(userId, locId, taskId);
-            if (state.editingTaskId === taskId) closeForms();
-            await loadData(true);
+            await OplixSaveBusy.run(async () => {
+                await Store().remove(userId, locId, taskId);
+                if (state.editingTaskId === taskId) closeForms();
+                await loadData(true);
+                await refreshDashboard();
+            }, "Deleting…");
             setStatus("Task deleted.", "success");
-            await refreshDashboard();
         } catch (err) {
             console.error("Task delete failed:", err);
             setStatus(err.message || "Failed to delete task.", "error");

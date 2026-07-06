@@ -237,17 +237,19 @@
                     }
                 }
                 try {
-                    const existing = (ctx.payables || []).find((p) => p.id === id) || {};
-                    const payload = readForm(form, ctx.locationId, {
-                        ...existing,
-                        id: id || Store().newId(),
-                        createdAt: existing.createdAt,
-                    });
-                    if (!payload.isPaid) payload.paidAt = null;
-                    else if (!existing.paidAt) {
-                        payload.paidAt = firebase.firestore.FieldValue.serverTimestamp();
-                    } else payload.paidAt = existing.paidAt;
-                    await Store().save(ctx.userId, ctx.locationId, payload);
+                    await OplixSaveBusy.run(async () => {
+                        const existing = (ctx.payables || []).find((p) => p.id === id) || {};
+                        const payload = readForm(form, ctx.locationId, {
+                            ...existing,
+                            id: id || Store().newId(),
+                            createdAt: existing.createdAt,
+                        });
+                        if (!payload.isPaid) payload.paidAt = null;
+                        else if (!existing.paidAt) {
+                            payload.paidAt = firebase.firestore.FieldValue.serverTimestamp();
+                        } else payload.paidAt = existing.paidAt;
+                        await Store().save(ctx.userId, ctx.locationId, payload);
+                    }, "Saving…");
                     closeForm();
                     setStatus("Saved.");
                     await ctx.onRefresh();
@@ -274,19 +276,25 @@
                 if (!item) return;
                 setStatus("Updating…");
                 try {
-                    if (ctx.onRecordCheckPayment) {
-                        const record = window.confirm(
-                            `Mark "${item.payTo || "payable"}" paid and add a Checks/ACH line on today's daily sheet?`
-                        );
-                        if (record) {
-                            await ctx.onRecordCheckPayment(item);
-                            setStatus("Marked paid and recorded on daily sheet.");
-                            await ctx.onRefresh();
-                            return;
+                    let recordedOnSheet = false;
+                    await OplixSaveBusy.run(async () => {
+                        if (ctx.onRecordCheckPayment) {
+                            const record = window.confirm(
+                                `Mark "${item.payTo || "payable"}" paid and add a Checks/ACH line on today's daily sheet?`
+                            );
+                            if (record) {
+                                await ctx.onRecordCheckPayment(item);
+                                recordedOnSheet = true;
+                                return;
+                            }
                         }
-                    }
-                    await Store().markPaid(ctx.userId, ctx.locationId, item);
-                    setStatus("Marked paid.");
+                        await Store().markPaid(ctx.userId, ctx.locationId, item);
+                    }, "Updating…");
+                    setStatus(
+                        recordedOnSheet
+                            ? "Marked paid and recorded on daily sheet."
+                            : "Marked paid."
+                    );
                     await ctx.onRefresh();
                 } catch (err) {
                     setStatus(err.message || "Update failed.");

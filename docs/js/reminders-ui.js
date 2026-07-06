@@ -256,17 +256,19 @@
                 const dueStr = String(fd.get("dueDate") || "").trim();
                 const existing = reminders().find((r) => r.id === id) || {};
                 try {
-                    await save(ctx.userId, ctx.locationId, {
-                        ...existing,
-                        id: id || newId(),
-                        locationId: ctx.locationId,
-                        title,
-                        notes: String(fd.get("notes") || "").trim(),
-                        dueDate: dueTimestampFromInput(dueStr),
-                        isCompleted: existing.isCompleted || false,
-                        completedAt: existing.completedAt || null,
-                        createdAt: existing.createdAt,
-                    });
+                    await OplixSaveBusy.run(async () => {
+                        await save(ctx.userId, ctx.locationId, {
+                            ...existing,
+                            id: id || newId(),
+                            locationId: ctx.locationId,
+                            title,
+                            notes: String(fd.get("notes") || "").trim(),
+                            dueDate: dueTimestampFromInput(dueStr),
+                            isCompleted: existing.isCompleted || false,
+                            completedAt: existing.completedAt || null,
+                            createdAt: existing.createdAt,
+                        });
+                    }, "Saving…");
                     closeForm();
                     setStatus("Saved.");
                     await ctx.onRefresh();

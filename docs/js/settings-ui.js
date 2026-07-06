@@ -302,9 +302,11 @@
         state.savingNotif = true;
         renderPanel();
         try {
-            const prefs = Store().buildNotificationPrefs(form);
-            await Store().updateNotificationPrefs(userId, prefs);
-            profile = { ...profile, notificationPrefs: prefs };
+            await OplixSaveBusy.run(async () => {
+                const prefs = Store().buildNotificationPrefs(form);
+                await Store().updateNotificationPrefs(userId, prefs);
+                profile = { ...profile, notificationPrefs: prefs };
+            }, "Saving…");
             setStatus("Notification preferences saved.", "success");
         } catch (err) {
             setStatus(err.message || "Failed to save notifications.", "error");
@@ -321,13 +323,15 @@
         setStatus("Saving…", "info");
         renderPanel();
         try {
-            await Store().updateOrganizationName(userId, name);
-            state.orgName = name.trim();
-            profile = { ...profile, organizationName: state.orgName || null };
+            await OplixSaveBusy.run(async () => {
+                await Store().updateOrganizationName(userId, name);
+                state.orgName = name.trim();
+                profile = { ...profile, organizationName: state.orgName || null };
+                if (window.OplixHomeOverview && window.OplixDashboard?.reloadLocations) {
+                    await OplixDashboard.reloadLocations();
+                }
+            }, "Saving…");
             setStatus("Organization name saved.", "success");
-            if (window.OplixHomeOverview && window.OplixDashboard?.reloadLocations) {
-                await OplixDashboard.reloadLocations();
-            }
         } catch (err) {
             setStatus(err.message || "Failed to save.", "error");
         } finally {

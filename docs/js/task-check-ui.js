@@ -570,23 +570,25 @@
         state.statusKind = "info";
         renderPanel();
         try {
-            const updated = await Store().reviewCompletion(userId, state.locationId, task, {
-                employeeId: m.employeeId,
-                approved,
-                note,
-                reviewerId: reviewerUserId || userId,
-                completionTimestamp: m.historyTimestamp
-                    ? new Date(m.historyTimestamp)
-                    : null,
-            });
-            const idx = state.tasks.findIndex((t) => t.id === updated.id);
-            if (idx >= 0) state.tasks[idx] = updated;
-            await loadManagerTasks();
+            await OplixSaveBusy.run(async () => {
+                const updated = await Store().reviewCompletion(userId, state.locationId, task, {
+                    employeeId: m.employeeId,
+                    approved,
+                    note,
+                    reviewerId: reviewerUserId || userId,
+                    completionTimestamp: m.historyTimestamp
+                        ? new Date(m.historyTimestamp)
+                        : null,
+                });
+                const idx = state.tasks.findIndex((t) => t.id === updated.id);
+                if (idx >= 0) state.tasks[idx] = updated;
+                await loadManagerTasks();
+                if (window.OplixDashboard?.reloadLocations) await OplixDashboard.reloadLocations();
+            }, "Saving review…");
             state.status = approved ? "Approved." : "Disapproved.";
             state.statusKind = "success";
             closePhotoModal();
             renderPanel();
-            if (window.OplixDashboard?.reloadLocations) await OplixDashboard.reloadLocations();
         } catch (err) {
             state.status = err.message || "Review failed.";
             state.statusKind = "error";

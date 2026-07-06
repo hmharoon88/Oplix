@@ -2745,6 +2745,100 @@ input.books-input[type="date"]::-webkit-calendar-picker-indicator {
     color: var(--dash-muted);
 }
 
+.books-status--saving,
+.books-status--loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--dash-accent, #2563eb);
+}
+
+.books-status--saving::before,
+.books-status--loading::before {
+    content: "";
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: books-status-spin 0.65s linear infinite;
+}
+
+.books-saving-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1e40af;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.books-saving-strip-spinner {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #93c5fd;
+    border-top-color: #1d4ed8;
+    border-radius: 50%;
+    animation: books-status-spin 0.65s linear infinite;
+}
+
+.oplix-save-busy {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1e40af;
+    font-size: 0.9rem;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 200;
+}
+
+.oplix-save-busy[hidden] {
+    display: none !important;
+}
+
+.oplix-save-busy-spinner {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #93c5fd;
+    border-top-color: #1d4ed8;
+    border-radius: 50%;
+    animation: books-status-spin 0.65s linear infinite;
+}
+
+body.oplix-save-busy-active .sidebar-btn {
+    opacity: 0.55;
+    pointer-events: none;
+    cursor: not-allowed;
+}
+
+@keyframes books-status-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.books-toolbar .books-select:disabled,
+.books-toolbar .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 .books-lines {
     margin-bottom: 16px;
 }

@@ -1209,9 +1209,11 @@
                     return;
                 }
                 try {
-                    await Store().deleteLocation(userId, currentDetail.location.id);
+                    await OplixSaveBusy.run(async () => {
+                        await Store().deleteLocation(userId, currentDetail.location.id);
+                        await afterLocationsChanged();
+                    }, "Deleting…");
                     closeLocation();
-                    await afterLocationsChanged();
                 } catch (err) {
                     alert(err.message || "Could not delete facility.");
                 }
@@ -1230,20 +1232,22 @@
 
             if (status) status.textContent = "Creating…";
             try {
-                const created = await Store().createLocation(userId, {
-                    name,
-                    address,
-                    facilityType,
-                });
+                await OplixSaveBusy.run(async () => {
+                    const created = await Store().createLocation(userId, {
+                        name,
+                        address,
+                        facilityType,
+                    });
+                    await afterLocationsChanged();
+                    if (window.OplixLocationDirectoryStore && created?.id) {
+                        await OplixLocationDirectoryStore.ensureDefaultUtilityProviders(
+                            userId,
+                            created.id
+                        );
+                    }
+                }, "Creating…");
                 showCreateForm = false;
                 if (status) status.textContent = "";
-                await afterLocationsChanged();
-                if (window.OplixLocationDirectoryStore && created?.id) {
-                    await OplixLocationDirectoryStore.ensureDefaultUtilityProviders(
-                        userId,
-                        created.id
-                    );
-                }
             } catch (err) {
                 if (status) status.textContent = err.message || "Could not create facility.";
             }

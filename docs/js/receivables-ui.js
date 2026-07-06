@@ -251,18 +251,20 @@
                     }
                 }
                 try {
-                    const existing = (ctx.receivables || []).find((r) => r.id === id) || {};
-                    const payload = readForm(form, ctx.locationId, {
-                        ...existing,
-                        id: id || Store().newId(),
-                        createdAt: existing.createdAt,
-                    });
-                    if (!payload.isReceived) payload.receivedAt = null;
-                    else if (!existing.receivedAt) {
-                        payload.receivedAt = firebase.firestore.FieldValue.serverTimestamp();
-                    } else payload.receivedAt = existing.receivedAt;
-                    await Store().save(ctx.userId, ctx.locationId, payload);
-                    await afterReceivableChange(ctx, payload);
+                    await OplixSaveBusy.run(async () => {
+                        const existing = (ctx.receivables || []).find((r) => r.id === id) || {};
+                        const payload = readForm(form, ctx.locationId, {
+                            ...existing,
+                            id: id || Store().newId(),
+                            createdAt: existing.createdAt,
+                        });
+                        if (!payload.isReceived) payload.receivedAt = null;
+                        else if (!existing.receivedAt) {
+                            payload.receivedAt = firebase.firestore.FieldValue.serverTimestamp();
+                        } else payload.receivedAt = existing.receivedAt;
+                        await Store().save(ctx.userId, ctx.locationId, payload);
+                        await afterReceivableChange(ctx, payload);
+                    }, "Saving…");
                     closeForm();
                     setStatus("Saved.");
                     await ctx.onRefresh();
@@ -289,8 +291,10 @@
                 if (!item) return;
                 setStatus("Updating…");
                 try {
-                    await Store().markReceived(ctx.userId, ctx.locationId, item);
-                    await afterReceivableChange(ctx, { ...item, isReceived: true, receivedAt: new Date() });
+                    await OplixSaveBusy.run(async () => {
+                        await Store().markReceived(ctx.userId, ctx.locationId, item);
+                        await afterReceivableChange(ctx, { ...item, isReceived: true, receivedAt: new Date() });
+                    }, "Updating…");
                     setStatus("Marked received — added to Books Net for this month.");
                     await ctx.onRefresh();
                 } catch (err) {

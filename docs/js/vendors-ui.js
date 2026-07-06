@@ -281,7 +281,9 @@
 
         if (status) status.textContent = "Saving…";
         try {
-            await Store().save(userId, locationId, M().COLLECTIONS.vendors, id, payload);
+            await OplixSaveBusy.run(async () => {
+                await Store().save(userId, locationId, M().COLLECTIONS.vendors, id, payload);
+            }, "Saving…");
             hideForm();
             await refresh();
         } catch (err) {

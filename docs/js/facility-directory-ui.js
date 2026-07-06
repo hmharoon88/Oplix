@@ -456,11 +456,17 @@
             }
 
             setStatus("Saving…");
-            await Store().save(ctx.userId, ctx.locationId, kind, id, payload);
-            hideForm();
-            setStatus("Saved.");
-            setTimeout(() => setStatus(""), 2000);
-            await ctx.onRefresh();
+            try {
+                await OplixSaveBusy.run(async () => {
+                    await Store().save(ctx.userId, ctx.locationId, kind, id, payload);
+                }, "Saving…");
+                hideForm();
+                setStatus("Saved.");
+                setTimeout(() => setStatus(""), 2000);
+                await ctx.onRefresh();
+            } catch (err) {
+                setStatus(err.message || "Save failed.");
+            }
         });
     }
 
