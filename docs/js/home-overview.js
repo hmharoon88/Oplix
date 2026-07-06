@@ -199,6 +199,44 @@
         return total;
     }
 
+    /** Days with daily books entry vs calendar days elapsed this month (through asOfDate). */
+    function monthToDateDaysEntered(location, bundle, daysById, asOfDate) {
+        const M = window.OplixBooksModel;
+        const elapsed = asOfDate.getDate();
+        if (!M) return { withData: 0, elapsed };
+
+        const prefix = monthBooksPrefix(asOfDate);
+        const todayDay = M.dayIdFromDate(asOfDate);
+        const hasGas = isGasLocation(location);
+
+        if (hasMonthBooksDays(daysById, asOfDate)) {
+            let withData = 0;
+            Object.entries(daysById || {}).forEach(([dayId, day]) => {
+                if (!dayId.startsWith(prefix) || dayId > todayDay) return;
+                if (M.dayHasEntryData(day, { hasGasStation: hasGas })) withData += 1;
+            });
+            return { withData, elapsed };
+        }
+
+        const monthStart = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), 1);
+        const monthEnd = new Date(
+            asOfDate.getFullYear(),
+            asOfDate.getMonth(),
+            asOfDate.getDate(),
+            23,
+            59,
+            59
+        );
+        const dayIds = new Set();
+        for (const shift of bundle.shifts || []) {
+            if (!shiftHasRegisterData(shift)) continue;
+            const date = shiftDateRef(shift);
+            if (!date || !isInDateRange(date, monthStart, monthEnd)) continue;
+            dayIds.add(M.dayIdFromDate(date));
+        }
+        return { withData: dayIds.size, elapsed };
+    }
+
     function sumRegisterCashExpenses(register) {
         if (!register) return 0;
         if (register.cashExpenseAmounts?.length) {
@@ -718,6 +756,8 @@
             monthToDateExpenses = monthToDateExpensesFromBooks(daysById, asOfDate);
         }
 
+        const daysEntered = monthToDateDaysEntered(location, bundle, daysById, asOfDate);
+
         return {
             monthToDateSales: monthToDateStoreSales,
             monthToDateLotterySales,
@@ -725,6 +765,8 @@
             monthToDateExpenses,
             monthToDateFuelGallons,
             monthToDateFuelDollars,
+            mtdDaysWithData: daysEntered.withData,
+            mtdDaysElapsed: daysEntered.elapsed,
         };
     }
 
@@ -1453,6 +1495,12 @@
         </td>`;
     }
 
+    function formatMtdDaysInline(withData, elapsed) {
+        const days = Number(withData) || 0;
+        const total = Number(elapsed) || 0;
+        return `<span class="home-mtd-days-inline" title="${days} of ${total} calendar days entered">${days}/${total}</span>`;
+    }
+
     function renderMonthToDateTable(stats) {
         if (!stats.length) return "";
         const rows = [...stats].sort((a, b) => b.monthToDateSales - a.monthToDateSales);
@@ -1464,7 +1512,7 @@
             <div class="home-cc-block home-cc-full">
                 <h2 class="home-cc-heading">Month to date</h2>
                 ${window.OplixBooksTrendLegend ? OplixBooksTrendLegend.legendHtml("mtd") : '<p class="books-hint home-mtd-hint">Compared to the same days last month.</p>'}
-                <p class="books-hint home-mtd-detail-hint">Store sales — merch for gas; register card + cash for C Store. Expenses — Daily books daily sheet when entered there; otherwise shift register payouts.</p>
+                <p class="books-hint home-mtd-detail-hint">Store sales — merch for gas; register card + cash for C Store. Expenses — Daily books daily sheet when entered there; otherwise shift register payouts. Number beside each facility — days entered / days so far this month.</p>
                 <div class="home-card home-cc-table-wrap">
                     <table class="home-cc-table home-cc-table--mtd">
                         <thead>
@@ -1483,7 +1531,7 @@
                                 .map(
                                     (s) => `
                             <tr>
-                                <td><strong>${escapeHtml(s.locationName)}</strong></td>
+                                <td><strong>${escapeHtml(s.locationName)}</strong> ${formatMtdDaysInline(s.mtdDaysWithData, s.mtdDaysElapsed)}</td>
                                 ${renderMtdCell(s.monthToDateSales, prev(s).monthToDateSales, formatCurrencyCompact, trendOpts(s))}
                                 ${renderMtdCell(s.monthToDateFuelGallons, prev(s).monthToDateFuelGallons, formatNumberCompact, trendOpts(s))}
                                 ${renderMtdCell(s.monthToDateFuelDollars, prev(s).monthToDateFuelDollars, formatCurrencyCompact, trendOpts(s))}
