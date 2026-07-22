@@ -55,6 +55,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
+        Task { @MainActor in
+            NotificationService.shared.noteAPNsTokenReceived()
+        }
     }
 
     func application(_ application: UIApplication,
@@ -64,6 +67,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // signing profile. Logged but non-fatal — the app still works,
         // just won't receive push.
         print("⚠️ APNs registration failed: \(error.localizedDescription)")
+        Task { @MainActor in
+            NotificationService.shared.noteAPNsRegistrationFailed(error)
+        }
     }
 }
 
@@ -127,14 +133,29 @@ struct RootView: View {
     @ObservedObject private var notificationService = NotificationService.shared
     @State private var showingNotificationPreprompt = false
 
+    // Stale clock: iOS can keep the app frozen in the background for
+    // hours; on resume every open screen still shows the data from
+    // when it was frozen. If we were away longer than this threshold,
+    // bump `sessionEpoch` — which rebuilds the whole signed-in view
+    // tree from scratch — so all screens reload fresh from Firestore.
+    // (A shift-close form seeded with hours-old Begin numbers is how
+    // false lottery shorts happened; see Fast Mart 7/16.)
+    @State private var backgroundedAt: Date?
+    @State private var sessionEpoch = 0
+    @State private var showingSessionRefreshedNotice = false
+    private static let staleSessionThreshold: TimeInterval = 30 * 60
+
     var body: some View {
         Group {
             if authViewModel.isAuthenticated, let user = authViewModel.currentUser {
-                if user.role == .manager {
-                    ManagerDashboardView()
-                } else {
-                    EmployeeHomeView(user: user)
+                Group {
+                    if user.role == .manager {
+                        ManagerDashboardView()
+                    } else {
+                        EmployeeHomeView(user: user)
+                    }
                 }
+                .id(sessionEpoch)
             } else {
                 RoleSelectionView()
             }
@@ -156,23 +177,75 @@ struct RootView: View {
             if authViewModel.isAuthenticated {
                 notificationService.registerCurrentUser()
                 await notificationService.refreshAuthStatus()
-                if notificationService.authStatus == .authorized {
-                    await notificationService.refreshAndPersistFCMToken()
-                } else if notificationService.authStatus == .notDetermined,
-                          !UserDefaults.standard.bool(forKey: NotificationPermissionView.didShowPrepromptKey) {
-                    showingNotificationPreprompt = true
+
+                let wantsPush = authViewModel.currentUser?.notificationPrefs?.channels?.resolvedPush ?? true
+                if wantsPush {
+                    switch notificationService.authStatus {
+                    case .authorized:
+                        await notificationService.refreshAndPersistFCMToken()
+                    case .notDetermined:
+                        if UserDefaults.standard.bool(forKey: NotificationPermissionView.didShowPrepromptKey) {
+                            // Employee tapped "Maybe later" — iOS was never asked.
+                            // Manager login used to be the only path that fixed this.
+                            await notificationService.ensurePushDeliveryReady()
+                        } else {
+                            showingNotificationPreprompt = true
+                        }
+                    default:
+                        break
+                    }
                 }
             } else {
                 await notificationService.unregisterCurrentDevice()
+                UserDefaults.standard.removeObject(forKey: NotificationPermissionView.didShowPrepromptKey)
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active, authViewModel.isAuthenticated else { return }
-            Task { await notificationService.refreshAndPersistFCMToken() }
+            switch phase {
+            case .background:
+                backgroundedAt = Date()
+            case .active:
+                guard authViewModel.isAuthenticated else {
+                    backgroundedAt = nil
+                    return
+                }
+                Task { await notificationService.refreshAndPersistFCMToken() }
+                if let backgroundedAt,
+                   Date().timeIntervalSince(backgroundedAt) >= Self.staleSessionThreshold {
+                    sessionEpoch += 1
+                    showingSessionRefreshedNotice = true
+                }
+                backgroundedAt = nil
+            default:
+                break
+            }
+        }
+        .overlay(alignment: .top) {
+            if showingSessionRefreshedNotice {
+                sessionRefreshedBanner
+            }
         }
         .sheet(isPresented: $showingNotificationPreprompt) {
             NotificationPermissionView()
                 .interactiveDismissDisabled(false)
+        }
+    }
+
+    private var sessionRefreshedBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.clockwise.circle.fill")
+            Text("Refreshed with the latest data")
+        }
+        .font(.footnote.weight(.medium))
+        .foregroundColor(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(Color.black.opacity(0.75)))
+        .padding(.top, 8)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            showingSessionRefreshedNotice = false
         }
     }
 }

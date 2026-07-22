@@ -52,13 +52,22 @@ struct NotificationSettingsView: View {
             Theme.secondaryGradient.ignoresSafeArea()
 
             Form {
+                if !notificationService.canDeliverOutsideApp {
+                    pushDeliveryStatusBanner
+                }
+
                 if notificationService.authStatus == .denied {
                     iOSPushDeniedBanner
                 }
 
                 Section {
                     Toggle("Push notifications", isOn: $pushEnabled)
-                        .onChange(of: pushEnabled) { _, _ in scheduleSave() }
+                        .onChange(of: pushEnabled) { _, newValue in
+                            if newValue {
+                                Task { await notificationService.ensurePushDeliveryReady() }
+                            }
+                            scheduleSave()
+                        }
                     Toggle("Email notifications", isOn: $emailEnabled)
                         .onChange(of: emailEnabled) { _, _ in scheduleSave() }
                 } header: {
@@ -126,10 +135,76 @@ struct NotificationSettingsView: View {
         }
         .task {
             await notificationService.refreshAuthStatus()
+            if pushEnabled {
+                await notificationService.ensurePushDeliveryReady()
+            }
             if !hasLoaded {
                 loadFromUser()
                 hasLoaded = true
             }
+        }
+    }
+
+    // MARK: - Delivery status (in-app prefs vs lock-screen push)
+
+    private var pushDeliveryStatusBanner: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "iphone.and.arrow.forward")
+                        .foregroundColor(.orange)
+                    Text("Lock-screen delivery")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.black)
+                }
+
+                Text(deliveryStatusMessage)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if let registrationMessage = notificationService.registrationMessage,
+                   !notificationService.canDeliverOutsideApp {
+                    Text(registrationMessage)
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+
+                if notificationService.authStatus != .denied {
+                    Button {
+                        Task { await notificationService.ensurePushDeliveryReady() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if notificationService.isRegisteringDevice {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            }
+                            Text(notificationService.isRegisteringDevice
+                                  ? "Registering…"
+                                  : "Enable iOS notifications")
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(Theme.cloudBlue)
+                    .disabled(notificationService.isRegisteringDevice)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var deliveryStatusMessage: String {
+        switch notificationService.authStatus {
+        case .authorized:
+            if notificationService.hasPersistedToken {
+                return "This device is registered. You should get alerts when the app is closed."
+            }
+            return "iOS allows notifications, but this device isn’t registered yet. Tap Enable below, then reopen the app."
+        case .denied:
+            return "Oplix preferences are on, but iOS is blocking alerts. Use Open Settings below."
+        case .notDetermined:
+            return "Oplix preferences are on, but iOS hasn’t been asked yet. Tap Enable below."
+        default:
+            return "Turn on iOS notifications to get task alerts outside the app."
         }
     }
 

@@ -1225,6 +1225,29 @@ class FirebaseService: ObservableObject {
         // Similar limitation - would need to query across locations
         return []
     }
+
+    /// Most recent closes for a location, newest first. Used by the
+    /// duplicate-close guard and the Begin verification at shift close.
+    /// Pass `source: .server` to bypass the offline cache — that makes
+    /// the call double as the "are we really online?" check.
+    func fetchRecentLotteryForms(
+        userId: String,
+        locationId: String,
+        limit: Int,
+        source: FirestoreSource = .default
+    ) async throws -> [LotteryForm] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryForms")
+            .order(by: "submittedAt", descending: true)
+            .limit(to: limit)
+            .getDocuments(source: source)
+        return try snapshot.documents.compactMap { doc in
+            try doc.data(as: LotteryForm.self)
+        }
+    }
     
     func createLotteryForm(userId: String, locationId: String, form: LotteryForm) async throws {
         try db.collection("users")
@@ -1271,7 +1294,10 @@ class FirebaseService: ObservableObject {
                 totalCashes: summary.totalCashes,
                 cashInBag: summary.cashInBag,
                 cashInBagNet: summary.cashInBagNet,
-                overShort: overShort
+                overShort: overShort,
+                lotteryReturnDeduction: summary.lotteryReturnDeduction,
+                lotteryPackCloseoutAddition: summary.lotteryPackCloseoutAddition,
+                packReturns: summary.packReturns
             )
         }
         
@@ -1342,10 +1368,13 @@ class FirebaseService: ObservableObject {
     /// Terminal-aware fetch. `nil` (or `1`) reads the legacy `"template"`
     /// doc; higher numbers read `"terminal_N"`. Returns nil if the doc
     /// is absent (e.g. terminal 3 was never configured).
+    /// Pass `source: .server` to bypass the offline cache (required at
+    /// shift close, where a cached copy can silently be hours old).
     func fetchLotteryFormTemplate(
         userId: String,
         locationId: String,
-        terminalNumber: Int?
+        terminalNumber: Int?,
+        source: FirestoreSource = .default
     ) async throws -> LotteryFormTemplate? {
         let docId = lotteryTemplateDocId(for: terminalNumber)
         let document = try await db.collection("users")
@@ -1354,7 +1383,7 @@ class FirebaseService: ObservableObject {
             .document(locationId)
             .collection("lotteryFormTemplate")
             .document(docId)
-            .getDocument()
+            .getDocument(source: source)
 
         guard document.exists else { return nil }
         return try document.data(as: LotteryFormTemplate.self)
@@ -1380,6 +1409,230 @@ class FirebaseService: ObservableObject {
 
         return templates.sorted {
             $0.effectiveTerminalNumber < $1.effectiveTerminalNumber
+        }
+    }
+
+    // MARK: - Lottery Returns
+
+    func fetchPendingLotteryReturns(
+        userId: String,
+        locationId: String,
+        terminalNumber: Int? = nil
+    ) async throws -> [LotteryReturn] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryReturns")
+            .whereField("status", isEqualTo: LotteryReturnStatus.pending.rawValue)
+            .getDocuments()
+
+        let all = try snapshot.documents.compactMap { doc -> LotteryReturn? in
+            try doc.data(as: LotteryReturn.self)
+        }
+
+        guard let terminalNumber, terminalNumber > 1 else {
+            return all.filter { ($0.terminalNumber ?? 1) <= 1 }
+        }
+        return all.filter { ($0.terminalNumber ?? 1) == terminalNumber }
+    }
+
+    /// Recent returns (pending + applied) for pack inventory history.
+    func fetchRecentLotteryReturns(
+        userId: String,
+        locationId: String,
+        terminalNumber: Int? = nil,
+        limit: Int = 40
+    ) async throws -> [LotteryReturn] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryReturns")
+            .order(by: "createdAt", descending: true)
+            .limit(to: limit)
+            .getDocuments()
+
+        let all = try snapshot.documents.compactMap { doc -> LotteryReturn? in
+            try doc.data(as: LotteryReturn.self)
+        }
+
+        guard let terminalNumber, terminalNumber > 1 else {
+            return all.filter { ($0.terminalNumber ?? 1) <= 1 }
+        }
+        return all.filter { ($0.terminalNumber ?? 1) == terminalNumber }
+    }
+
+    func createLotteryReturn(
+        userId: String,
+        locationId: String,
+        lotteryReturn: LotteryReturn
+    ) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryReturns")
+            .document(lotteryReturn.id)
+            .setData(from: lotteryReturn)
+    }
+
+    func markLotteryReturnsApplied(
+        userId: String,
+        locationId: String,
+        returnIds: [String],
+        shiftId: String
+    ) async throws {
+        guard !returnIds.isEmpty else { return }
+        let batch = db.batch()
+        let collection = db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryReturns")
+
+        for id in returnIds {
+            let ref = collection.document(id)
+            batch.updateData([
+                "status": LotteryReturnStatus.applied.rawValue,
+                "appliedAt": FieldValue.serverTimestamp(),
+                "appliedShiftId": shiftId,
+            ], forDocument: ref)
+        }
+        try await batch.commit()
+    }
+
+    // MARK: - Lottery Pack Closeouts (finished packs replaced mid-shift)
+
+    func fetchPendingLotteryPackCloseouts(
+        userId: String,
+        locationId: String,
+        terminalNumber: Int? = nil
+    ) async throws -> [LotteryPackCloseout] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryPackCloseouts")
+            .whereField("status", isEqualTo: LotteryPackCloseoutStatus.pending.rawValue)
+            .getDocuments()
+
+        let all = try snapshot.documents.compactMap { doc -> LotteryPackCloseout? in
+            try doc.data(as: LotteryPackCloseout.self)
+        }
+
+        guard let terminalNumber, terminalNumber > 1 else {
+            return all.filter { ($0.terminalNumber ?? 1) <= 1 }
+        }
+        return all.filter { ($0.terminalNumber ?? 1) == terminalNumber }
+    }
+
+    func createLotteryPackCloseout(
+        userId: String,
+        locationId: String,
+        closeout: LotteryPackCloseout
+    ) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryPackCloseouts")
+            .document(closeout.id)
+            .setData(from: closeout)
+    }
+
+    func markLotteryPackCloseoutsApplied(
+        userId: String,
+        locationId: String,
+        closeoutIds: [String],
+        shiftId: String
+    ) async throws {
+        guard !closeoutIds.isEmpty else { return }
+        let batch = db.batch()
+        let collection = db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryPackCloseouts")
+
+        for id in closeoutIds {
+            let ref = collection.document(id)
+            batch.updateData([
+                "status": LotteryPackCloseoutStatus.applied.rawValue,
+                "appliedAt": FieldValue.serverTimestamp(),
+                "appliedShiftId": shiftId,
+            ], forDocument: ref)
+        }
+        try await batch.commit()
+    }
+
+    // MARK: - Lottery Stock (received packs not yet on a bin)
+
+    func fetchInStockLotteryPacks(
+        userId: String,
+        locationId: String
+    ) async throws -> [LotteryStockPack] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryStock")
+            .whereField("status", isEqualTo: LotteryStockPackStatus.inStock.rawValue)
+            .getDocuments()
+
+        return try snapshot.documents.compactMap { doc -> LotteryStockPack? in
+            try doc.data(as: LotteryStockPack.self)
+        }
+        .sorted { lhs, rhs in
+            let gameCmp = lhs.gameNumber.localizedStandardCompare(rhs.gameNumber)
+            if gameCmp != .orderedSame { return gameCmp == .orderedAscending }
+            return lhs.packSerial.localizedStandardCompare(rhs.packSerial) == .orderedAscending
+        }
+    }
+
+    func createLotteryStockPack(
+        userId: String,
+        locationId: String,
+        pack: LotteryStockPack
+    ) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryStock")
+            .document(pack.id)
+            .setData(from: pack)
+    }
+
+    func markLotteryStockPackAssigned(
+        userId: String,
+        locationId: String,
+        packId: String,
+        rowId: String,
+        binNumber: String
+    ) async throws {
+        try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryStock")
+            .document(packId)
+            .updateData([
+                "status": LotteryStockPackStatus.assigned.rawValue,
+                "assignedAt": FieldValue.serverTimestamp(),
+                "assignedRowId": rowId,
+                "assignedBinNumber": binNumber
+            ])
+    }
+
+    func findInStockLotteryPack(
+        userId: String,
+        locationId: String,
+        packSerial: String
+    ) async throws -> LotteryStockPack? {
+        let packs = try await fetchInStockLotteryPacks(userId: userId, locationId: locationId)
+        return packs.first {
+            OhioLotteryBarcodeParser.packSerialsMatch($0.packSerial, packSerial)
         }
     }
     

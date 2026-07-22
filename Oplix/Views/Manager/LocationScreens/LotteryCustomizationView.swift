@@ -245,9 +245,15 @@ struct LotteryCustomizationView: View {
                                 HStack(spacing: 0) {
                                     // Bin# column - auto-populated with serial number (read-only)
                                     binNumberCell(String(index + 1))
-                                    dataCell($row.gameNumber, rowIndex: index, isGameNumber: true)
-                                    dataCell($row.value, isValueField: true)
-                                    dataCell($row.tickets)
+                                    dataCell($row.gameNumber, onUpdate: {
+                                        markCurrentTerminalDirty()
+                                    }, rowIndex: index, isGameNumber: true)
+                                    dataCell($row.value, onUpdate: {
+                                        markCurrentTerminalDirty()
+                                    }, isValueField: true)
+                                    dataCell($row.tickets, onUpdate: {
+                                        markCurrentTerminalDirty()
+                                    })
                                     dataCell($row.beginningNumber, onUpdate: {
                                         validateAndCalculateRow(for: index)
                                     }, rowIndex: index, isTicketNumber: true)
@@ -611,6 +617,10 @@ struct LotteryCustomizationView: View {
         isSaving = true
         errorMessage = nil
         showingError = false
+        // Always mark the visible terminal dirty before save. Edits to
+        // game # / value / tickets used to leave isDirty false, so Save
+        // dismissed without writing anything to Firestore.
+        markCurrentTerminalDirty()
         captureCurrentTerminalDraft()
 
         do {
@@ -1098,7 +1108,8 @@ struct LotteryCustomizationView: View {
                     // Auto-populate value and tickets
                     formRows[index].value = gameData.value
                     formRows[index].tickets = gameData.tickets
-                    
+                    markCurrentTerminalDirty()
+
                     // Recalculate row values
                     calculateRowValues(for: index)
                 }

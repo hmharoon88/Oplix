@@ -63,6 +63,14 @@ struct LotteryShiftSummarySheet: View {
                         VStack(spacing: 16) {
                             LotteryCashFlowSummaryView(summary: summary)
 
+                            if let returns = summary.packReturns, !returns.isEmpty {
+                                PackReturnsBreakdownView(
+                                    title: "Pack returns this close",
+                                    lines: returns,
+                                    footerNote: "These amounts were subtracted from instant sales on this shift."
+                                )
+                            }
+
                             SummaryCard(
                                 title: "Lottery Totals",
                                 items: lotteryItems

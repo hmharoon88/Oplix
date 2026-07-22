@@ -40,6 +40,17 @@ final class NotificationService: ObservableObject {
     // UI uses this to show "Push notifications are turned off in iOS
     // Settings" if the user denied earlier and never came back.
     @Published private(set) var authStatus: UNAuthorizationStatus = .notDetermined
+    /// True after this device’s FCM token was saved under `users/{uid}/fcmTokens`.
+    @Published private(set) var hasPersistedToken = false
+    /// True while Enable / refresh is waiting on APNs + FCM.
+    @Published private(set) var isRegisteringDevice = false
+    /// User-visible reason when registration can’t finish (APNs failure, etc.).
+    @Published private(set) var registrationMessage: String?
+
+    /// Push can reach the lock screen only when iOS allows alerts and we saved a token.
+    var canDeliverOutsideApp: Bool {
+        (authStatus == .authorized || authStatus == .provisional) && hasPersistedToken
+    }
 
     // MARK: - Internal state
 
@@ -52,6 +63,10 @@ final class NotificationService: ObservableObject {
     /// redundant writes on every token-refresh callback when the
     /// signed-in user hasn't changed.
     private var lastPersistedUserId: String?
+
+    /// Set once APNs hands us a device token and we bridge it to FCM.
+    /// FCM tokens minted before this hand-off can fail lock-screen delivery.
+    private var apnsTokenReady = false
 
     private let db = Firestore.firestore()
 
@@ -67,9 +82,27 @@ final class NotificationService: ObservableObject {
     /// token gets persisted by `registerCurrentUser()` post-sign-in.
     func handleFCMToken(_ token: String) {
         cachedToken = token
-        if let userId = Auth.auth().currentUser?.uid {
-            persistToken(token, for: userId)
-        }
+        guard apnsTokenReady, let userId = Auth.auth().currentUser?.uid else { return }
+        persistToken(token, for: userId)
+    }
+
+    /// Called from AppDelegate after `Messaging.messaging().apnsToken` is set.
+    /// Re-persists the FCM token for the signed-in user so employee-first
+    /// installs don't keep a pre-APNs token that never delivers alerts.
+    func noteAPNsTokenReceived() {
+        apnsTokenReady = true
+        registrationMessage = nil
+        guard Auth.auth().currentUser?.uid != nil else { return }
+        Task { await refreshAndPersistFCMToken() }
+    }
+
+    /// Called from AppDelegate when APNs registration fails (simulator,
+    /// missing push entitlement, etc.). Surfaces a reason in Settings.
+    func noteAPNsRegistrationFailed(_ error: Error) {
+        apnsTokenReady = false
+        registrationMessage =
+            "Apple push registration failed: \(error.localizedDescription). " +
+            "Use a real iPhone (not Simulator) and confirm Push is enabled for the app."
     }
 
     /// Called after the user signs in. Persists any cached FCM token,
@@ -77,10 +110,37 @@ final class NotificationService: ObservableObject {
     /// notification permission are replaced.
     func registerCurrentUser() {
         guard Auth.auth().currentUser?.uid != nil else { return }
-        if let token = cachedToken, let userId = Auth.auth().currentUser?.uid {
+        if apnsTokenReady, let token = cachedToken, let userId = Auth.auth().currentUser?.uid {
             persistToken(token, for: userId)
         }
         Task { await refreshAndPersistFCMToken() }
+    }
+
+    /// Call when the user turns push on in Oplix settings. In-app toggles
+    /// alone are not enough — iOS permission + a saved FCM token are required
+    /// for lock-screen delivery.
+    @discardableResult
+    func ensurePushDeliveryReady() async -> Bool {
+        isRegisteringDevice = true
+        registrationMessage = nil
+        defer { isRegisteringDevice = false }
+
+        await refreshAuthStatus()
+        if authStatus == .notDetermined {
+            return await requestAuthorization()
+        }
+        if authStatus == .denied {
+            registrationMessage = "iOS is blocking notifications. Open Settings and allow alerts for Oplix."
+            return false
+        }
+        await refreshAndPersistFCMToken()
+        if canDeliverOutsideApp {
+            registrationMessage = "This device is registered."
+        } else if registrationMessage == nil {
+            registrationMessage =
+                "Couldn’t finish registering this device. Force-quit Oplix, reopen, and try Enable again."
+        }
+        return canDeliverOutsideApp
     }
 
     /// Pull the current FCM token from Firebase and save it for the
@@ -89,15 +149,42 @@ final class NotificationService: ObservableObject {
     func refreshAndPersistFCMToken() async {
         guard let userId = Auth.auth().currentUser?.uid else { return }
         await refreshAuthStatus()
-        if authStatus == .authorized {
-            UIApplication.shared.registerForRemoteNotifications()
+        UIApplication.shared.registerForRemoteNotifications()
+
+        // FCM may already hold the APNs token even if our flag was never set
+        // (race on launch / Enable tapped before didRegister callback).
+        if !apnsTokenReady, Messaging.messaging().apnsToken != nil {
+            apnsTokenReady = true
         }
+
+        // Wait briefly for the APNs callback — previously Enable returned
+        // immediately when the flag was still false, so the button looked dead.
+        if !apnsTokenReady {
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if Messaging.messaging().apnsToken != nil {
+                    apnsTokenReady = true
+                    break
+                }
+            }
+        }
+
+        guard apnsTokenReady else {
+            if registrationMessage == nil {
+                registrationMessage =
+                    "Waiting for Apple push token timed out. Force-quit and reopen Oplix, then tap Enable again."
+            }
+            return
+        }
+
         do {
             let token = try await Messaging.messaging().token()
             cachedToken = token
-            persistToken(token, for: userId)
+            await persistTokenAsync(token, for: userId)
         } catch {
             print("⚠️ FCM token fetch failed: \(error.localizedDescription)")
+            registrationMessage = "Couldn’t get Firebase push token: \(error.localizedDescription)"
+            hasPersistedToken = false
         }
     }
 
@@ -107,7 +194,9 @@ final class NotificationService: ObservableObject {
     /// that would invalidate the APNs token entirely; we only want
     /// to break the user→device link.
     func unregisterCurrentDevice() async {
-        guard let userId = lastPersistedUserId else { return }
+        // Fall back to the signed-in uid so manager logout still clears
+        // fcmTokens even when persist hadn't finished yet.
+        guard let userId = lastPersistedUserId ?? Auth.auth().currentUser?.uid else { return }
         let deviceId = Self.deviceId
         do {
             try await db.collection("users")
@@ -116,6 +205,7 @@ final class NotificationService: ObservableObject {
                 .document(deviceId)
                 .delete()
             lastPersistedUserId = nil
+            hasPersistedToken = false
         } catch {
             print("⚠️ Failed to unregister device token: \(error.localizedDescription)")
         }
@@ -163,6 +253,10 @@ final class NotificationService: ObservableObject {
     // MARK: - Persistence
 
     private func persistToken(_ token: String, for userId: String) {
+        Task { await persistTokenAsync(token, for: userId) }
+    }
+
+    private func persistTokenAsync(_ token: String, for userId: String) async {
         let deviceId = Self.deviceId
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
 
@@ -182,12 +276,15 @@ final class NotificationService: ObservableObject {
         // updates the same doc (no proliferation of dead tokens) and
         // so we can later add fields like `notificationPrefs` cache
         // without clobbering this one.
-        ref.setData(payload, merge: true) { [weak self] error in
-            if let error = error {
-                print("⚠️ Failed to persist FCM token: \(error.localizedDescription)")
-                return
-            }
-            self?.lastPersistedUserId = userId
+        do {
+            try await ref.setData(payload, merge: true)
+            lastPersistedUserId = userId
+            hasPersistedToken = true
+            registrationMessage = nil
+        } catch {
+            print("⚠️ Failed to persist FCM token: \(error.localizedDescription)")
+            hasPersistedToken = false
+            registrationMessage = "Couldn’t save device token: \(error.localizedDescription)"
         }
     }
 

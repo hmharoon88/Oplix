@@ -89,6 +89,11 @@ service cloud.firestore {
           && resource.data.get('managerUserId', '') == request.auth.uid)
       );
 
+      // Each user registers their own device for push (employee, supervisor, manager).
+      match /fcmTokens/{deviceId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
       // All manager-tenant data: employees, locations, tasks, books, etc.
       match /{document=**} {
         allow read, write: if canAccessManagerTree(userId);
@@ -99,7 +104,12 @@ service cloud.firestore {
 
     match /gameDatabase/{gameId} {
       allow read: if isSignedIn();
-      allow write: if isManagerAccount(request.auth.uid);
+      // Managers maintain the catalog; supervisors may add games found
+      // while assigning packs on the floor.
+      allow write: if isSignedIn() && (
+        isManagerAccount(request.auth.uid) ||
+        (userExists(request.auth.uid) && userData(request.auth.uid).role == 'supervisor')
+      );
     }
   }
 }

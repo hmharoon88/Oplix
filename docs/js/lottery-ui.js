@@ -534,7 +534,36 @@
                 const row = state.editRows.find((r) => r.id === id);
                 if (row && field) row[field] = inp.value;
             });
-            inp.addEventListener("change", () => renderPanel());
+            inp.addEventListener("change", async () => {
+                const tr = inp.closest("[data-lottery-row]");
+                const id = tr?.dataset.lotteryRow;
+                const field = inp.dataset.lotteryField;
+                const row = state.editRows.find((r) => r.id === id);
+                if (row && field) row[field] = inp.value;
+
+                // Match iOS: when game # is entered, fill value + tickets from gameDatabase.
+                if (field === "gameNumber" && row) {
+                    const gameNumber = String(row.gameNumber || "").trim();
+                    if (gameNumber) {
+                        try {
+                            const game = await Store().fetchGameData(gameNumber);
+                            if (game) {
+                                row.value = game.value != null ? String(game.value) : "";
+                                row.tickets = game.tickets != null ? String(game.tickets) : "";
+                                setStatus(
+                                    `Game ${gameNumber}: $${row.value || "—"} · ${row.tickets || "—"} tickets`,
+                                    "success"
+                                );
+                            } else {
+                                setStatus(`Game ${gameNumber} not in game database.`, "info");
+                            }
+                        } catch (err) {
+                            setStatus(err.message || "Could not look up game.", "error");
+                        }
+                    }
+                }
+                renderPanel();
+            });
         });
 
         root.querySelector("#lottery-register")?.addEventListener("input", (e) => {

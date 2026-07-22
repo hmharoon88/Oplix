@@ -639,6 +639,9 @@ class EmployeeHomeViewModel: ObservableObject {
     /// the existing call sites byte-for-byte unchanged.
     @Published var lotteryTemplates: [Int: LotteryFormTemplate] = [:]
 
+    /// In-flight lock for `closeLotteryShift` — see duplicate-close guard there.
+    private var isClosingLotteryShift = false
+
     /// True iff the loaded `Location` has been configured with > 1
     /// lottery terminal. Drives whether the multi-terminal employee
     /// flow lights up at all. Reads through to `Location` so we don't
@@ -732,15 +735,26 @@ class EmployeeHomeViewModel: ObservableObject {
         guard let managerUserId = managerUserId else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager user ID not found"])
         }
-        guard var template = template(for: terminalNumber) else {
+        guard let localTemplate = template(for: terminalNumber) else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
         }
 
-        // Find and update the row, then persist the whole template.
-        // We keep the per-keystroke save behaviour the original
-        // single-terminal code had so an interrupted session doesn't
-        // lose the employee's input — same trade-off, just scoped to
-        // the right terminal.
+        // Read-merge-write. This device's in-memory template can be
+        // hours old (app frozen in background) — pushing the whole
+        // thing used to silently overwrite Begin numbers another
+        // device rolled forward at its close (the "false short" bug).
+        // So: pull the current server copy, merge in only this one
+        // End number, and save that. If the fetch fails (offline) we
+        // fall back to the legacy whole-template save so the
+        // employee's input still isn't lost — the Begin verification
+        // at close time is the safety net for that path.
+        let serverTemplate = try? await firebaseService.fetchLotteryFormTemplate(
+            userId: managerUserId,
+            locationId: locationId,
+            terminalNumber: terminalNumber
+        )
+        var template = serverTemplate ?? localTemplate
+
         if let index = template.rows.firstIndex(where: { $0.id == rowId }) {
             template.rows[index].endingNumber = endingNumber
             try await firebaseService.saveLotteryFormTemplate(
@@ -751,16 +765,343 @@ class EmployeeHomeViewModel: ObservableObject {
             setTemplate(template, for: terminalNumber)
         }
     }
-    
+
+    /// Mid-shift pack swap discovered at close: credit old pack (sold or return), assign new pack, set End #.
+    func resolveShiftCloseUnrecognizedPack(
+        barcode: OhioLotteryBarcode,
+        scenario: LotteryShiftClosePackReplaceScenario,
+        targetRowId: String,
+        returnTicket: String,
+        endingNumber: String,
+        creditSealedBeginAsFullBook: Bool = false,
+        terminalNumber: Int? = nil
+    ) async throws {
+        guard let managerUserId = managerUserId else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager user ID not found"])
+        }
+
+        // Same read-merge-write rationale as `updateLotteryRowEndingNumber`:
+        // never push a stale in-memory template over the server copy.
+        let freshTemplate = try? await firebaseService.fetchLotteryFormTemplate(
+            userId: managerUserId,
+            locationId: locationId,
+            terminalNumber: terminalNumber
+        )
+        guard var template = freshTemplate ?? template(for: terminalNumber) else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
+        }
+        guard let index = template.rows.firstIndex(where: { $0.id == targetRowId }) else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Bin not found"])
+        }
+
+        let oldRow = template.rows[index]
+        let oldSerial = oldRow.packSerial ?? ""
+        guard !oldSerial.isEmpty else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Selected bin has no pack to replace."])
+        }
+
+        let binLabel = oldRow.binNumber.isEmpty ? String(index + 1) : oldRow.binNumber
+        let resolvedTerminal = terminalNumber ?? template.effectiveTerminalNumber
+        let sameGame = OhioLotteryBarcodeParser.gameNumbersMatch(oldRow.gameNumber, barcode.gameNumber)
+
+        // Same game mid-shift swap: keep shift Begin, set End from scan, no sold-out
+        // closeout. Wrap math at close covers finished old + new pack from sealed.
+        // Works whether the pack was pre-received into stock or scanned first at close.
+        if sameGame {
+            let end = LotteryShiftCloseScanMatcher.normalizedTicketNumber(endingNumber)
+            guard !end.isEmpty else {
+                throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Couldn't read End # from the scan."])
+            }
+
+            template.rows[index].packSerial = barcode.packSerial
+            template.rows[index].packStatus = .active
+            // Keep beginningNumber from the shift.
+            template.rows[index].endingNumber = end
+            template.rows[index].sold = ""
+            template.rows[index].dollar = ""
+            template.rows[index].books = ""
+
+            try await firebaseService.saveLotteryFormTemplate(
+                userId: managerUserId,
+                locationId: locationId,
+                template: template
+            )
+            setTemplate(template, for: terminalNumber)
+
+            if let stock = try? await firebaseService.findInStockLotteryPack(
+                userId: managerUserId,
+                locationId: locationId,
+                packSerial: barcode.packSerial
+            ) {
+                try? await firebaseService.markLotteryStockPackAssigned(
+                    userId: managerUserId,
+                    locationId: locationId,
+                    packId: stock.id,
+                    rowId: oldRow.id,
+                    binNumber: binLabel
+                )
+            }
+            return
+        }
+
+        switch scenario {
+        case .soldFinished:
+            let pendingCloseouts = try await firebaseService.fetchPendingLotteryPackCloseouts(
+                userId: managerUserId,
+                locationId: locationId,
+                terminalNumber: terminalNumber
+            )
+            let alreadyPending = pendingCloseouts.contains {
+                OhioLotteryBarcodeParser.packSerialsMatch($0.packSerial, oldSerial)
+            }
+            if alreadyPending {
+                throw NSError(
+                    domain: "Oplix",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "A sold-out credit for pack \(oldSerial) is already pending. Finish this shift close first (or ask a manager to clear the duplicate) before replacing again."]
+                )
+            }
+
+            let (sold, books) = LotteryCalculationService.calculateFinishedPackSold(
+                beginning: oldRow.beginningNumber,
+                ticketsInBook: oldRow.tickets,
+                reverseOrder: template.reverseOrder,
+                creditFullBookIfSealedBegin: creditSealedBeginAsFullBook
+            )
+            // Skip $0 closeouts (typical Begin-00 swap without full-book confirm).
+            if sold > 0 {
+                let dollars = Double(LotteryCalculationService.calculateDollars(sold: sold, value: oldRow.value))
+                let closeout = LotteryPackCloseout(
+                    locationId: locationId,
+                    rowId: oldRow.id,
+                    binNumber: binLabel,
+                    gameNumber: oldRow.gameNumber,
+                    packSerial: oldSerial,
+                    beginningNumber: oldRow.beginningNumber,
+                    endingNumber: "00",
+                    soldTickets: sold,
+                    soldDollars: dollars,
+                    books: books,
+                    terminalNumber: resolvedTerminal > 1 ? resolvedTerminal : nil
+                )
+                try await firebaseService.createLotteryPackCloseout(
+                    userId: managerUserId,
+                    locationId: locationId,
+                    closeout: closeout
+                )
+            }
+
+        case .returned:
+            let ticket = LotteryShiftCloseScanMatcher.normalizedTicketNumber(returnTicket)
+            guard !ticket.isEmpty else {
+                throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Enter the return top ticket #."])
+            }
+            let isSealed = ticket == "00"
+            let returnedTickets = LotteryCalculationService.calculateReturnedTickets(
+                fromTicket: ticket,
+                ticketsInBook: oldRow.tickets,
+                reverseOrder: template.reverseOrder,
+                isSealedPack: isSealed
+            )
+            let returnedDollars = Double(
+                LotteryCalculationService.calculateDollars(sold: returnedTickets, value: oldRow.value)
+            )
+            let (soldBefore, _) = LotteryCalculationService.calculateSoldAndBooks(
+                beginning: oldRow.beginningNumber.isEmpty ? ticket : oldRow.beginningNumber,
+                ending: ticket,
+                tickets: oldRow.tickets,
+                reverseOrder: template.reverseOrder
+            )
+            let skipDeduction = soldBefore == 0
+                || LotteryShiftCloseScanMatcher.ticketNumbersEqual(oldRow.beginningNumber, ticket)
+
+            let lotteryReturn = LotteryReturn(
+                locationId: locationId,
+                rowId: oldRow.id,
+                binNumber: binLabel,
+                gameNumber: oldRow.gameNumber,
+                packSerial: oldSerial,
+                returnedTickets: returnedTickets,
+                returnedDollars: returnedDollars,
+                ticketNumber: ticket,
+                ticketValue: oldRow.value,
+                beginningNumber: oldRow.beginningNumber,
+                skipCloseDeduction: skipDeduction,
+                terminalNumber: resolvedTerminal > 1 ? resolvedTerminal : nil
+            )
+            try await firebaseService.createLotteryReturn(
+                userId: managerUserId,
+                locationId: locationId,
+                lotteryReturn: lotteryReturn
+            )
+        }
+
+        let sealedBegin: String
+        let gameValue: String
+        let gameTickets: String
+
+        // Different game only reaches here.
+        var gameData = try await firebaseService.fetchGameData(gameNumber: barcode.gameNumber)
+        if gameData == nil {
+            let all = try await firebaseService.fetchAllGameData()
+            gameData = all.first {
+                OhioLotteryBarcodeParser.gameNumbersMatch($0.gameNumber, barcode.gameNumber)
+            }
+        }
+        guard let resolved = gameData else {
+            throw NSError(
+                domain: "Oplix",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "Game \(barcode.gameNumber) isn’t in the game database. Ask a manager to add value and tickets, then scan again."]
+            )
+        }
+        gameValue = resolved.value
+        gameTickets = resolved.tickets
+        sealedBegin = LotteryCalculationService.sealedBeginTicket(
+            ticketsInBook: gameTickets,
+            reverseOrder: template.reverseOrder
+        )
+
+        // Different-game replacement counts from sealed Begin → scanned End.
+        let beginForNewPack = sealedBegin
+        let end = LotteryShiftCloseScanMatcher.normalizedTicketNumber(endingNumber)
+
+        template.rows[index].gameNumber = OhioLotteryBarcodeParser.canonicalGameNumber(barcode.gameNumber)
+        template.rows[index].value = gameValue
+        template.rows[index].tickets = gameTickets
+        template.rows[index].packSerial = barcode.packSerial
+        template.rows[index].packStatus = .active
+        template.rows[index].beginningNumber = beginForNewPack
+        template.rows[index].endingNumber = end
+        template.rows[index].sold = ""
+        template.rows[index].dollar = ""
+        template.rows[index].books = ""
+
+        try await firebaseService.saveLotteryFormTemplate(
+            userId: managerUserId,
+            locationId: locationId,
+            template: template
+        )
+        setTemplate(template, for: terminalNumber)
+
+        if let stock = try? await firebaseService.findInStockLotteryPack(
+            userId: managerUserId,
+            locationId: locationId,
+            packSerial: barcode.packSerial
+        ) {
+            try? await firebaseService.markLotteryStockPackAssigned(
+                userId: managerUserId,
+                locationId: locationId,
+                packId: stock.id,
+                rowId: oldRow.id,
+                binNumber: binLabel
+            )
+        }
+    }
+
+    /// Mark unscanned bins as returned packs during the close flow.
+    ///
+    /// Used from the incomplete-bins warning: a pack that a rep took back
+    /// mid-shift never gets an End scan, so its bin shows up as incomplete.
+    /// The return is recorded at top ticket = Begin — nothing sold this
+    /// shift (earlier shifts already counted up to Begin), so there is no
+    /// close deduction; the record exists for rack history, and the bin is
+    /// cleared so the close math ignores it.
+    func markBinsReturnedAtClose(rowIds: [String], terminalNumber: Int? = nil) async throws {
+        guard !rowIds.isEmpty else { return }
+        guard let managerUserId = managerUserId else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager user ID not found"])
+        }
+
+        // Read-merge-write: never push a stale in-memory template.
+        let freshTemplate = try? await firebaseService.fetchLotteryFormTemplate(
+            userId: managerUserId,
+            locationId: locationId,
+            terminalNumber: terminalNumber
+        )
+        guard var template = freshTemplate ?? template(for: terminalNumber) else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
+        }
+        let resolvedTerminal = terminalNumber ?? template.effectiveTerminalNumber
+
+        var changedAnything = false
+        for rowId in rowIds {
+            guard let index = template.rows.firstIndex(where: { $0.id == rowId }) else { continue }
+            let row = template.rows[index]
+            guard let serial = row.packSerial, !serial.isEmpty, !row.beginningNumber.isEmpty else { continue }
+
+            let ticket = row.beginningNumber == "0" ? "00" : row.beginningNumber
+            let returnedTickets = LotteryCalculationService.calculateReturnedTickets(
+                fromTicket: ticket,
+                ticketsInBook: row.tickets,
+                reverseOrder: template.reverseOrder,
+                isSealedPack: ticket == "00"
+            )
+            let returnedDollars = Double(
+                LotteryCalculationService.calculateDollars(sold: returnedTickets, value: row.value)
+            )
+            let binLabel = row.binNumber.isEmpty ? String(index + 1) : row.binNumber
+
+            let lotteryReturn = LotteryReturn(
+                locationId: locationId,
+                rowId: row.id,
+                binNumber: binLabel,
+                gameNumber: row.gameNumber,
+                packSerial: serial,
+                returnedTickets: returnedTickets,
+                returnedDollars: returnedDollars,
+                ticketNumber: ticket,
+                ticketValue: row.value,
+                beginningNumber: row.beginningNumber,
+                skipCloseDeduction: true,
+                terminalNumber: resolvedTerminal > 1 ? resolvedTerminal : nil
+            )
+            try await firebaseService.createLotteryReturn(
+                userId: managerUserId,
+                locationId: locationId,
+                lotteryReturn: lotteryReturn
+            )
+
+            template.rows[index].packSerial = nil
+            template.rows[index].packStatus = nil
+            template.rows[index].gameNumber = ""
+            template.rows[index].value = ""
+            template.rows[index].tickets = ""
+            template.rows[index].beginningNumber = ""
+            template.rows[index].endingNumber = ""
+            template.rows[index].sold = ""
+            template.rows[index].dollar = ""
+            template.rows[index].books = ""
+            changedAnything = true
+        }
+
+        if changedAnything {
+            try await firebaseService.saveLotteryFormTemplate(
+                userId: managerUserId,
+                locationId: locationId,
+                template: template
+            )
+            setTemplate(template, for: terminalNumber)
+        }
+    }
+
     // Validation result for incomplete rows
     struct ValidationResult {
         let incompleteRows: [IncompleteRow]
         let hasIncompleteRows: Bool
         
-        struct IncompleteRow {
+        struct IncompleteRow: Identifiable {
+            let rowId: String
             let binNumber: String
             let gameNumber: String
             let missingFields: [String]
+            /// Bin has an active pack with a known Begin — the employee can
+            /// mark it "returned" at close instead of leaving it unscanned.
+            let canMarkReturned: Bool
+
+            var id: String { rowId }
         }
     }
     
@@ -776,6 +1117,14 @@ class EmployeeHomeViewModel: ObservableObject {
         var incompleteRows: [ValidationResult.IncompleteRow] = []
         
         for (index, row) in template.rows.enumerated() {
+            // A completely empty bin (no game, no pack, no numbers) has
+            // nothing to scan and nothing to return — don't flag it.
+            let isEmptyBin = row.gameNumber.isEmpty
+                && (row.packSerial?.isEmpty != false)
+                && row.beginningNumber.isEmpty
+                && row.endingNumber.isEmpty
+            if isEmptyBin { continue }
+
             var missingFields: [String] = []
             
             // Check for missing required fields
@@ -794,10 +1143,15 @@ class EmployeeHomeViewModel: ObservableObject {
             
             // Only include rows that have at least one missing field
             if !missingFields.isEmpty {
+                let hasActivePack = (row.packSerial?.isEmpty == false)
+                    && row.packStatus != .returned
+                    && row.packStatus != .empty
                 incompleteRows.append(ValidationResult.IncompleteRow(
+                    rowId: row.id,
                     binNumber: String(index + 1),
                     gameNumber: row.gameNumber.isEmpty ? "N/A" : row.gameNumber,
-                    missingFields: missingFields
+                    missingFields: missingFields,
+                    canMarkReturned: hasActivePack && !row.beginningNumber.isEmpty
                 ))
             }
         }
@@ -840,19 +1194,98 @@ class EmployeeHomeViewModel: ObservableObject {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "You must be clocked in to submit a lottery form. Please clock in first."])
         }
 
+        // Duplicate-close guard. Double taps / UI retries used to run
+        // this whole method concurrently and save 2-4 identical forms
+        // (and roll the template forward repeatedly). One in-flight
+        // close at a time, and refuse a repeat close of the same
+        // shift+terminal within a short window. Deliberately
+        // time-boxed: a 24h auto-clocked-out shift legitimately closes
+        // lottery more than once under the same shift id.
+        guard !isClosingLotteryShift else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "A lottery close is already in progress. Please wait."])
+        }
+        isClosingLotteryShift = true
+        defer { isClosingLotteryShift = false }
+
+        // Closing lottery requires a live connection. Both reads below
+        // force `.server` so Firestore's offline cache can never
+        // supply hours-old numbers; failing them means we're offline
+        // (or the server is unreachable) and we refuse to close.
+        let offlineError = NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "No internet connection. Closing lottery requires a live connection so the numbers can be verified. Please reconnect and try again."])
+
+        let recentForms: [LotteryForm]
+        do {
+            recentForms = try await firebaseService.fetchRecentLotteryForms(
+                userId: managerUserId,
+                locationId: locationId,
+                limit: 10,
+                source: .server
+            )
+        } catch {
+            throw offlineError
+        }
+
+        let isDuplicate = recentForms.contains { form in
+            form.shiftId == shift.id &&
+            form.effectiveTerminalNumber == (terminalNumber ?? 1) &&
+            Date().timeIntervalSince(form.submittedAt) < 300
+        }
+        if isDuplicate {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "This lottery shift was already closed a few moments ago — a duplicate close was prevented."])
+        }
+
         // 0. Reload the template we're about to mutate so we pick up
         // any keystroke-level saves (`updateLotteryRowEndingNumber`)
         // the form view kicked off while the employee was typing.
-        if let latestTemplate = try? await firebaseService.fetchLotteryFormTemplate(
-            userId: managerUserId,
-            locationId: locationId,
-            terminalNumber: terminalNumber
-        ) {
-            setTemplate(latestTemplate, for: terminalNumber)
+        // Server-source for the same reason as above.
+        do {
+            if let latestTemplate = try await firebaseService.fetchLotteryFormTemplate(
+                userId: managerUserId,
+                locationId: locationId,
+                terminalNumber: terminalNumber,
+                source: .server
+            ) {
+                setTemplate(latestTemplate, for: terminalNumber)
+            }
+        } catch {
+            throw offlineError
         }
 
         guard var template = template(for: terminalNumber) else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
+        }
+
+        // 0b. Begin verification — the last line of defense against
+        // stale Begin numbers (see LotteryBeginVerificationService).
+        // If any Begin skipped the latest close, correct it on the
+        // server and bounce back to the UI for a review-and-confirm;
+        // the retry re-runs this check and passes cleanly.
+        let terminalForms = recentForms.filter { $0.effectiveTerminalNumber == (terminalNumber ?? 1) }
+        let endLookups = LotteryBeginVerificationService.endLookups(forms: terminalForms)
+        let beginCorrections = LotteryBeginVerificationService.corrections(
+            rows: template.rows,
+            reverseOrder: template.reverseOrder,
+            lastCloseEnds: endLookups.last,
+            olderEnds: endLookups.older
+        )
+        if !beginCorrections.isEmpty {
+            for correction in beginCorrections {
+                if let rowIndex = template.rows.firstIndex(where: { $0.id == correction.rowId }) {
+                    template.rows[rowIndex].beginningNumber = correction.newBegin
+                }
+            }
+            template.terminalNumber = terminalNumber ?? template.terminalNumber
+            try await firebaseService.saveLotteryFormTemplate(
+                userId: managerUserId,
+                locationId: locationId,
+                template: template
+            )
+            setTemplate(template, for: terminalNumber)
+            throw NSError(
+                domain: "Oplix",
+                code: 101, // Begin numbers refreshed — UI shows review-and-confirm
+                userInfo: [NSLocalizedDescriptionKey: LotteryBeginVerificationService.alertMessage(for: beginCorrections)]
+            )
         }
 
         // Validate before proceeding (unless validation is skipped)
@@ -931,14 +1364,38 @@ class EmployeeHomeViewModel: ObservableObject {
         
         // 2. Parse online total (use first value if multiple)
         let onlineTotal = onlineTotals.first.flatMap { Double($0.isEmpty ? "0" : $0) }
+
+        // 2b. Pending pack returns reduce instant sales; finished-pack closeouts add them.
+        let pendingReturns = try await firebaseService.fetchPendingLotteryReturns(
+            userId: managerUserId,
+            locationId: locationId,
+            terminalNumber: terminalNumber
+        )
+        let pendingCloseouts = try await firebaseService.fetchPendingLotteryPackCloseouts(
+            userId: managerUserId,
+            locationId: locationId,
+            terminalNumber: terminalNumber
+        )
+        let returnDeduction = pendingReturns.reduce(0.0) { $0 + $1.closeDeductionDollars }
+        let closeoutAddition = pendingCloseouts.reduce(0.0) { $0 + $1.soldDollars }
+        let closeoutSold = pendingCloseouts.reduce(0) { $0 + $1.soldTickets }
+        let closeoutBooks = pendingCloseouts.reduce(0) { $0 + $1.books }
+
+        let adjustedTotals = (
+            totalSold: templateTotals.totalSold + closeoutSold,
+            totalDollars: templateTotals.totalDollars,
+            totalBooks: templateTotals.totalBooks + closeoutBooks
+        )
         
         // 3. Calculate shift summary
         let shiftSummary = LotteryCalculationService.calculateShiftSummary(
-            templateTotals: templateTotals,
+            templateTotals: adjustedTotals,
             onlineTotal: onlineTotal,
             onlineCashes: onlineCashes,
             instantCashes: instantCashes,
-            registerCash: registerCash
+            registerCash: registerCash,
+            returnDeduction: returnDeduction,
+            packCloseoutAddition: closeoutAddition
         )
         
         // 4. Create form data with summary
@@ -1002,7 +1459,12 @@ class EmployeeHomeViewModel: ObservableObject {
             totalCashes: shiftSummary.totalCashes,
             cashInBag: shiftSummary.cashInBag,
             cashInBagNet: shiftSummary.cashInBagNet,
-            overShort: overShort
+            overShort: overShort,
+            lotteryReturnDeduction: returnDeduction > 0 ? returnDeduction : nil,
+            lotteryPackCloseoutAddition: closeoutAddition > 0 ? closeoutAddition : nil,
+            packReturns: pendingReturns.isEmpty ? nil : pendingReturns.map { item in
+                LotteryPackReturnLineItem(from: item, ticketValue: item.resolvedTicketValue)
+            }
         )
         
         // 8. Create and save lottery form with report (without image URL first for faster response).
@@ -1022,6 +1484,23 @@ class EmployeeHomeViewModel: ObservableObject {
         
         // Create form immediately (don't wait for image upload)
         try await firebaseService.createLotteryForm(userId: managerUserId, locationId: locationId, form: form)
+
+        if !pendingReturns.isEmpty {
+            try await firebaseService.markLotteryReturnsApplied(
+                userId: managerUserId,
+                locationId: locationId,
+                returnIds: pendingReturns.map(\.id),
+                shiftId: shift.id
+            )
+        }
+        if !pendingCloseouts.isEmpty {
+            try await firebaseService.markLotteryPackCloseoutsApplied(
+                userId: managerUserId,
+                locationId: locationId,
+                closeoutIds: pendingCloseouts.map(\.id),
+                shiftId: shift.id
+            )
+        }
         
         // Upload image in background and update form after (non-blocking)
         // Capture values needed for background task

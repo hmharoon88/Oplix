@@ -253,9 +253,11 @@ struct LotteryCalculationService {
         onlineTotal: Double?,
         onlineCashes: [String],
         instantCashes: [String],
-        registerCash: String?
+        registerCash: String?,
+        returnDeduction: Double = 0,
+        packCloseoutAddition: Double = 0
     ) -> ShiftSummary {
-        let instantTotal = Double(templateTotals.totalDollars)
+        let instantTotal = max(0, Double(templateTotals.totalDollars) + packCloseoutAddition - returnDeduction)
         let onlineTotalValue = onlineTotal ?? 0.0
         
         // Calculate total sold amount
@@ -280,7 +282,7 @@ struct LotteryCalculationService {
         
         return ShiftSummary(
             totalSold: templateTotals.totalSold,
-            totalDollars: templateTotals.totalDollars,
+            totalDollars: templateTotals.totalDollars + Int(packCloseoutAddition.rounded()),
             totalBooks: templateTotals.totalBooks,
             instantTotal: instantTotal,
             onlineTotal: onlineTotalValue,
@@ -298,11 +300,89 @@ struct LotteryCalculationService {
     // MARK: - Helper Functions
     
     /// Parse cash amount from string (handles "$" and decimals)
-    private static func parseCashAmount(_ amount: String?) -> Double? {
+    static func parseCashAmount(_ amount: String?) -> Double? {
         guard let amount = amount, !amount.isEmpty else { return nil }
         let cleanAmount = amount.replacingOccurrences(of: "$", with: "")
             .replacingOccurrences(of: ",", with: "")
         return Double(cleanAmount)
+    }
+
+    /// Begin # for a brand-new sealed pack on this facility's ticket order.
+    static func sealedBeginTicket(ticketsInBook tickets: String, reverseOrder: Bool) -> String {
+        if reverseOrder {
+            let ticketsInt = Int(tickets) ?? 0
+            guard ticketsInt > 0 else { return "00" }
+            return String(ticketsInt - 1)
+        }
+        return "00"
+    }
+
+    /// Tickets returned on a pack from the scanned ticket position back to `00`.
+    static func calculateReturnedTickets(
+        fromTicket ticket: String,
+        ticketsInBook tickets: String,
+        reverseOrder: Bool,
+        isSealedPack: Bool
+    ) -> Int {
+        let ticketsInt = Int(tickets) ?? 0
+        guard ticketsInt > 0 else { return 0 }
+
+        if isSealedPack {
+            return ticketsInt
+        }
+
+        let normalized = (ticket == "0") ? "00" : ticket
+        if normalized == "00" {
+            return ticketsInt
+        }
+
+        let (count, _) = calculateSoldAndBooks(
+            beginning: normalized,
+            ending: "00",
+            tickets: tickets,
+            reverseOrder: reverseOrder
+        )
+        return max(count, 0)
+    }
+
+    /// Sold tickets when a pack is finished mid-shift and replaced on the same bin.
+    /// Credits Begin → `00`.
+    ///
+    /// When Begin is already the sealed start (`00` forward / top ticket reverse),
+    /// a full-book credit is **not** assumed — that caused West Jeff phantom
+    /// thousands when packs were swapped at Begin 00. Pass
+    /// `creditFullBookIfSealedBegin: true` only after the employee explicitly
+    /// confirms the entire sealed pack sold out.
+    static func calculateFinishedPackSold(
+        beginning: String,
+        ticketsInBook tickets: String,
+        reverseOrder: Bool,
+        creditFullBookIfSealedBegin: Bool = false
+    ) -> (sold: Int, books: Int) {
+        let ticketsInt = Int(tickets) ?? 0
+        guard ticketsInt > 0 else { return (sold: 0, books: 0) }
+
+        let normalizedBegin = (beginning == "0") ? "00" : beginning
+        guard !normalizedBegin.isEmpty else { return (sold: 0, books: 0) }
+
+        let sealedBegin = sealedBeginTicket(ticketsInBook: tickets, reverseOrder: reverseOrder)
+        let sealedNorm = (sealedBegin == "0") ? "00" : sealedBegin
+        let beginIsSealed = normalizedBegin == sealedNorm
+
+        if beginIsSealed {
+            if creditFullBookIfSealedBegin {
+                return (sold: ticketsInt, books: 1)
+            }
+            return (sold: 0, books: 0)
+        }
+
+        let (sold, books) = calculateSoldAndBooks(
+            beginning: normalizedBegin,
+            ending: "00",
+            tickets: tickets,
+            reverseOrder: reverseOrder
+        )
+        return (sold: max(sold, 0), books: books)
     }
 }
 

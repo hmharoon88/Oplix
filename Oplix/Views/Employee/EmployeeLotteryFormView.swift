@@ -24,7 +24,11 @@ struct EmployeeLotteryFormView: View {
     @State private var validationMessage: String?
     @State private var showingValidationMessage = false
     @State private var showingCloseWarning = false
-    @State private var closeWarningMessage = ""
+    @State private var closeWarningRows: [EmployeeHomeViewModel.ValidationResult.IncompleteRow] = []
+    // Begin numbers were refreshed at close time (stale-data guard) —
+    // employee reviews the changes and confirms to retry the close.
+    @State private var showingBeginRefreshConfirm = false
+    @State private var beginRefreshMessage = ""
     @State private var showingShiftSummary = false
     @State private var completedLotteryForm: LotteryForm?
     
@@ -45,23 +49,71 @@ struct EmployeeLotteryFormView: View {
     
     // Focus management for keyboard navigation - use @StateObject wrapper to prevent cycles
     @State private var focusedRowId: String? = nil
+    @State private var shiftCloseScanTarget: LotteryShiftCloseScanTarget?
+    @State private var showingExternalScanner = false
     
     // Performance optimization: Create row lookup dictionary once
     private var rowLookup: [String: LotteryFormTemplateRow] {
         Dictionary(uniqueKeysWithValues: template.rows.map { ($0.id, $0) })
     }
     
-    private var columnWidth: CGFloat {
-        // Calculate width to fit 4 columns on screen
-        let screenWidth = UIScreen.main.bounds.width
-        let padding: CGFloat = 16 // Side padding
-        let availableWidth = screenWidth - padding * 2
-        return availableWidth / 4
+    private var scannableBinCount: Int {
+        LotteryShiftCloseScanMatcher.scannableRows(from: template.rows).count
     }
-    
+
+    private var hasScannableBins: Bool {
+        scannableBinCount > 0
+    }
+
+    fileprivate static let endWarningSlotWidth: CGFloat = 20
+    fileprivate static let endScanSlotWidth: CGFloat = 28
+
+    private var lotteryFormTable: some View {
+        GeometryReader { geometry in
+            let columnWidth = geometry.size.width / 4
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    headerCell("Bin #", width: columnWidth)
+                    headerCell("Value", width: columnWidth)
+                    headerCell("Begin #", width: columnWidth)
+                    endHeaderCell(width: columnWidth)
+                }
+                .background(Theme.cloudBlue.opacity(0.2))
+                .overlay(
+                    Rectangle()
+                        .frame(height: 1)
+                        .foregroundColor(.gray.opacity(0.5)),
+                    alignment: .bottom
+                )
+                .overlay(
+                    Rectangle()
+                        .frame(height: 1)
+                        .foregroundColor(.gray.opacity(0.5)),
+                    alignment: .top
+                )
+
+                dataRowsView(columnWidth: columnWidth)
+            }
+            .overlay(
+                Rectangle()
+                    .frame(width: 1)
+                    .foregroundColor(.gray.opacity(0.5)),
+                alignment: .leading
+            )
+            .overlay(
+                Rectangle()
+                    .frame(width: 1)
+                    .foregroundColor(.gray.opacity(0.5)),
+                alignment: .trailing
+            )
+        }
+        .frame(height: CGFloat(template.rows.count + 1) * 44)
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 20) {
+                shiftCloseScanSection
                 lotteryFormTable
                 onlineAndCashFieldsSection
                 cashInHandEntrySection
@@ -89,6 +141,57 @@ struct EmployeeLotteryFormView: View {
         .fullScreenCover(isPresented: $showingCamera) {
             LotteryCameraPickerView(imageData: $imageData, capturedImage: $capturedImage)
         }
+        .fullScreenCover(item: $shiftCloseScanTarget) { target in
+            LotteryShiftCloseScannerSheet(
+                target: target,
+                rows: template.rows,
+                reverseOrder: template.reverseOrder,
+                rowValues: $rowValues,
+                onPersistEnding: { rowId, ending in
+                    try? await viewModel.updateLotteryRowEndingNumber(
+                        rowId: rowId,
+                        endingNumber: ending,
+                        terminalNumber: terminalNumber
+                    )
+                },
+                onResolveUnrecognizedPack: { scenario, barcode, rowId, returnTicket, ending, creditSealedBeginAsFullBook in
+                    try await viewModel.resolveShiftCloseUnrecognizedPack(
+                        barcode: barcode,
+                        scenario: scenario,
+                        targetRowId: rowId,
+                        returnTicket: returnTicket,
+                        endingNumber: ending,
+                        creditSealedBeginAsFullBook: creditSealedBeginAsFullBook,
+                        terminalNumber: terminalNumber
+                    )
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showingExternalScanner) {
+            LotteryShiftCloseExternalScannerSheet(
+                rows: template.rows,
+                reverseOrder: template.reverseOrder,
+                rowValues: $rowValues,
+                onPersistEnding: { rowId, ending in
+                    try? await viewModel.updateLotteryRowEndingNumber(
+                        rowId: rowId,
+                        endingNumber: ending,
+                        terminalNumber: terminalNumber
+                    )
+                },
+                onResolveUnrecognizedPack: { scenario, barcode, rowId, returnTicket, ending, creditSealedBeginAsFullBook in
+                    try await viewModel.resolveShiftCloseUnrecognizedPack(
+                        barcode: barcode,
+                        scenario: scenario,
+                        targetRowId: rowId,
+                        returnTicket: returnTicket,
+                        endingNumber: ending,
+                        creditSealedBeginAsFullBook: creditSealedBeginAsFullBook,
+                        terminalNumber: terminalNumber
+                    )
+                }
+            )
+        }
         .alert("Error", isPresented: $showingError) {
             Button("OK") {
                 errorMessage = nil
@@ -98,17 +201,45 @@ struct EmployeeLotteryFormView: View {
                 Text(errorMessage)
             }
         }
-        .alert("Incomplete Rows Detected", isPresented: $showingCloseWarning) {
+        .sheet(isPresented: $showingCloseWarning) {
+            CloseIncompleteBinsSheet(
+                rows: closeWarningRows,
+                onCancel: {
+                    showingCloseWarning = false
+                },
+                onContinue: { returnedRowIds in
+                    showingCloseWarning = false
+                    Task {
+                        if !returnedRowIds.isEmpty {
+                            do {
+                                try await viewModel.markBinsReturnedAtClose(
+                                    rowIds: returnedRowIds,
+                                    terminalNumber: terminalNumber
+                                )
+                            } catch {
+                                await MainActor.run {
+                                    errorMessage = error.localizedDescription
+                                    showingError = true
+                                }
+                                return
+                            }
+                        }
+                        await closeLotteryShift(skipValidation: true)
+                    }
+                }
+            )
+        }
+        .alert("Begin numbers refreshed", isPresented: $showingBeginRefreshConfirm) {
             Button("Cancel", role: .cancel) {
-                closeWarningMessage = ""
+                beginRefreshMessage = ""
             }
-            Button("Close Anyway", role: .destructive) {
+            Button("Confirm & Close") {
                 Task {
                     await closeLotteryShift(skipValidation: true)
                 }
             }
         } message: {
-            Text(closeWarningMessage)
+            Text(beginRefreshMessage)
         }
         .fullScreenCover(isPresented: $showingShiftSummary) {
             if let form = completedLotteryForm, let summary = form.shiftSummary {
@@ -125,45 +256,75 @@ struct EmployeeLotteryFormView: View {
             }
         }
     }
-    
-    private var lotteryFormTable: some View {
-        VStack(spacing: 0) {
-            // Header Row
-            HStack(spacing: 0) {
-                headerCell("Bin #")
-                headerCell("Value")
-                headerCell("Begin #")
-                headerCell("End #")
+
+    private var shiftCloseScanSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                focusedRowId = nil
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil,
+                    from: nil,
+                    for: nil
+                )
+                shiftCloseScanTarget = .continuous(rows: template.rows)
+            } label: {
+                HStack {
+                    Image(systemName: "barcode.viewfinder")
+                        .font(.title3)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Scan bins (camera)")
+                            .font(.headline)
+                        Text(hasScannableBins
+                             ? "Walk the rack — camera stays open for each top ticket"
+                             : "Manager must assign packs before you can scan")
+                            .font(.caption)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                }
+                .foregroundColor(.white)
+                .padding()
+                .background(hasScannableBins ? Theme.cloudBlue : Color.gray)
+                .cornerRadius(12)
             }
-            .background(Theme.cloudBlue.opacity(0.2))
-            .overlay(
-                Rectangle()
-                    .frame(height: 1)
-                    .foregroundColor(.gray.opacity(0.5)),
-                alignment: .bottom
-            )
-            .overlay(
-                Rectangle()
-                    .frame(height: 1)
-                    .foregroundColor(.gray.opacity(0.5)),
-                alignment: .top
-            )
-            
-            // Data Rows
-            dataRowsView
+            .disabled(!hasScannableBins)
+
+            Button {
+                focusedRowId = nil
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil,
+                    from: nil,
+                    for: nil
+                )
+                showingExternalScanner = true
+            } label: {
+                HStack {
+                    Image(systemName: "barcode")
+                        .font(.title3)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("External scanner")
+                            .font(.headline)
+                        Text(hasScannableBins
+                             ? "Bluetooth / plug-in scanner — auto-fills End # and moves next"
+                             : "Manager must assign packs before you can scan")
+                            .font(.caption)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                }
+                .foregroundColor(.white)
+                .padding()
+                .background(hasScannableBins ? Color.orange : Color.gray)
+                .cornerRadius(12)
+            }
+            .disabled(!hasScannableBins)
+
+            Text("Or tap the scan icon on a row to fill one End #. You can still type manually.")
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
-        .overlay(
-            Rectangle()
-                .frame(width: 1)
-                .foregroundColor(.gray.opacity(0.5)),
-            alignment: .leading
-        )
-        .overlay(
-            Rectangle()
-                .frame(width: 1)
-                .foregroundColor(.gray.opacity(0.5)),
-            alignment: .trailing
-        )
     }
     
     private var onlineAndCashFieldsSection: some View {
@@ -203,21 +364,32 @@ struct EmployeeLotteryFormView: View {
         }
     }
 
-    private var dataRowsView: some View {
+    private func dataRowsView(columnWidth: CGFloat) -> some View {
         let allRowIds = template.rows.map { $0.id }
         return VStack(spacing: 0) {
             ForEach(Array(template.rows.enumerated()), id: \.element.id) { index, row in
                 lotteryFormRowView(
                     index: index,
                     row: row,
-                    allRowIds: allRowIds
+                    allRowIds: allRowIds,
+                    columnWidth: columnWidth
                 )
             }
         }
     }
     
-    private func lotteryFormRowView(index: Int, row: LotteryFormTemplateRow, allRowIds: [String]) -> some View {
-        LotteryFormRowView(
+    private func lotteryFormRowView(
+        index: Int,
+        row: LotteryFormTemplateRow,
+        allRowIds: [String],
+        columnWidth: CGFloat
+    ) -> some View {
+        let canScanRow = !row.beginningNumber.isEmpty
+            && !row.gameNumber.isEmpty
+            && row.packStatus != .returned
+            && row.packStatus != .empty
+
+        return LotteryFormRowView(
             index: index,
             row: row,
             rowValue: rowValues[row.id] ?? row.endingNumber,
@@ -226,6 +398,22 @@ struct EmployeeLotteryFormView: View {
             allRowIds: allRowIds,
             focusedRowId: $focusedRowId,
             isLastRow: index == template.rows.count - 1,
+            showsScanChrome: hasScannableBins,
+            canScanEnding: canScanRow,
+            onScanEnding: canScanRow ? {
+                focusedRowId = nil
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil,
+                    from: nil,
+                    for: nil
+                )
+                shiftCloseScanTarget = LotteryShiftCloseScanTarget(
+                    id: row.id,
+                    binNumber: index + 1,
+                    row: row
+                )
+            } : nil,
             onValueChanged: { newValue in
                 handleRowValueChanged(rowId: row.id, newValue: newValue)
             }
@@ -357,11 +545,11 @@ struct EmployeeLotteryFormView: View {
         .disabled(isSaving || !canCloseShift)
     }
     
-    private func headerCell(_ text: String) -> some View {
+    private func headerCell(_ text: String, width: CGFloat) -> some View {
         Text(text)
             .font(.system(size: 12, weight: .bold))
             .foregroundColor(.black)
-            .frame(width: columnWidth, height: 44)
+            .frame(width: width, height: 44)
             .background(Theme.cloudBlue.opacity(0.1))
             .overlay(
                 Rectangle()
@@ -376,47 +564,34 @@ struct EmployeeLotteryFormView: View {
                 alignment: .leading
             )
     }
-    
-    private func binNumberCell(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundColor(.black)
-            .multilineTextAlignment(.center)
-            .frame(width: columnWidth, height: 44)
-            .background(Theme.cloudWhite)
-            .overlay(
-                Rectangle()
-                    .frame(width: 1)
-                    .foregroundColor(.gray.opacity(0.5)),
-                alignment: .trailing
-            )
-            .overlay(
-                Rectangle()
-                    .frame(width: 1)
-                    .foregroundColor(.gray.opacity(0.5)),
-                alignment: .leading
-            )
-    }
-    
-    private func readOnlyCell(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundColor(.black)
-            .multilineTextAlignment(.center)
-            .frame(width: columnWidth, height: 44)
-            .background(Theme.cloudWhite)
-            .overlay(
-                Rectangle()
-                    .frame(width: 1)
-                    .foregroundColor(.gray.opacity(0.5)),
-                alignment: .trailing
-            )
-            .overlay(
-                Rectangle()
-                    .frame(width: 1)
-                    .foregroundColor(.gray.opacity(0.5)),
-                alignment: .leading
-            )
+
+    private func endHeaderCell(width: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            if hasScannableBins {
+                Color.clear.frame(width: Self.endWarningSlotWidth)
+            }
+            Text("End #")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.black)
+                .frame(maxWidth: .infinity)
+            if hasScannableBins {
+                Color.clear.frame(width: Self.endScanSlotWidth)
+            }
+        }
+        .frame(width: width, height: 44)
+        .background(Theme.cloudBlue.opacity(0.1))
+        .overlay(
+            Rectangle()
+                .frame(width: 1)
+                .foregroundColor(.gray.opacity(0.5)),
+            alignment: .trailing
+        )
+        .overlay(
+            Rectangle()
+                .frame(width: 1)
+                .foregroundColor(.gray.opacity(0.5)),
+            alignment: .leading
+        )
     }
     
     // Format value with dollar sign
@@ -509,19 +684,8 @@ struct EmployeeLotteryFormView: View {
         let validation = await viewModel.validateLotteryForm(terminalNumber: terminalNumber)
         
         if validation.hasIncompleteRows {
-            // Build warning message
-            var message = "Some rows have missing fields:\n\n"
-            for incompleteRow in validation.incompleteRows {
-                message += "Bin #\(incompleteRow.binNumber)"
-                if !incompleteRow.gameNumber.isEmpty && incompleteRow.gameNumber != "N/A" {
-                    message += " (Game #\(incompleteRow.gameNumber))"
-                }
-                message += ": Missing \(incompleteRow.missingFields.joined(separator: ", "))\n"
-            }
-            message += "\nThese rows will not be included in calculations. Do you want to proceed anyway?"
-            
             await MainActor.run {
-                closeWarningMessage = message
+                closeWarningRows = validation.incompleteRows
                 showingCloseWarning = true
             }
         } else {
@@ -532,6 +696,10 @@ struct EmployeeLotteryFormView: View {
     
     // Close lottery shift function
     private func closeLotteryShift(skipValidation: Bool = false) async {
+        // A close is already running (double tap / repeated alert
+        // confirmation) — never start a second one.
+        guard !isSaving else { return }
+
         // Double-check that image has been taken
         if capturedImage == nil && imageData == nil {
             await MainActor.run {
@@ -622,9 +790,17 @@ struct EmployeeLotteryFormView: View {
             }
         } catch {
             await MainActor.run {
-                errorMessage = "Failed to close lottery shift: \(error.localizedDescription)"
-                showingError = true
                 isSaving = false
+                if (error as NSError).code == 101 {
+                    // Stale Begin numbers were auto-corrected on the
+                    // server — show what changed and let the employee
+                    // confirm; the retry re-verifies and passes.
+                    beginRefreshMessage = error.localizedDescription
+                    showingBeginRefreshConfirm = true
+                } else {
+                    errorMessage = "Failed to close lottery shift: \(error.localizedDescription)"
+                    showingError = true
+                }
             }
         }
     }
@@ -689,11 +865,27 @@ struct LotteryFormRowView: View {
     let allRowIds: [String]
     @Binding var focusedRowId: String?
     let isLastRow: Bool
+    var showsScanChrome: Bool = false
+    var canScanEnding: Bool = false
+    var onScanEnding: (() -> Void)?
     let onValueChanged: (String) -> Void
     
     @State private var localValue: String
     
-    init(index: Int, row: LotteryFormTemplateRow, rowValue: String, columnWidth: CGFloat, rowLookup: [String: LotteryFormTemplateRow], allRowIds: [String], focusedRowId: Binding<String?>, isLastRow: Bool, onValueChanged: @escaping (String) -> Void) {
+    init(
+        index: Int,
+        row: LotteryFormTemplateRow,
+        rowValue: String,
+        columnWidth: CGFloat,
+        rowLookup: [String: LotteryFormTemplateRow],
+        allRowIds: [String],
+        focusedRowId: Binding<String?>,
+        isLastRow: Bool,
+        showsScanChrome: Bool = false,
+        canScanEnding: Bool = false,
+        onScanEnding: (() -> Void)? = nil,
+        onValueChanged: @escaping (String) -> Void
+    ) {
         self.index = index
         self.row = row
         self.rowValue = rowValue
@@ -702,6 +894,9 @@ struct LotteryFormRowView: View {
         self.allRowIds = allRowIds
         self._focusedRowId = focusedRowId
         self.isLastRow = isLastRow
+        self.showsScanChrome = showsScanChrome
+        self.canScanEnding = canScanEnding
+        self.onScanEnding = onScanEnding
         self.onValueChanged = onValueChanged
         _localValue = State(initialValue: rowValue)
     }
@@ -765,8 +960,19 @@ struct LotteryFormRowView: View {
                     alignment: .leading
                 )
             
-            // End # - editable
-            ZStack {
+            // End # — fixed slots so warning / value / scan stay aligned with header
+            HStack(spacing: 0) {
+                if showsScanChrome {
+                    Group {
+                        if isBookCycled(beginning: row.beginningNumber, ending: localValue) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 13))
+                                .foregroundColor(.yellow)
+                        }
+                    }
+                    .frame(width: EmployeeLotteryFormView.endWarningSlotWidth)
+                }
+
                 NumberPadTextField(
                     text: $localValue,
                     rowId: row.id,
@@ -782,19 +988,23 @@ struct LotteryFormRowView: View {
                 .multilineTextAlignment(.center)
                 .font(.system(size: 16, weight: .bold))
                 .foregroundColor(.black)
-                .frame(width: columnWidth, height: 44)
-                
-                // Yellow warning indicator for book cycled
-                if isBookCycled(beginning: row.beginningNumber, ending: localValue) {
-                    HStack {
-                        Spacer()
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.yellow)
-                            .padding(.trailing, 4)
+                .frame(maxWidth: .infinity, minHeight: 44)
+
+                if showsScanChrome {
+                    Group {
+                        if canScanEnding, let onScanEnding {
+                            Button(action: onScanEnding) {
+                                Image(systemName: "barcode.viewfinder")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(Theme.cloudBlue)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
+                    .frame(width: EmployeeLotteryFormView.endScanSlotWidth, height: 44)
                 }
             }
+            .frame(width: columnWidth, height: 44)
             .overlay(
                 Rectangle()
                     .frame(width: 1)
@@ -959,6 +1169,101 @@ struct NumberPadTextField: UIViewRepresentable {
             let newText = textField.text ?? ""
             if parent.text != newText {
                 parent.text = newText
+            }
+        }
+    }
+}
+
+/// Shown when the employee tries to close with bins missing numbers.
+/// Bins with an active pack can be check-marked as returned (rep took
+/// the pack back mid-shift), which records the return and clears the
+/// bin before the close runs. Unchecked bins are simply left out of
+/// the calculations, same as before.
+struct CloseIncompleteBinsSheet: View {
+    let rows: [EmployeeHomeViewModel.ValidationResult.IncompleteRow]
+    let onCancel: () -> Void
+    let onContinue: ([String]) -> Void
+
+    @State private var returnedRowIds: Set<String> = []
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("These bins are missing numbers and won’t be included in the calculations. If a pack was taken back (returned) during this shift, check-mark its bin so it’s recorded as a return.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Section("Incomplete bins") {
+                    ForEach(rows) { row in
+                        if row.canMarkReturned {
+                            Button {
+                                if returnedRowIds.contains(row.rowId) {
+                                    returnedRowIds.remove(row.rowId)
+                                } else {
+                                    returnedRowIds.insert(row.rowId)
+                                }
+                            } label: {
+                                HStack {
+                                    rowDescription(row)
+                                    Spacer()
+                                    Image(systemName: returnedRowIds.contains(row.rowId)
+                                        ? "checkmark.square.fill"
+                                        : "square")
+                                        .font(.title3)
+                                        .foregroundColor(returnedRowIds.contains(row.rowId) ? .green : .secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            rowDescription(row)
+                        }
+                    }
+                }
+
+                if !returnedRowIds.isEmpty {
+                    Section {
+                        Text("\(returnedRowIds.count) bin\(returnedRowIds.count == 1 ? "" : "s") will be recorded as returned packs (no sales counted this shift) and cleared from the rack.")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                }
+            }
+            .navigationTitle("Bins not scanned")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Close shift") {
+                        onContinue(Array(returnedRowIds))
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rowDescription(_ row: EmployeeHomeViewModel.ValidationResult.IncompleteRow) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("Bin #\(row.binNumber)")
+                    .font(.headline)
+                if row.gameNumber != "N/A" {
+                    Text("Game \(row.gameNumber)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Text("Missing \(row.missingFields.joined(separator: ", "))")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            if row.canMarkReturned {
+                Text("Check if this pack was returned")
+                    .font(.caption2)
+                    .foregroundColor(.orange)
             }
         }
     }

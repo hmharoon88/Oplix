@@ -40,8 +40,15 @@
         return template?.terminalNumber ?? 1;
     }
 
+    const PACK_STATUSES = new Set(["active", "returned", "empty"]);
+
+    function normalizePackStatus(value) {
+        const s = value != null ? String(value).trim().toLowerCase() : "";
+        return PACK_STATUSES.has(s) ? s : "";
+    }
+
     function normalizeRow(row, index) {
-        return {
+        const out = {
             id: row.id || newId(),
             binNumber: row.binNumber != null ? String(row.binNumber) : String(index + 1),
             gameNumber: row.gameNumber != null ? String(row.gameNumber) : "",
@@ -53,6 +60,11 @@
             dollar: row.dollar != null ? String(row.dollar) : "",
             books: row.books != null ? String(row.books) : "",
         };
+        const packSerial = row.packSerial != null ? String(row.packSerial).trim() : "";
+        if (packSerial) out.packSerial = packSerial;
+        const packStatus = normalizePackStatus(row.packStatus);
+        if (packStatus) out.packStatus = packStatus;
+        return out;
     }
 
     function normalizeTemplate(data, locationId, terminalNumber) {
@@ -100,6 +112,37 @@
         });
         templates.sort((a, b) => effectiveTerminalNumber(a) - effectiveTerminalNumber(b));
         return templates;
+    }
+
+    /**
+     * Look up a game in the global `gameDatabase` (same catalog iOS uses).
+     * Tries canonical + zero-padded candidates when available.
+     */
+    async function fetchGameData(gameNumber) {
+        const raw = gameNumber != null ? String(gameNumber).trim() : "";
+        if (!raw || !window.oplixDb) return null;
+
+        const Barcode = window.OplixOhioLotteryBarcode;
+        const candidates =
+            Barcode && typeof Barcode.gameLookupCandidates === "function"
+                ? Barcode.gameLookupCandidates(raw)
+                : [raw, String(parseInt(raw, 10) || raw)];
+
+        const seen = new Set();
+        for (const candidate of candidates) {
+            const key = String(candidate || "").trim();
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            const snap = await window.oplixDb
+                .collection("gameDatabase")
+                .where("gameNumber", "==", key)
+                .limit(1)
+                .get();
+            if (!snap.empty) {
+                return snap.docs[0].data();
+            }
+        }
+        return null;
     }
 
     async function saveTemplate(userId, locationId, template) {
@@ -269,6 +312,7 @@
         emptyTemplate,
         fetchTemplate,
         fetchAllTemplates,
+        fetchGameData,
         saveTemplate,
         fetchForms,
         createForm,
