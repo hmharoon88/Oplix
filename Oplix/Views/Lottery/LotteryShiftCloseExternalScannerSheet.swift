@@ -14,8 +14,8 @@ struct LotteryShiftCloseExternalScannerSheet: View {
     let rows: [LotteryFormTemplateRow]
     var reverseOrder: Bool = false
     @Binding var rowValues: [String: String]
-    let onPersistEnding: (String, String) async -> Void
-    var onResolveUnrecognizedPack: ((LotteryShiftClosePackReplaceScenario, OhioLotteryBarcode, String, String, String, Bool) async throws -> Void)? = nil
+    let onPersistEnding: (String, String, OhioLotteryBarcode?) async throws -> Bool
+    var onResolveUnrecognizedPack: ((LotteryShiftClosePackReplaceScenario, OhioLotteryBarcode, String, String, String, Bool) async throws -> Bool)? = nil
 
     @State private var captureText = ""
     @State private var invalidMessage: String?
@@ -26,6 +26,8 @@ struct LotteryShiftCloseExternalScannerSheet: View {
     @State private var messageClearTask: Task<Void, Never>?
     @State private var captureEnabled = true
     @State private var replacePrompt: LotteryShiftClosePackReplacePrompt?
+    @State private var packsAddedToInventory = 0
+    @State private var showingInventorySummary = false
 
     private let rescanCooldown: TimeInterval = 0.75
 
@@ -60,7 +62,7 @@ struct LotteryShiftCloseExternalScannerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done") { finishScanning() }
                 }
             }
             .onAppear {
@@ -68,6 +70,14 @@ struct LotteryShiftCloseExternalScannerSheet: View {
             }
             .onDisappear {
                 messageClearTask?.cancel()
+            }
+            .alert("Inventory updated", isPresented: $showingInventorySummary) {
+                Button("OK") { dismiss() }
+            } message: {
+                let n = packsAddedToInventory
+                Text(n == 1
+                     ? "Added 1 pack to inventory while scanning."
+                     : "Added \(n) packs to inventory while scanning.")
             }
             .sheet(item: $replacePrompt) { prompt in
                 LotteryShiftClosePackReplaceSheet(
@@ -80,7 +90,8 @@ struct LotteryShiftCloseExternalScannerSheet: View {
                         guard let onResolveUnrecognizedPack else {
                             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Pack replace isn’t available here."])
                         }
-                        try await onResolveUnrecognizedPack(scenario, prompt.barcode, rowId, returnTicket, ending, creditSealedBeginAsFullBook)
+                        let added = try await onResolveUnrecognizedPack(scenario, prompt.barcode, rowId, returnTicket, ending, creditSealedBeginAsFullBook)
+                        if added { packsAddedToInventory += 1 }
                         rowValues[rowId] = ending
                         let bin = prompt.candidates.first(where: { $0.id == rowId })?.binNumber ?? 0
                         successMessage = "Bin #\(bin) updated → End # \(ending)"
@@ -91,6 +102,14 @@ struct LotteryShiftCloseExternalScannerSheet: View {
                     }
                 )
             }
+        }
+    }
+
+    private func finishScanning() {
+        if packsAddedToInventory > 0 {
+            showingInventorySummary = true
+        } else {
+            dismiss()
         }
     }
 
@@ -256,7 +275,7 @@ struct LotteryShiftCloseExternalScannerSheet: View {
             markPayloadHandled(raw)
         case .unrecognizedPack(let barcode, let candidates):
             if let onResolveUnrecognizedPack,
-               let target = LotteryShiftCloseScanMatcher.autoSeamlessTarget(
+               let seamlessRow = LotteryShiftCloseScanMatcher.autoSeamlessTarget(
                 for: barcode,
                 among: candidates
                ) {
@@ -266,16 +285,17 @@ struct LotteryShiftCloseExternalScannerSheet: View {
                     captureEnabled = false
                     Task {
                         do {
-                            try await onResolveUnrecognizedPack(
+                            let added = try await onResolveUnrecognizedPack(
                                 .soldFinished,
                                 barcode,
-                                target.id,
+                                seamlessRow.id,
                                 "",
                                 ending,
                                 false
                             )
                             await MainActor.run {
-                                applyEnding(ending, to: target, raw: raw)
+                                if added { packsAddedToInventory += 1 }
+                                applyEnding(ending, to: seamlessRow, raw: raw, barcode: nil, alreadyPersisted: true)
                             }
                         } catch {
                             await MainActor.run {
@@ -301,7 +321,7 @@ struct LotteryShiftCloseExternalScannerSheet: View {
                 handleInvalidPayload(error.localizedDescription)
                 markPayloadHandled(raw)
             case .success(let ending):
-                applyEnding(ending, to: matched, raw: raw)
+                applyEnding(ending, to: matched, raw: raw, barcode: barcode, alreadyPersisted: false)
             }
         }
     }
@@ -309,7 +329,9 @@ struct LotteryShiftCloseExternalScannerSheet: View {
     private func applyEnding(
         _ ending: String,
         to matched: LotteryShiftCloseScanMatcher.RowContext,
-        raw: String
+        raw: String,
+        barcode: OhioLotteryBarcode?,
+        alreadyPersisted: Bool
     ) {
         invalidMessage = nil
         rowValues[matched.id] = ending
@@ -328,7 +350,20 @@ struct LotteryShiftCloseExternalScannerSheet: View {
         // Briefly drop focus so speech/UI settle, then reclaim for next wedge scan.
         captureEnabled = false
         Task {
-            await onPersistEnding(matched.id, ending)
+            if !alreadyPersisted {
+                do {
+                    let added = try await onPersistEnding(matched.id, ending, barcode)
+                    await MainActor.run {
+                        if added { packsAddedToInventory += 1 }
+                    }
+                } catch {
+                    await MainActor.run {
+                        rowValues[matched.id] = ""
+                        successMessage = nil
+                        handleInvalidPayload(error.localizedDescription)
+                    }
+                }
+            }
             try? await Task.sleep(nanoseconds: 150_000_000)
             await MainActor.run {
                 captureEnabled = true

@@ -148,9 +148,25 @@
     async function saveTemplate(userId, locationId, template) {
         const terminalNumber = template.terminalNumber ?? null;
         const docId = templateDocId(terminalNumber);
+
+        // Preserve pack serial/status from the existing doc when the web
+        // editor doesn't touch those fields — otherwise a Save can wipe
+        // rack pack tracking (same class of bug as iOS dirty-flag saves).
+        const existing = await fetchTemplate(userId, locationId, terminalNumber);
+        const previousById = new Map((existing?.rows || []).map((r) => [r.id, r]));
+        const rows = (template.rows || []).map((row, index) => {
+            const next = normalizeRow(row, index);
+            const prev = previousById.get(next.id);
+            if (prev) {
+                if (!next.packSerial && prev.packSerial) next.packSerial = prev.packSerial;
+                if (!next.packStatus && prev.packStatus) next.packStatus = prev.packStatus;
+            }
+            return next;
+        });
+
         const payload = {
             locationId,
-            rows: (template.rows || []).map(normalizeRow),
+            rows,
             lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
             lotteryRegisterAmount: template.lotteryRegisterAmount || "",
             reverseOrder: !!template.reverseOrder,

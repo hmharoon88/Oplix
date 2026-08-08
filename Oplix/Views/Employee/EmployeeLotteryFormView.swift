@@ -147,10 +147,11 @@ struct EmployeeLotteryFormView: View {
                 rows: template.rows,
                 reverseOrder: template.reverseOrder,
                 rowValues: $rowValues,
-                onPersistEnding: { rowId, ending in
-                    try? await viewModel.updateLotteryRowEndingNumber(
+                onPersistEnding: { rowId, ending, barcode in
+                    try await viewModel.updateLotteryRowEndingFromScan(
                         rowId: rowId,
                         endingNumber: ending,
+                        barcode: barcode,
                         terminalNumber: terminalNumber
                     )
                 },
@@ -172,10 +173,11 @@ struct EmployeeLotteryFormView: View {
                 rows: template.rows,
                 reverseOrder: template.reverseOrder,
                 rowValues: $rowValues,
-                onPersistEnding: { rowId, ending in
-                    try? await viewModel.updateLotteryRowEndingNumber(
+                onPersistEnding: { rowId, ending, barcode in
+                    try await viewModel.updateLotteryRowEndingFromScan(
                         rowId: rowId,
                         endingNumber: ending,
+                        barcode: barcode,
                         terminalNumber: terminalNumber
                     )
                 },
@@ -429,15 +431,22 @@ struct EmployeeLotteryFormView: View {
     
     private func handleRowValueChanged(rowId: String, newValue: String) {
         rowValues[rowId] = newValue
-        // Debounced save
+        // Debounced save — surface failures so End doesn't look saved when Firestore rejected it.
         Task {
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             if rowValues[rowId] == newValue {
-                try? await viewModel.updateLotteryRowEndingNumber(
-                    rowId: rowId,
-                    endingNumber: newValue,
-                    terminalNumber: terminalNumber
-                )
+                do {
+                    try await viewModel.updateLotteryRowEndingNumber(
+                        rowId: rowId,
+                        endingNumber: newValue,
+                        terminalNumber: terminalNumber
+                    )
+                } catch {
+                    await MainActor.run {
+                        errorMessage = "Couldn't save End #: \(error.localizedDescription)"
+                        showingError = true
+                    }
+                }
             }
         }
     }

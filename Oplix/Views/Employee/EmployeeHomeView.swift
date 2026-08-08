@@ -242,6 +242,9 @@ struct EmployeeHomeContent: View {
                                         .font(.system(size: 16, weight: .semibold))
                                         .foregroundColor(.white)
                                     Spacer()
+                                    Text(appVersionLabel)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.85))
                                 }
                                 HStack {
                                     Image(systemName: "mappin.circle.fill")
@@ -549,6 +552,11 @@ struct EmployeeHomeContent: View {
     }
     
     
+    private var appVersionLabel: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        return "v\(version)"
+    }
+
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, MMMM d, yyyy" // e.g., "Monday, January 15, 2025"

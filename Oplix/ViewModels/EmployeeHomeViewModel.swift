@@ -732,6 +732,24 @@ class EmployeeHomeViewModel: ObservableObject {
         endingNumber: String,
         terminalNumber: Int? = nil
     ) async throws {
+        _ = try await updateLotteryRowEndingFromScan(
+            rowId: rowId,
+            endingNumber: endingNumber,
+            barcode: nil,
+            terminalNumber: terminalNumber
+        )
+    }
+
+    /// Apply End # from a close scan. When `barcode` is present, attaches the
+    /// pack serial to the bin if missing and registers the pack in inventory
+    /// when it wasn't known yet.
+    @discardableResult
+    func updateLotteryRowEndingFromScan(
+        rowId: String,
+        endingNumber: String,
+        barcode: OhioLotteryBarcode?,
+        terminalNumber: Int? = nil
+    ) async throws -> Bool {
         guard let managerUserId = managerUserId else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager user ID not found"])
         }
@@ -739,24 +757,39 @@ class EmployeeHomeViewModel: ObservableObject {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
         }
 
-        // Read-merge-write. This device's in-memory template can be
-        // hours old (app frozen in background) — pushing the whole
-        // thing used to silently overwrite Begin numbers another
-        // device rolled forward at its close (the "false short" bug).
-        // So: pull the current server copy, merge in only this one
-        // End number, and save that. If the fetch fails (offline) we
-        // fall back to the legacy whole-template save so the
-        // employee's input still isn't lost — the Begin verification
-        // at close time is the safety net for that path.
         let serverTemplate = try? await firebaseService.fetchLotteryFormTemplate(
             userId: managerUserId,
             locationId: locationId,
             terminalNumber: terminalNumber
         )
         var template = serverTemplate ?? localTemplate
+        var addedToInventory = false
 
         if let index = template.rows.firstIndex(where: { $0.id == rowId }) {
             template.rows[index].endingNumber = endingNumber
+
+            if let barcode {
+                let existingSerial = template.rows[index].packSerial ?? ""
+                let alreadyHadThisSerial = !existingSerial.isEmpty
+                    && OhioLotteryBarcodeParser.packSerialsMatch(existingSerial, barcode.packSerial)
+                if !alreadyHadThisSerial {
+                    template.rows[index].packSerial = barcode.packSerial
+                    template.rows[index].packStatus = .active
+
+                    let binLabel = template.rows[index].binNumber.isEmpty
+                        ? String(index + 1)
+                        : template.rows[index].binNumber
+                    addedToInventory = await registerCloseScanPackInInventoryIfNeeded(
+                        barcode: barcode,
+                        value: template.rows[index].value,
+                        tickets: template.rows[index].tickets,
+                        rowId: template.rows[index].id,
+                        binLabel: binLabel,
+                        managerUserId: managerUserId
+                    )
+                }
+            }
+
             try await firebaseService.saveLotteryFormTemplate(
                 userId: managerUserId,
                 locationId: locationId,
@@ -764,9 +797,62 @@ class EmployeeHomeViewModel: ObservableObject {
             )
             setTemplate(template, for: terminalNumber)
         }
+        return addedToInventory
+    }
+
+    /// Returns `true` when a brand-new stock record was created for this pack.
+    private func registerCloseScanPackInInventoryIfNeeded(
+        barcode: OhioLotteryBarcode,
+        value: String,
+        tickets: String,
+        rowId: String,
+        binLabel: String,
+        managerUserId: String
+    ) async -> Bool {
+        if let existing = try? await firebaseService.findLotteryStockPack(
+            userId: managerUserId,
+            locationId: locationId,
+            packSerial: barcode.packSerial
+        ) {
+            if existing.isInStock {
+                try? await firebaseService.markLotteryStockPackAssigned(
+                    userId: managerUserId,
+                    locationId: locationId,
+                    packId: existing.id,
+                    rowId: rowId,
+                    binNumber: binLabel
+                )
+            }
+            return false
+        }
+
+        let pack = LotteryStockPack(
+            locationId: locationId,
+            gameNumber: OhioLotteryBarcodeParser.canonicalGameNumber(barcode.gameNumber),
+            packSerial: barcode.packSerial,
+            value: value,
+            tickets: tickets,
+            receivedTicketNumber: barcode.ticketNumber.isEmpty ? "00" : barcode.ticketNumber,
+            status: .assigned,
+            assignedAt: Date(),
+            assignedRowId: rowId,
+            assignedBinNumber: binLabel
+        )
+        do {
+            try await firebaseService.createLotteryStockPack(
+                userId: managerUserId,
+                locationId: locationId,
+                pack: pack
+            )
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Mid-shift pack swap discovered at close: credit old pack (sold or return), assign new pack, set End #.
+    /// Returns `true` when the scanned pack was newly added to inventory.
+    @discardableResult
     func resolveShiftCloseUnrecognizedPack(
         barcode: OhioLotteryBarcode,
         scenario: LotteryShiftClosePackReplaceScenario,
@@ -775,7 +861,7 @@ class EmployeeHomeViewModel: ObservableObject {
         endingNumber: String,
         creditSealedBeginAsFullBook: Bool = false,
         terminalNumber: Int? = nil
-    ) async throws {
+    ) async throws -> Bool {
         guard let managerUserId = managerUserId else {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager user ID not found"])
         }
@@ -828,20 +914,14 @@ class EmployeeHomeViewModel: ObservableObject {
             )
             setTemplate(template, for: terminalNumber)
 
-            if let stock = try? await firebaseService.findInStockLotteryPack(
-                userId: managerUserId,
-                locationId: locationId,
-                packSerial: barcode.packSerial
-            ) {
-                try? await firebaseService.markLotteryStockPackAssigned(
-                    userId: managerUserId,
-                    locationId: locationId,
-                    packId: stock.id,
-                    rowId: oldRow.id,
-                    binNumber: binLabel
-                )
-            }
-            return
+            return await registerCloseScanPackInInventoryIfNeeded(
+                barcode: barcode,
+                value: oldRow.value,
+                tickets: oldRow.tickets,
+                rowId: oldRow.id,
+                binLabel: binLabel,
+                managerUserId: managerUserId
+            )
         }
 
         switch scenario {
@@ -986,19 +1066,14 @@ class EmployeeHomeViewModel: ObservableObject {
         )
         setTemplate(template, for: terminalNumber)
 
-        if let stock = try? await firebaseService.findInStockLotteryPack(
-            userId: managerUserId,
-            locationId: locationId,
-            packSerial: barcode.packSerial
-        ) {
-            try? await firebaseService.markLotteryStockPackAssigned(
-                userId: managerUserId,
-                locationId: locationId,
-                packId: stock.id,
-                rowId: oldRow.id,
-                binNumber: binLabel
-            )
-        }
+        return await registerCloseScanPackInInventoryIfNeeded(
+            barcode: barcode,
+            value: gameValue,
+            tickets: gameTickets,
+            rowId: oldRow.id,
+            binLabel: binLabel,
+            managerUserId: managerUserId
+        )
     }
 
     /// Mark unscanned bins as returned packs during the close flow.

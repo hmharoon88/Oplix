@@ -1635,6 +1635,27 @@ class FirebaseService: ObservableObject {
             OhioLotteryBarcodeParser.packSerialsMatch($0.packSerial, packSerial)
         }
     }
+
+    /// Any stock record for this serial (in stock or already assigned).
+    func findLotteryStockPack(
+        userId: String,
+        locationId: String,
+        packSerial: String
+    ) async throws -> LotteryStockPack? {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("lotteryStock")
+            .getDocuments()
+
+        let all = try snapshot.documents.compactMap { doc -> LotteryStockPack? in
+            try doc.data(as: LotteryStockPack.self)
+        }
+        return all.first {
+            OhioLotteryBarcodeParser.packSerialsMatch($0.packSerial, packSerial)
+        }
+    }
     
     // MARK: - Firebase Storage
     

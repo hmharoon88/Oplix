@@ -26,8 +26,10 @@ struct LotteryShiftCloseScannerSheet: View {
     let rows: [LotteryFormTemplateRow]
     var reverseOrder: Bool = false
     @Binding var rowValues: [String: String]
-    let onPersistEnding: (String, String) async -> Void
-    var onResolveUnrecognizedPack: ((LotteryShiftClosePackReplaceScenario, OhioLotteryBarcode, String, String, String, Bool) async throws -> Void)? = nil
+    /// Persist End # (and optional pack barcode). Returns true if a new pack was added to inventory.
+    let onPersistEnding: (String, String, OhioLotteryBarcode?) async throws -> Bool
+    /// Returns true if a new pack was added to inventory.
+    var onResolveUnrecognizedPack: ((LotteryShiftClosePackReplaceScenario, OhioLotteryBarcode, String, String, String, Bool) async throws -> Bool)? = nil
 
     @State private var invalidMessage: String?
     @State private var successMessage: String?
@@ -38,6 +40,8 @@ struct LotteryShiftCloseScannerSheet: View {
     @State private var replacePrompt: LotteryShiftClosePackReplacePrompt?
     /// Hard lock so in-flight camera callbacks can't bounce the replace UI.
     @State private var isReplaceFlowLocked = false
+    @State private var packsAddedToInventory = 0
+    @State private var showingInventorySummary = false
 
     private let rescanCooldown: TimeInterval = 1.5
 
@@ -95,7 +99,8 @@ struct LotteryShiftCloseScannerSheet: View {
                                     userInfo: [NSLocalizedDescriptionKey: "Pack replace isn’t available here."]
                                 )
                             }
-                            try await onResolveUnrecognizedPack(scenario, prompt.barcode, rowId, returnTicket, ending, creditSealedBeginAsFullBook)
+                            let added = try await onResolveUnrecognizedPack(scenario, prompt.barcode, rowId, returnTicket, ending, creditSealedBeginAsFullBook)
+                            if added { packsAddedToInventory += 1 }
                             rowValues[rowId] = ending
                             let bin = prompt.candidates.first(where: { $0.id == rowId })?.binNumber ?? 0
                             successMessage = "Bin #\(bin) updated → End # \(ending)"
@@ -103,9 +108,7 @@ struct LotteryShiftCloseScannerSheet: View {
                             clearReplaceFlow()
                             scheduleMessageClear()
                             if !target.isContinuous {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                                    dismiss()
-                                }
+                                finishScanning()
                             }
                         }
                     )
@@ -121,7 +124,7 @@ struct LotteryShiftCloseScannerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(target.isContinuous ? "Done" : "Cancel") {
-                        dismiss()
+                        finishScanning()
                     }
                     .disabled(isReplaceFlowLocked)
                 }
@@ -131,6 +134,27 @@ struct LotteryShiftCloseScannerSheet: View {
                     readyHint = initialReadyHint
                 }
             }
+            .alert("Inventory updated", isPresented: $showingInventorySummary) {
+                Button("OK") { dismiss() }
+            } message: {
+                Text(inventorySummaryMessage)
+            }
+        }
+    }
+
+    private var inventorySummaryMessage: String {
+        let n = packsAddedToInventory
+        if n == 1 {
+            return "Added 1 pack to inventory while scanning."
+        }
+        return "Added \(n) packs to inventory while scanning."
+    }
+
+    private func finishScanning() {
+        if packsAddedToInventory > 0 {
+            showingInventorySummary = true
+        } else {
+            dismiss()
         }
     }
 
@@ -310,7 +334,7 @@ struct LotteryShiftCloseScannerSheet: View {
         case .unrecognizedPack(let barcode, let candidates):
             // Same-game single-bin: seamless Begin→End without the sold-out sheet.
             if let onResolveUnrecognizedPack,
-               let target = LotteryShiftCloseScanMatcher.autoSeamlessTarget(
+               let seamlessRow = LotteryShiftCloseScanMatcher.autoSeamlessTarget(
                 for: barcode,
                 among: candidates,
                 preferredRowId: preferredRowId
@@ -321,16 +345,17 @@ struct LotteryShiftCloseScannerSheet: View {
                     markPayloadHandled(raw)
                     Task {
                         do {
-                            try await onResolveUnrecognizedPack(
+                            let added = try await onResolveUnrecognizedPack(
                                 .soldFinished,
                                 barcode,
-                                target.id,
+                                seamlessRow.id,
                                 "",
                                 ending,
                                 false
                             )
                             await MainActor.run {
-                                applyEnding(ending, to: target, raw: raw)
+                                if added { packsAddedToInventory += 1 }
+                                applyEnding(ending, to: seamlessRow, raw: raw, barcode: nil, alreadyPersisted: true)
                                 clearReplaceFlow()
                             }
                         } catch {
@@ -363,7 +388,7 @@ struct LotteryShiftCloseScannerSheet: View {
                 LotteryScanFeedback.playError()
                 markPayloadHandled(raw)
             case .success(let ending):
-                applyEnding(ending, to: matched, raw: raw)
+                applyEnding(ending, to: matched, raw: raw, barcode: barcode, alreadyPersisted: false)
             }
         }
     }
@@ -371,7 +396,9 @@ struct LotteryShiftCloseScannerSheet: View {
     private func applyEnding(
         _ ending: String,
         to matched: LotteryShiftCloseScanMatcher.RowContext,
-        raw: String
+        raw: String,
+        barcode: OhioLotteryBarcode?,
+        alreadyPersisted: Bool
     ) {
         invalidMessage = nil
         rowValues[matched.id] = ending
@@ -389,13 +416,28 @@ struct LotteryShiftCloseScannerSheet: View {
 
         scheduleMessageClear()
 
-        Task {
-            await onPersistEnding(matched.id, ending)
+        if !alreadyPersisted {
+            Task {
+                do {
+                    let added = try await onPersistEnding(matched.id, ending, barcode)
+                    await MainActor.run {
+                        if added { packsAddedToInventory += 1 }
+                    }
+                } catch {
+                    await MainActor.run {
+                        // Don't leave a green "saved" End on screen if Firestore rejected it.
+                        rowValues[matched.id] = ""
+                        successMessage = nil
+                        handleInvalidPayload(error.localizedDescription)
+                        LotteryScanFeedback.playError()
+                    }
+                }
+            }
         }
 
         if !target.isContinuous {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                dismiss()
+                finishScanning()
             }
         }
     }
