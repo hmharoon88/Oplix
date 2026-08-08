@@ -843,7 +843,7 @@
             ...(hasGasStation()
                 ? [
                       { label: "Fuel ($)", amount: agg.fuelDollars, kind: "info" },
-                      { label: "Credit card (register)", amount: agg.creditCard, kind: "info" },
+                      { label: "Network Card", amount: agg.creditCard, kind: "info" },
                   ]
                 : []),
             { label: "Month credits (Net)", amount: agg.receivablesTotal, kind: "plus" },
@@ -2654,7 +2654,7 @@
         if (showCredit) {
             salesCards.push(`
                 <div class="books-station-card">
-                    <div class="books-station-card-head"><strong>Credit card</strong></div>
+                    <div class="books-station-card-head"><strong>Network Card</strong></div>
                     <label class="books-label">Amount ($)
                         <input ${amountInputAttrs("credit_card", state.day.creditCard)}>
                     </label>
@@ -2910,7 +2910,7 @@
         if (showField("registers")) {
             parts.push(
                 options.gas
-                    ? `<p class="books-hint">Register card/cash is for shift reconciliation only — not added to merch, credit card, or fuel.</p>`
+                    ? `<p class="books-hint">Register card/cash is for shift reconciliation only — not added to merch, network card, or fuel.</p>`
                     : `<p class="books-hint"><strong>Total sales</strong> uses register card + cash. Pulltab, lottery, wind, and keno are track only.</p>`
             );
             parts.push(renderAllRegisters());

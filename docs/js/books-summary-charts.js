@@ -45,11 +45,16 @@
         const s = String(label || "");
         const map = {
             "Merch sale (store)": "Merch",
-            "Register card": "Reg card",
-            "Credit card": "Credit card",
+            "Register card": "Card",
+            "Card": "Card",
+            "Store card": "Card",
+            "Cash": "Cash",
+            "Credit card": "Network Card",
+            "Pump credit": "Network Card",
+            "Network Card": "Network Card",
             "Fuel sales ($)": "Fuel",
-            "Register — card": "Reg card",
-            "Register — cash": "Reg cash",
+            "Register — card": "Card",
+            "Register — cash": "Cash",
             "Checks / ACH": "Check Exp",
             "Cash expense": "Cash exp.",
         };
@@ -296,7 +301,7 @@
         const secondaryGas = gas
             ? `
                     <div class="bs-metric-mini bs-metric-mini--card">
-                        <span>Credit card</span>
+                        <span>Card</span>
                         <strong>${money(b.card)}</strong>
                     </div>
                     <div class="bs-metric-mini bs-metric-mini--fuel">
@@ -428,7 +433,8 @@
         const salesRows = gas
             ? [
                   keyMetricCell("Merch sales", money(agg.sales), { ...opt, drill: "sales" }),
-                  keyMetricCell("Credit card", money(cc.card), opt),
+                  keyMetricCell("Card", money(cc.card), opt),
+                  keyMetricCell("Network Card", money(agg.creditCard), opt),
                   keyMetricCell("Fuel ($)", money(agg.fuelDollars), opt),
                   keyMetricCell("Fuel (gal.)", formatNumber(agg.fuelGallons), opt),
               ]
@@ -509,8 +515,8 @@
         const M = booksModel || window.OplixBooksModel;
         const hasGas = (packs || []).some((p) => p.aggregate?.hasGasStation);
         const cols = [
-            { label: "Register — card", get: (a) => a.registerCard },
-            { label: "Register — cash", get: (a) => a.registerCash },
+            { label: "Card", get: (a) => a.registerCard },
+            { label: "Cash", get: (a) => a.registerCash },
             { label: "Pulltab cash (track only)", get: (a) => a.pulltabCash },
             { label: "Lottery (track only)", get: (a) => a.lotteryCash },
             {
@@ -523,7 +529,7 @@
             { label: "In house (track only)", get: (a) => a.inHouseAccount },
             { label: "Lottery pay out (track only)", get: (a) => a.lotteryPayOut },
             { label: "Cash refunds (track only)", get: (a) => a.registerShiftRefundsTotal },
-            { label: "Credit card", get: (a) => a.creditCard },
+            { label: "Network Card", get: (a) => a.creditCard },
             { label: "Fuel ($)", get: (a) => a.fuelDollars },
             { label: "Fuel (gal.)", get: (a) => a.fuelGallons, format: "number" },
         ];
@@ -534,8 +540,8 @@
             cols.splice(0, 3);
             cols.unshift(
                 { label: "Merch sale", get: (a) => a.merchSale },
-                { label: "Register — card", get: (a) => a.registerCard },
-                { label: "Register — cash", get: (a) => a.registerCash }
+                { label: "Card", get: (a) => a.registerCard },
+                { label: "Cash", get: (a) => a.registerCash }
             );
         }
 
@@ -697,8 +703,8 @@
             return `
             <div class="bs-legend-chips" aria-hidden="true">
                 <span class="bs-chip"><i class="bs-chip-dot" style="background:${COLOR_CARD}"></i>Merch</span>
-                <span class="bs-chip"><i class="bs-chip-dot" style="background:#6366f1"></i>Register card</span>
-                <span class="bs-chip"><i class="bs-chip-dot" style="background:#8b5cf6"></i>Credit card</span>
+                <span class="bs-chip"><i class="bs-chip-dot" style="background:#6366f1"></i>Card</span>
+                <span class="bs-chip"><i class="bs-chip-dot" style="background:#8b5cf6"></i>Network Card</span>
                 <span class="bs-chip"><i class="bs-chip-dot" style="background:${COLOR_FUEL}"></i>Fuel</span>
             </div>`;
         }
@@ -726,7 +732,10 @@
         const cardAmt = num(items.find((s) => s.label === "Card")?.amount);
         const cashAmt = num(items.find((s) => s.label === "Cash")?.amount);
         const merchAmt = num(items.find((s) => s.label === "Merch")?.amount);
-        const regCardAmt = num(items.find((s) => s.label === "Register card")?.amount);
+        const regCardAmt = num(
+            items.find((s) => s.label === "Card" || s.label === "Store card" || s.label === "Register card")
+                ?.amount
+        );
         const fuelAmt = num(items.find((s) => s.label === "Fuel")?.amount);
         const total = cardAmt + cashAmt;
 
@@ -737,7 +746,7 @@
                     <strong>${money(opts.total != null ? opts.total : merchAmt)}</strong>
                 </div>
                 <div class="bs-panel-stat bs-panel-stat--card">
-                    <span>Credit card</span>
+                    <span>Card</span>
                     <strong>${money(opts.registerCard != null ? opts.registerCard : regCardAmt)}</strong>
                 </div>
                 <div class="bs-panel-stat bs-panel-stat--fuel">
@@ -909,8 +918,8 @@
         const rows = (entries || []).map((e) => ({
             label: e.label,
             merch: num(e.Merch),
-            regCard: num(e["Register card"]),
-            pumpCredit: num(e["Credit card"]),
+            regCard: num(e["Card"] ?? e["Register card"]),
+            pumpCredit: num(e["Network Card"] ?? e["Pump credit"] ?? e["Credit card"]),
             fuel: num(e.Fuel),
         }));
         const hasData = rows.some(
@@ -930,7 +939,7 @@
                 <div class="bs-panel-head">
                     <div class="bs-panel-head-text">
                         <h3 class="bs-panel-title">${escapeHtml(title)}</h3>
-                        <p class="bs-panel-sub">Merch, register card, credit card, and fuel for each period.</p>
+                        <p class="bs-panel-sub">Merch, card, network card, and fuel for each period.</p>
                     </div>
                 </div>
                 <div class="bs-pie-bar-pair bs-pie-bar-pair--bars-only">
@@ -957,7 +966,7 @@
         const gap = 3;
         const colors = [COLOR_CARD, "#6366f1", "#8b5cf6", COLOR_FUEL];
         const keys = ["merch", "regCard", "pumpCredit", "fuel"];
-        const labels = ["Merch", "Reg card", "Credit card", "Fuel"];
+        const labels = ["Merch", "Card", "Network Card", "Fuel"];
 
         const yAxis = Array.from({ length: ticks + 1 }, (_, i) => {
             const t = i / ticks;

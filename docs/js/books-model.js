@@ -792,8 +792,8 @@
                 cash: num(agg.registerCash),
                 total: num(agg.registerCard) + num(agg.registerCash),
                 slices: [
-                    { label: "Register — card", amount: num(agg.registerCard) },
-                    { label: "Register — cash", amount: num(agg.registerCash) },
+                    { label: "Card", amount: num(agg.registerCard) },
+                    { label: "Cash", amount: num(agg.registerCash) },
                 ],
             };
         }
@@ -802,8 +802,8 @@
             cash: num(agg.registerCash),
             total: num(agg.registerCard) + num(agg.registerCash),
             slices: [
-                { label: "Register — card", amount: num(agg.registerCard) },
-                { label: "Register — cash", amount: num(agg.registerCash) },
+                { label: "Card", amount: num(agg.registerCard) },
+                { label: "Cash", amount: num(agg.registerCash) },
             ],
         };
     }
@@ -812,9 +812,9 @@
     function gasSalesDetailBreakdownFromAggregate(agg) {
         return [
             { fieldId: "merchSale", label: "Merch sale", amount: num(agg.merchSale) },
-            { fieldId: "registers", label: "Register — card", amount: num(agg.registerCard) },
-            { fieldId: "registers", label: "Register — cash", amount: num(agg.registerCash) },
-            { fieldId: "creditCard", label: "Credit card", amount: num(agg.creditCard) },
+            { fieldId: "registers", label: "Card", amount: num(agg.registerCard) },
+            { fieldId: "registers", label: "Cash", amount: num(agg.registerCash) },
+            { fieldId: "creditCard", label: "Network Card", amount: num(agg.creditCard) },
             { fieldId: "waynePass", label: "Wayne Pass", amount: num(agg.waynePass) },
             { fieldId: "fuel", label: "Fuel gallons", amount: num(agg.fuelGallons), format: "number" },
             ...(num(agg.fuelRegular) !== 0
@@ -888,8 +888,8 @@
             );
         } else {
             lines = [
-                { fieldId: "registers", label: "Register — card", amount: num(agg.registerCard) },
-                { fieldId: "registers", label: "Register — cash", amount: num(agg.registerCash) },
+                { fieldId: "registers", label: "Card", amount: num(agg.registerCard) },
+                { fieldId: "registers", label: "Cash", amount: num(agg.registerCash) },
             ];
         }
         lines = appendCustomBreakdownLines(lines, agg).filter(
@@ -937,12 +937,12 @@
         return lines;
     }
 
-    /** Gas station chart slices — merch, register card, pump credit, and fuel (separate from total sales). */
+    /** Gas station chart slices — merch, store card, pump credit, and fuel (separate from total sales). */
     function gasSalesSlicesFromAggregate(agg) {
         return [
             { label: "Merch", amount: num(agg.merchSale) },
-            { label: "Register card", amount: num(agg.registerCard) },
-            { label: "Credit card", amount: num(agg.creditCard) },
+            { label: "Card", amount: num(agg.registerCard) },
+            { label: "Network Card", amount: num(agg.creditCard) },
             { label: "Fuel", amount: num(agg.fuelDollars) },
         ];
     }
@@ -1586,8 +1586,8 @@
             { key: "fuelDollars", label: "Fuel sales ($)" },
             { key: "fuelGallons", label: "Fuel gallons", format: "number" },
             { key: "merchSale", label: "Merch sale (store)" },
-            { key: "registerCard", label: "Register — card" },
-            { key: "creditCard", label: "Credit card" },
+            { key: "registerCard", label: "Card" },
+            { key: "creditCard", label: "Network Card" },
             { key: "expenses", label: "Total expenses" },
             { key: "net", label: "Net" },
             { key: "receivablesTotal", label: "Receivables" },
