@@ -793,38 +793,356 @@
         </ul>`;
     }
 
+    function defaultPostingDayId() {
+        const today = M().dayIdFromDate(new Date());
+        if (today.startsWith(state.monthId)) return today;
+        const n = M().daysInMonth(state.monthId);
+        return `${state.monthId}-${String(n).padStart(2, "0")}`;
+    }
+
+    function monthlySourcedDayPostings() {
+        const rows = [];
+        Object.entries(state.daysById || {}).forEach(([dayId, day]) => {
+            (day.checksAch || []).forEach((r) => {
+                if (r.source !== "monthly") return;
+                rows.push({
+                    id: r.id,
+                    dayId: r.date || dayId,
+                    category: "Check expense",
+                    description: r.description || "",
+                    checkNo: r.checkNo || "",
+                    amount: M().num(r.amount),
+                });
+            });
+            (day.otherExpenses || []).forEach((r) => {
+                if (r.source !== "monthly") return;
+                rows.push({
+                    id: r.id,
+                    dayId: dayId,
+                    category: "Other expense",
+                    description: r.description || "",
+                    checkNo: "",
+                    amount: M().num(r.amount),
+                });
+            });
+        });
+        rows.sort((a, b) => String(a.dayId).localeCompare(String(b.dayId)));
+        return rows;
+    }
+
+    function renderMonthPostingForm(closed) {
+        if (closed) return "";
+        const nextCheck = suggestedNextCheckNo();
+        const defaultDay = defaultPostingDayId();
+        return `
+            <div class="books-month-posting-form" data-month-posting-form>
+                <h4 class="books-month-posting-title">Add missed posting</h4>
+                <p class="books-hint">Use this for items missed on a daily sheet. Check expenses land on that day and update check # sequence. Checks Received works like Receivables → Mark received for that date.</p>
+                <div class="books-month-posting-grid">
+                    <label class="books-label">Category
+                        <select class="books-select" name="postCategory" data-month-post-category>
+                            <option value="checks_received">Checks Received</option>
+                            <option value="check_expense" selected>Check expense</option>
+                            <option value="other_expense">Other / missed expense</option>
+                            <option value="month_expense">Other expense (month Net only)</option>
+                            <option value="month_credit">Other credit (month Net only)</option>
+                        </select>
+                    </label>
+                    <label class="books-label books-month-post-date-wrap" data-month-post-date-wrap>
+                        Date
+                        <input class="books-input" type="date" name="postDate" value="${escapeHtml(defaultDay)}" data-month-post-date>
+                    </label>
+                    <label class="books-label">Description / payee *
+                        <input class="books-input" type="text" name="postDescription" placeholder="Payee or description" data-month-post-desc>
+                    </label>
+                    <label class="books-label books-month-post-check-wrap" data-month-post-check-wrap>
+                        Check #
+                        <input class="books-input" type="text" name="postCheckNo" value="${escapeHtml(nextCheck)}" placeholder="${escapeHtml(nextCheck ? `Next: ${nextCheck}` : "Check #")}" data-month-post-check>
+                    </label>
+                    <label class="books-label">Amount ($) *
+                        <input ${amountInputAttrs("postAmount", 0)} data-month-post-amount>
+                    </label>
+                </div>
+                <div class="books-month-posting-actions">
+                    <button type="button" class="btn" data-month-posting-submit>Add posting</button>
+                    <span class="dir-status" data-month-posting-status></span>
+                </div>
+            </div>`;
+    }
+
+    function renderMonthlySourcedSummary() {
+        const rows = monthlySourcedDayPostings();
+        if (!rows.length) return "";
+        return `
+            <div class="books-month-sourced">
+                <h4 class="books-month-posting-title">Posted to daily sheets from Monthly books</h4>
+                <ul class="books-month-sourced-list">
+                    ${rows
+                        .map(
+                            (r) => `
+                        <li>
+                            <strong>${escapeHtml(r.category)}</strong>
+                            · ${escapeHtml(formatDayLabel(r.dayId))}
+                            · ${escapeHtml(r.description || "(no description)")}
+                            ${r.checkNo ? ` · #${escapeHtml(r.checkNo)}` : ""}
+                            · ${money(r.amount)}
+                        </li>`
+                        )
+                        .join("")}
+                </ul>
+            </div>`;
+    }
+
     function renderMonthAdjustments(closed) {
         const list = state.month.monthAdjustments || [];
         const fieldsetAttr = closed ? " disabled" : "";
         return `
-            <fieldset class="books-fieldset"${fieldsetAttr}>
-                <h3 class="books-subtitle">Month adjustments</h3>
-                <p class="books-hint">Catch-all lines for anything not on daily sheets or other tabs — bank fees, corrections, one-off credits. Expenses reduce Net; credits increase Net.</p>
-                <div class="books-lines books-month-adj-lines" data-di-list="monthAdjustments">
-                    <div class="books-lines-head books-month-adj-head">
-                        <span>Description</span>
-                        <span>Type</span>
-                        <span>Amount</span>
-                        <span></span>
+            <section class="books-month-section books-month-postings">
+                <h3 class="books-subtitle">Month postings &amp; adjustments</h3>
+                ${renderMonthPostingForm(closed)}
+                ${renderMonthlySourcedSummary()}
+                <fieldset class="books-fieldset"${fieldsetAttr}>
+                    <h4 class="books-month-posting-title">Other month adjustments (Net only)</h4>
+                    <p class="books-hint">Bank fees, corrections, and one-off credits with no daily sheet date. Expenses reduce Net; credits increase Net.</p>
+                    <div class="books-lines books-month-adj-lines" data-di-list="monthAdjustments">
+                        <div class="books-lines-head books-month-adj-head">
+                            <span>Description</span>
+                            <span>Type</span>
+                            <span>Amount</span>
+                            <span></span>
+                        </div>
+                        ${list
+                            .map((row) => {
+                                const kind = row.kind === "credit" ? "credit" : "expense";
+                                return `
+                        <div class="books-lines-row books-month-adj-row" data-di-row="${escapeHtml(row.id)}">
+                            <input type="text" class="books-input" name="description" value="${escapeHtml(row.description || "")}" placeholder="e.g. Bank fee, correction">
+                            <select class="books-select" name="kind">
+                                <option value="expense"${kind === "expense" ? " selected" : ""}>Expense</option>
+                                <option value="credit"${kind === "credit" ? " selected" : ""}>Credit</option>
+                            </select>
+                            <input ${amountInputAttrs("amount", row.amount)}>
+                            <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="monthAdjustments">×</button>
+                        </div>`;
+                            })
+                            .join("")}
+                        ${closed ? "" : `<button type="button" class="books-add-line" data-di-add="monthAdjustments">+ Add Net-only adjustment</button>`}
                     </div>
-                    ${list
-                        .map((row) => {
-                            const kind = row.kind === "credit" ? "credit" : "expense";
-                            return `
-                    <div class="books-lines-row books-month-adj-row" data-di-row="${escapeHtml(row.id)}">
-                        <input type="text" class="books-input" name="description" value="${escapeHtml(row.description || "")}" placeholder="e.g. Bank fee, correction">
-                        <select class="books-select" name="kind">
-                            <option value="expense"${kind === "expense" ? " selected" : ""}>Expense</option>
-                            <option value="credit"${kind === "credit" ? " selected" : ""}>Credit</option>
-                        </select>
-                        <input ${amountInputAttrs("amount", row.amount)}>
-                        <button type="button" class="books-rm" data-di-rm="${escapeHtml(row.id)}" data-di-list="monthAdjustments">×</button>
-                    </div>`;
-                        })
-                        .join("")}
-                    ${closed ? "" : `<button type="button" class="books-add-line" data-di-add="monthAdjustments">+ Add adjustment</button>`}
-                </div>
-            </fieldset>`;
+                </fieldset>
+            </section>`;
+    }
+
+    function syncMonthPostingFormVisibility(root) {
+        const form = root?.querySelector("[data-month-posting-form]");
+        if (!form) return;
+        const cat = form.querySelector("[data-month-post-category]")?.value || "check_expense";
+        const needsDate = cat === "checks_received" || cat === "check_expense" || cat === "other_expense";
+        const needsCheck = cat === "check_expense";
+        const dateWrap = form.querySelector("[data-month-post-date-wrap]");
+        const checkWrap = form.querySelector("[data-month-post-check-wrap]");
+        if (dateWrap) dateWrap.hidden = !needsDate;
+        if (checkWrap) checkWrap.hidden = !needsCheck;
+        if (needsCheck) {
+            const checkEl = form.querySelector("[data-month-post-check]");
+            if (checkEl && !String(checkEl.value || "").trim()) {
+                checkEl.value = suggestedNextCheckNo();
+            }
+        }
+    }
+
+    async function submitMonthPosting(root) {
+        if (isViewingClosedMonth()) {
+            window.alert("Month is closed — reopen to add postings.");
+            return;
+        }
+        const form = root?.querySelector("[data-month-posting-form]");
+        if (!form) return;
+        const statusEl = form.querySelector("[data-month-posting-status]");
+        const setStatus = (msg) => {
+            if (statusEl) statusEl.textContent = msg || "";
+        };
+
+        const category = form.querySelector("[data-month-post-category]")?.value || "";
+        const dateStr = String(form.querySelector("[data-month-post-date]")?.value || "").trim();
+        const description = String(form.querySelector("[data-month-post-desc]")?.value || "").trim();
+        const checkNo = String(form.querySelector("[data-month-post-check]")?.value || "").trim();
+        const amountEl = form.querySelector("[data-month-post-amount]");
+        if (amountEl && window.OplixBooksModel) {
+            const n = OplixBooksModel.parseAmountExpression(amountEl.value);
+            if (Number.isFinite(n)) amountEl.value = OplixBooksModel.formatAmountForInput(n);
+        }
+        const amount = M().num(amountEl?.value);
+
+        if (!description) {
+            setStatus("Enter a description / payee.");
+            return;
+        }
+        if (!(amount > 0)) {
+            setStatus("Enter an amount greater than zero.");
+            return;
+        }
+
+        const needsDate =
+            category === "checks_received" ||
+            category === "check_expense" ||
+            category === "other_expense";
+        if (needsDate) {
+            if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                setStatus("Pick a valid date.");
+                return;
+            }
+            if (!dateStr.startsWith(state.monthId)) {
+                setStatus("Date must be in the selected month.");
+                return;
+            }
+        }
+
+        setStatus("Saving…");
+        beginBooksSave("Saving posting…");
+        try {
+            if (category === "month_expense" || category === "month_credit") {
+                syncMonthAdjustmentsFromDom(root);
+                if (!state.month.monthAdjustments) state.month.monthAdjustments = [];
+                state.month.monthAdjustments.push({
+                    id: lineId(),
+                    description,
+                    amount,
+                    kind: category === "month_credit" ? "credit" : "expense",
+                });
+                await Store().saveMonth(userId, state.locationId, state.monthId, state.month);
+                window.OplixAnalytics?.invalidateCache?.();
+                state.dirty = false;
+                setStatus("Added Net-only adjustment.");
+                render({ skipSync: true });
+                return;
+            }
+
+            const dayId = dateStr;
+            if (category === "check_expense" || category === "other_expense") {
+                const day = dayDocForId(dayId);
+                if (category === "check_expense") {
+                    day.checksAch = day.checksAch || [];
+                    day.checksAch.push({
+                        id: lineId(),
+                        date: dayId,
+                        description,
+                        checkNo,
+                        amount,
+                        payableId: null,
+                        source: "monthly",
+                    });
+                } else {
+                    day.otherExpenses = day.otherExpenses || [];
+                    day.otherExpenses.push({
+                        id: lineId(),
+                        description,
+                        amount,
+                        source: "monthly",
+                    });
+                }
+                await Store().saveDay(userId, state.locationId, state.monthId, dayId, day, {
+                    allowWhenClosed: true,
+                });
+                state.daysById[dayId] = { ...day, _dayId: dayId };
+                if (dayId === state.dayId) state.day = dayDocForId(dayId);
+
+                const seqMax = M().maxCheckNumberInDays(state.daysById);
+                if (seqMax != null) {
+                    const prev =
+                        state.month.lastCheckNo != null ? Number(state.month.lastCheckNo) : null;
+                    if (prev == null || seqMax > prev) {
+                        state.month.lastCheckNo = seqMax;
+                        await Store().saveMonth(
+                            userId,
+                            state.locationId,
+                            state.monthId,
+                            state.month
+                        );
+                    }
+                }
+                window.OplixAnalytics?.invalidateCache?.();
+                state.dirty = false;
+                setStatus(
+                    category === "check_expense"
+                        ? "Check expense posted to that day."
+                        : "Other expense posted to that day."
+                );
+                render({ skipSync: true });
+                return;
+            }
+
+            if (category === "checks_received") {
+                if (!window.OplixReceivablesStore || !window.OplixReceivablesModel) {
+                    setStatus("Receivables unavailable.");
+                    return;
+                }
+                const RM = OplixReceivablesModel;
+                const receivedAt = firebase.firestore.Timestamp.fromDate(
+                    new Date(`${dayId}T12:00:00`)
+                );
+                const payload = RM.normalizeReceivable(
+                    {
+                        id: OplixReceivablesStore.newId(),
+                        locationId: state.locationId,
+                        receiveFrom: description,
+                        amount,
+                        dueDate: receivedAt,
+                        frequency: "none",
+                        isReceived: true,
+                        receivedAt,
+                        notes: "Posted from Monthly books",
+                    },
+                    state.locationId
+                );
+                await OplixReceivablesStore.save(userId, state.locationId, payload);
+                if (window.OplixBooksLinks?.persistReceivableBooksSync) {
+                    const sync = await OplixBooksLinks.persistReceivableBooksSync(
+                        userId,
+                        state.locationId,
+                        payload,
+                        state.monthId
+                    );
+                    if (sync?.month) state.month = M().normalizeMonthDoc(sync.month);
+                }
+                await OplixReceivablesStore.ensureNextOpenForBooks(
+                    userId,
+                    state.locationId,
+                    payload,
+                    state.receivables
+                );
+                if (typeof loadReceivables === "function") await loadReceivables();
+                else {
+                    state.receivables = await OplixReceivablesStore.list(
+                        userId,
+                        state.locationId
+                    );
+                }
+                // Refresh month from store so Net / linked credits match.
+                try {
+                    const fresh = await Store().loadMonth(
+                        userId,
+                        state.locationId,
+                        state.monthId,
+                        { bypassCache: true }
+                    );
+                    if (fresh?.month) state.month = M().normalizeMonthDoc(fresh.month);
+                } catch (_) {
+                    /* keep synced month */
+                }
+                window.OplixAnalytics?.invalidateCache?.();
+                state.dirty = false;
+                setStatus("Checks Received posted — counts in Books Net.");
+                render({ skipSync: true });
+                return;
+            }
+
+            setStatus("Unknown category.");
+        } catch (err) {
+            console.error("[Oplix] Month posting failed:", err);
+            setStatus(err.message || "Could not save posting.");
+        } finally {
+            endBooksSave();
+        }
     }
 
     function renderMonthlyBooks() {
@@ -917,7 +1235,7 @@
                 </fieldset>
 
                 <div class="books-month-actions">
-                    ${closed ? "" : `<button type="button" class="btn books-save" id="di-save-month">Save month adjustments</button>`}
+                    ${closed ? "" : `<button type="button" class="btn books-save" id="di-save-month">Save month</button>`}
                     ${
                         closed
                             ? `<button type="button" class="btn" id="di-reopen-month">Reopen month</button>`
@@ -1216,6 +1534,10 @@
                 saveMonth();
                 return;
             }
+            if (e.target.closest("[data-month-posting-submit]")) {
+                submitMonthPosting(panel.querySelector(".books-monthly-panel") || panel);
+                return;
+            }
             if (e.target.id === "di-save-day") {
                 if (!isBooksSaveInFlight()) saveDay();
                 return;
@@ -1321,6 +1643,14 @@
             addExpenseDescription(input.value);
         });
 
+        panel.addEventListener("change", (e) => {
+            if (e.target.matches("[data-month-post-category]")) {
+                syncMonthPostingFormVisibility(
+                    panel.querySelector(".books-monthly-panel") || $("monthly-books-root") || panel
+                );
+            }
+        });
+
         panel.addEventListener("focusin", (e) => {
             const el = e.target;
             if (!el.classList?.contains("books-input-amount")) return;
@@ -1330,7 +1660,9 @@
 
         panel.addEventListener("input", (e) => {
             if (!e.target.closest(".data-input-form")) return;
-            if (isViewingClosedDay() || isViewingClosedMonth()) return;
+            const inMonthPosting = !!e.target.closest("[data-month-posting-form]");
+            if (isViewingClosedMonth()) return;
+            if (isViewingClosedDay() && !inMonthPosting) return;
             if (e.target.name === "fuel_gallons") {
                 const root = $("data-input-root");
                 ["fuel_regular", "fuel_mid_grade", "fuel_premium", "fuel_diesel"].forEach((name) => {
@@ -1366,6 +1698,9 @@
                 }
 
                 if (e.target.closest(".data-input-form")) {
+                    const inMonthPosting = !!e.target.closest("[data-month-posting-form]");
+                    if (isViewingClosedMonth()) return;
+                    if (isViewingClosedDay() && !inMonthPosting) return;
                     syncFromForm();
                     state.dirty = true;
                     if (state.tab === "cash-recon" && name.startsWith("cr_")) {
@@ -3589,6 +3924,7 @@
                 ${renderBooksToolbar("mb")}
                 ${renderBooksHealthStrip()}
                 ${renderMonthlyBooks()}`;
+            syncMonthPostingFormVisibility(root);
         } catch (err) {
             console.error("[Oplix] Monthly books render failed:", err);
             root.innerHTML = `<p class="app-error">${escapeHtml(err.message || "Could not load Monthly books.")}</p>`;

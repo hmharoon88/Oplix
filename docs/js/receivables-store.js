@@ -60,6 +60,25 @@
         });
     }
 
+    /**
+     * After marking received on web books: keep the payer as an open item for
+     * next month with amount $0 so the new (often different) amount can be entered.
+     * Skips weekly/monthly rows (iOS recurring owns those). No-op if already open.
+     */
+    async function ensureNextOpenForBooks(userId, locationId, receivedItem, existingList) {
+        const Model = window.OplixReceivablesModel;
+        if (!Model || !receivedItem) return null;
+        const r = Model.normalizeReceivable(receivedItem, locationId);
+        if (r.frequency === "weekly" || r.frequency === "monthly") return null;
+        const current = existingList || (await list(userId, locationId));
+        const asOf = Model.toDate(r.receivedAt) || new Date();
+        if (Model.hasCarryForwardOpen(current, r.receiveFrom, asOf)) return null;
+        const next = Model.buildNextOpenForBooks(r, locationId);
+        if (!next) return null;
+        const id = await save(userId, locationId, { ...next, id: newId() });
+        return id;
+    }
+
     async function remove(userId, locationId, receivableId) {
         await colRef(userId, locationId).doc(receivableId).delete();
     }
@@ -72,6 +91,7 @@
         list,
         save,
         markReceived,
+        ensureNextOpenForBooks,
         remove,
         newId,
     };

@@ -141,7 +141,7 @@
         invalidateMonth(userId, locationId, monthId);
     }
 
-    async function saveDay(userId, locationId, monthId, dayId, day) {
+    async function saveDay(userId, locationId, monthId, dayId, day, options = {}) {
         const ref = dayRef(userId, locationId, monthId, dayId);
         const monthSnap = await monthRef(userId, locationId, monthId).get();
         const monthData = monthSnap.exists ? monthSnap.data() : null;
@@ -150,13 +150,19 @@
         }
         const snap = await ref.get();
         const existing = snap.exists ? snap.data() : null;
-        if (existing?.closed && day.closed !== false) {
+        if (existing?.closed && day.closed !== false && !options.allowWhenClosed) {
             throw new Error("This day is closed. Reopen it before saving changes.");
         }
         const payload = {
             ...day,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         };
+        // Preserve closed state when writing a missed posting onto a closed day.
+        if (options.allowWhenClosed && existing?.closed) {
+            payload.closed = true;
+            payload.closedAt = existing.closedAt || payload.closedAt || null;
+            payload.closedBy = existing.closedBy || payload.closedBy || null;
+        }
         await ref.set(payload, { merge: true });
         invalidateMonth(userId, locationId, monthId);
     }

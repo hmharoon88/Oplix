@@ -104,6 +104,72 @@
         return openReceivables(list).reduce((s, r) => s + (r.amount || 0), 0);
     }
 
+    function normalizePayerKey(name) {
+        return String(name || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, " ");
+    }
+
+    function endOfMonth(date) {
+        const d = toDate(date) || new Date();
+        return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+    }
+
+    /**
+     * True if a next-period stub already exists for this payer (amount $0, or due after this month).
+     * Other open rows for the same payer (another payment this month) do not count.
+     */
+    function hasCarryForwardOpen(list, receiveFrom, asOfDate) {
+        const key = normalizePayerKey(receiveFrom);
+        if (!key) return false;
+        const monthEnd = endOfMonth(asOfDate || new Date());
+        return openReceivables(list).some((r) => {
+            if (normalizePayerKey(r.receiveFrom) !== key) return false;
+            if (!(parseFloat(r.amount) > 0)) return true;
+            const due = toDate(r.dueDate);
+            return !!(due && due > monthEnd);
+        });
+    }
+
+    /** @deprecated use hasCarryForwardOpen — kept name for older callers */
+    function hasOpenForPayer(list, receiveFrom) {
+        return hasCarryForwardOpen(list, receiveFrom);
+    }
+
+    function addMonths(date, months) {
+        const d = new Date(date.getTime());
+        const day = d.getDate();
+        d.setMonth(d.getMonth() + months);
+        if (d.getDate() < day) d.setDate(0);
+        return d;
+    }
+
+    /**
+     * Next open stub for books entry: same payer, amount 0 (fill in later).
+     * One-time / books flow only — does not use weekly/monthly recurring.
+     */
+    function buildNextOpenForBooks(receivedItem, locationId) {
+        const r = normalizeReceivable(receivedItem, locationId);
+        if (!r.receiveFrom) return null;
+        const base = toDate(r.dueDate) || toDate(r.receivedAt) || new Date();
+        const nextDue = addMonths(base, 1);
+        nextDue.setHours(12, 0, 0, 0);
+        return normalizeReceivable(
+            {
+                ...defaultReceivable(locationId),
+                receiveFrom: r.receiveFrom,
+                amount: 0,
+                notes: r.notes || "",
+                frequency: "none",
+                isReceived: false,
+                dueDate: firebase.firestore.Timestamp.fromDate(nextDue),
+                originalReceivableId: r.originalReceivableId || r.id || null,
+            },
+            locationId
+        );
+    }
+
     window.OplixReceivablesModel = {
         FREQUENCIES,
         defaultReceivable,
@@ -115,5 +181,9 @@
         openReceivables,
         receivedReceivablesForMonth,
         openTotal,
+        normalizePayerKey,
+        hasOpenForPayer,
+        hasCarryForwardOpen,
+        buildNextOpenForBooks,
     };
 })();

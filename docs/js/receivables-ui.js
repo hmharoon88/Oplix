@@ -157,13 +157,24 @@
         if (ctx.onSyncBooks) await ctx.onSyncBooks(receivable);
     }
 
+    async function carryPayerForwardIfNeeded(ctx, receivedItem) {
+        if (!receivedItem?.isReceived) return false;
+        const id = await Store().ensureNextOpenForBooks(
+            ctx.userId,
+            ctx.locationId,
+            receivedItem,
+            ctx.receivables
+        );
+        return !!id;
+    }
+
     function renderTab(ctx) {
         const open = M().openReceivables(ctx.receivables);
         const received = M().receivedReceivablesForMonth(ctx.receivables, ctx.monthId);
         const total = M().openTotal(ctx.receivables);
 
         return renderShell({
-            hint: "Open receivables for this facility. When you mark one <strong>received</strong>, it is added to this month’s Books total (Net). Same list as Facilities → Receivables.",
+            hint: "Add who pays you, enter the amount, and mark <strong>received</strong> (counts in Books Net). Same person can pay more than once in a month — use <strong>Add receivable</strong> again for each check. After each received one-time item, that payer stays open next month at $0 for the next amount. Leave Frequency as <strong>One-time</strong> for this books flow.",
             totalLabel: "Open receivables",
             total,
             openCount: open.length,
@@ -183,7 +194,7 @@
         const total = M().openTotal(all);
 
         return renderShell({
-            hint: "Money owed to this facility — when marked received, syncs to Daily books Net for that month. Same list as Daily books → Receivables.",
+            hint: "Same list as Daily books → Receivables. Mark received to sync into that month’s Books Net. On web, one-time items keep the payer open next month at $0 for the next amount.",
             totalLabel: "Open receivables",
             total,
             openCount: open.length,
@@ -253,6 +264,7 @@
                 try {
                     await OplixSaveBusy.run(async () => {
                         const existing = (ctx.receivables || []).find((r) => r.id === id) || {};
+                        const wasReceived = !!existing.isReceived;
                         const payload = readForm(form, ctx.locationId, {
                             ...existing,
                             id: id || Store().newId(),
@@ -264,6 +276,9 @@
                         } else payload.receivedAt = existing.receivedAt;
                         await Store().save(ctx.userId, ctx.locationId, payload);
                         await afterReceivableChange(ctx, payload);
+                        if (payload.isReceived && !wasReceived) {
+                            await carryPayerForwardIfNeeded(ctx, payload);
+                        }
                     }, "Saving…");
                     closeForm();
                     setStatus("Saved.");
@@ -291,11 +306,18 @@
                 if (!item) return;
                 setStatus("Updating…");
                 try {
+                    let carried = false;
                     await OplixSaveBusy.run(async () => {
                         await Store().markReceived(ctx.userId, ctx.locationId, item);
-                        await afterReceivableChange(ctx, { ...item, isReceived: true, receivedAt: new Date() });
+                        const received = { ...item, isReceived: true, receivedAt: new Date() };
+                        await afterReceivableChange(ctx, received);
+                        carried = await carryPayerForwardIfNeeded(ctx, received);
                     }, "Updating…");
-                    setStatus("Marked received — added to Books Net for this month.");
+                    setStatus(
+                        carried
+                            ? "Marked received — added to Books Net. Same payer kept open for next month ($0 — enter new amount)."
+                            : "Marked received — added to Books Net for this month."
+                    );
                     await ctx.onRefresh();
                 } catch (err) {
                     setStatus(err.message || "Update failed.");

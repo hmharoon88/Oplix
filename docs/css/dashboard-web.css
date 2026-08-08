@@ -1958,6 +1958,53 @@
     align-items: center;
 }
 
+.books-month-postings {
+    margin-top: 8px;
+}
+
+.books-month-posting-form {
+    margin-bottom: 1.25rem;
+    padding: 14px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.books-month-posting-title {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.books-month-posting-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px 12px;
+    margin: 12px 0;
+}
+
+.books-month-posting-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.books-month-sourced {
+    margin-bottom: 1.25rem;
+}
+
+.books-month-sourced-list {
+    margin: 0.5rem 0 0;
+    padding-left: 1.15rem;
+    color: #334155;
+}
+
+.books-month-sourced-list li {
+    margin-bottom: 0.35rem;
+}
+
 .books-month-actions {
     display: flex;
     flex-wrap: wrap;
