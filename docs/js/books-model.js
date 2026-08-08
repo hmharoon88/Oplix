@@ -1590,7 +1590,7 @@
             { key: "creditCard", label: "Network Card" },
             { key: "expenses", label: "Total expenses" },
             { key: "net", label: "Net" },
-            { key: "receivablesTotal", label: "Receivables" },
+            { key: "receivablesTotal", label: "Checks Received" },
             { key: "utilitiesTotal", label: "Utilities" },
             { key: "payrollTotal", label: "Payroll" },
             { key: "cashExpense", label: "Cash expense" },
