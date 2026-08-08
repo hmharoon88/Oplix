@@ -832,12 +832,10 @@
 
     function renderMonthPostingForm(closed) {
         if (closed) return "";
-        const nextCheck = suggestedNextCheckNo();
-        const defaultDay = defaultPostingDayId();
         return `
             <div class="books-month-posting-form" data-month-posting-form>
                 <h4 class="books-month-posting-title">Add missed posting</h4>
-                <p class="books-hint">Use this for items missed on a daily sheet. Check expenses land on that day and update check # sequence. Checks Received works like Receivables → Mark received for that date.</p>
+                <p class="books-hint">Use this for items missed on a daily sheet. Date and check # are optional — fill them when you have them. Check expenses land on that day (or today if date is blank) and update check # sequence when a number is entered. Checks Received works like Receivables → Mark received.</p>
                 <div class="books-month-posting-grid">
                     <label class="books-label">Category
                         <select class="books-select" name="postCategory" data-month-post-category>
@@ -849,15 +847,15 @@
                         </select>
                     </label>
                     <label class="books-label books-month-post-date-wrap" data-month-post-date-wrap>
-                        Date
-                        <input class="books-input" type="date" name="postDate" value="${escapeHtml(defaultDay)}" data-month-post-date>
+                        Date <span class="data-list-meta">(optional)</span>
+                        <input class="books-input" type="date" name="postDate" value="" data-month-post-date>
                     </label>
                     <label class="books-label">Description / payee *
                         <input class="books-input" type="text" name="postDescription" placeholder="Payee or description" data-month-post-desc>
                     </label>
                     <label class="books-label books-month-post-check-wrap" data-month-post-check-wrap>
-                        Check #
-                        <input class="books-input" type="text" name="postCheckNo" value="${escapeHtml(nextCheck)}" placeholder="${escapeHtml(nextCheck ? `Next: ${nextCheck}` : "Check #")}" data-month-post-check>
+                        Check # <span class="data-list-meta">(optional)</span>
+                        <input class="books-input" type="text" name="postCheckNo" value="" placeholder="Check #" data-month-post-check>
                     </label>
                     <label class="books-label">Amount ($) *
                         <input ${amountInputAttrs("postAmount", 0)} data-month-post-amount>
@@ -942,12 +940,18 @@
         const checkWrap = form.querySelector("[data-month-post-check-wrap]");
         if (dateWrap) dateWrap.hidden = !needsDate;
         if (checkWrap) checkWrap.hidden = !needsCheck;
-        if (needsCheck) {
-            const checkEl = form.querySelector("[data-month-post-check]");
-            if (checkEl && !String(checkEl.value || "").trim()) {
-                checkEl.value = suggestedNextCheckNo();
+    }
+
+    function resolvePostingDayId(dateStr) {
+        const raw = String(dateStr || "").trim();
+        if (raw) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return { error: "Pick a valid date." };
+            if (!raw.startsWith(state.monthId)) {
+                return { error: "Date must be in the selected month." };
             }
+            return { dayId: raw };
         }
+        return { dayId: defaultPostingDayId() };
     }
 
     async function submitMonthPosting(root) {
@@ -986,15 +990,14 @@
             category === "checks_received" ||
             category === "check_expense" ||
             category === "other_expense";
+        let dayId = null;
         if (needsDate) {
-            if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-                setStatus("Pick a valid date.");
+            const resolved = resolvePostingDayId(dateStr);
+            if (resolved.error) {
+                setStatus(resolved.error);
                 return;
             }
-            if (!dateStr.startsWith(state.monthId)) {
-                setStatus("Date must be in the selected month.");
-                return;
-            }
+            dayId = resolved.dayId;
         }
 
         setStatus("Saving…");
@@ -1017,7 +1020,6 @@
                 return;
             }
 
-            const dayId = dateStr;
             if (category === "check_expense" || category === "other_expense") {
                 const day = dayDocForId(dayId);
                 if (category === "check_expense") {
@@ -1281,7 +1283,7 @@
             id: lineId(),
             date: state.dayId,
             description: payable.payTo || "",
-            checkNo: suggestedNextCheckNo(),
+            checkNo: "",
             amount: M().num(payable.amount),
             payableId: payable.id,
         });
@@ -1721,7 +1723,7 @@
         if (list === "cashExpenses") {
             state.day.cashExpenses.push(emptyCashExpenseRow());
         } else if (list === "checksAch") {
-            state.day.checksAch.push(emptyChecksAchRow(suggestedNextCheckNo()));
+            state.day.checksAch.push(emptyChecksAchRow());
         } else if (list === "otherExpenses") {
             state.day.otherExpenses.push(emptyOtherExpenseRow());
         } else if (list === "pulltabs") {
@@ -3224,8 +3226,6 @@
     }
 
     function renderChecksAchList() {
-        const seq = currentCheckSequence();
-        const nextPh = seq.next != null ? `Next: ${seq.next}` : "Check # or ACH";
         return renderExpenseGroupCards(
             "checksAch",
             "Checks / ACH",
@@ -3234,7 +3234,7 @@
                 {
                     name: "checkNo",
                     label: "Check # / ACH",
-                    placeholder: nextPh,
+                    placeholder: "Check # or ACH",
                 },
                 { name: "amount", label: "Amount", type: "number" },
             ],
