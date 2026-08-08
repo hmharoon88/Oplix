@@ -665,11 +665,11 @@
                 : num(agg.receivablesTotal);
 
         if (receivableLines.length) {
-            rows.push({ label: "Receivables", value: null, section: true });
+            rows.push({ label: "Checks Received", value: null, section: true });
             receivableLines.forEach((r) => add(r.description, r.amount, null, true));
-            add("Receivables total", receivablesTotal);
+            add("Checks Received total", receivablesTotal);
         } else if (receivablesTotal !== 0) {
-            add("Receivables", receivablesTotal);
+            add("Checks Received", receivablesTotal);
         }
 
         const openReceivableLines = openReceivableReportLines(agg);
@@ -890,7 +890,7 @@
                 });
             });
         lines.push({
-            label: "Receivables total",
+            label: "Checks Received total",
             get: (a) => a.receivablesTotal,
             group: "sales",
             emphasis: true,
