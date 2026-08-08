@@ -330,16 +330,20 @@
         const t = report.totals;
         const pt = report.prevTotals;
         return `
-            <p class="books-hint rpt-all-locs-hint"><strong>${escapeHtml(salesHeader)}</strong> and <strong>Net</strong> use the official books totals. Register card, cash sale, credit card, fuel, and gallons are shown for reference — they are not added again to ${escapeHtml(salesHeader.toLowerCase())}.</p>
+            <p class="books-hint rpt-all-locs-hint"><strong>${escapeHtml(salesHeader)}</strong> and <strong>Net</strong> use the official books totals. ${
+                report.anyGas
+                    ? "Card (register), cash, network card (pumps), fuel, and gallons"
+                    : "Card, cash, credit card, fuel, and gallons"
+            } are shown for reference — they are not added again to ${escapeHtml(salesHeader.toLowerCase())}.</p>
             ${prevLegendBlock}
             <table class="home-cc-table rpt-table rpt-table--trends">
                 <thead>
                     <tr>
                         <th>Facility</th>
                         <th class="home-cc-num">${escapeHtml(salesHeader)}</th>
-                        <th class="home-cc-num">Register card</th>
-                        <th class="home-cc-num">Cash sale</th>
-                        <th class="home-cc-num">Credit card</th>
+                        <th class="home-cc-num">Card</th>
+                        <th class="home-cc-num">Cash</th>
+                        <th class="home-cc-num">${report.anyGas ? "Network Card" : "Credit card"}</th>
                         <th class="home-cc-num">Fuel ($)</th>
                         <th class="home-cc-num">Gallons</th>
                         <th class="home-cc-num">Expenses</th>
@@ -437,13 +441,13 @@
                     ? `<span><em>Merch</em> <strong>${money(dailyTotals.merchSale)}</strong></span>
                        <span><em>Fuel (gal)</em> <strong>${formatValue(dailyTotals.fuelGallons, "number")}</strong></span>
                        <span><em>Fuel ($)</em> <strong>${money(dailyTotals.fuelDollars)}</strong></span>
-                       <span><em>Credit card</em> <strong>${money(dailyTotals.creditCard)}</strong></span>`
+                       <span><em>Network Card</em> <strong>${money(dailyTotals.creditCard)}</strong></span>`
                     : `<span><em>Sales</em> <strong>${money(dailyTotals.sales)}</strong></span>`;
                 const gasHead = hasGas
                     ? `<th class="home-cc-num">Merch</th>
                        <th class="home-cc-num">Fuel (gal)</th>
                        <th class="home-cc-num">Fuel ($)</th>
-                       <th class="home-cc-num">Credit card</th>`
+                       <th class="home-cc-num">Network Card</th>`
                     : "";
                 const salesColHead = hasGas ? "" : `<th class="home-cc-num">Sales</th>`;
                 const dailyBlock = daysWithData

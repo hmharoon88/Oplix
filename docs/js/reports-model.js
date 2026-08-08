@@ -781,9 +781,9 @@
         const detailHeaders = [
             "Facility",
             salesHeader,
-            "Register card",
-            "Cash sale",
-            "Credit card",
+            "Card",
+            "Cash",
+            anyGas ? "Network Card" : "Credit card",
             "Fuel ($)",
             "Gallons",
             "Expenses",
@@ -850,17 +850,17 @@
 
         if (anyGas) {
             lines.push({ label: "Merch sale", get: (a) => a.merchSale, group: "sales" });
-            lines.push({ label: "Register — card", get: (a) => a.registerCard, group: "sales" });
-            lines.push({ label: "Register — cash", get: (a) => a.registerCash, group: "sales" });
-            lines.push({ label: "Credit card", get: (a) => a.creditCard, group: "sales" });
+            lines.push({ label: "Card", get: (a) => a.registerCard, group: "sales" });
+            lines.push({ label: "Cash", get: (a) => a.registerCash, group: "sales" });
+            lines.push({ label: "Network Card", get: (a) => a.creditCard, group: "sales" });
             lines.push({ label: "Fuel ($)", get: (a) => a.fuelDollars, group: "sales" });
             lines.push({ label: "Pulltab (track only)", get: (a) => a.pulltabCash, group: "track" });
             lines.push({ label: "Lottery (track only)", get: (a) => a.lotteryCash, group: "track" });
             lines.push({ label: "Wind station (track only)", get: (a) => a.windStationCash, group: "track" });
             lines.push({ label: "Keno station (track only)", get: (a) => a.kenoStationCash, group: "track" });
         } else {
-            lines.push({ label: "Register — card", get: (a) => a.registerCard, group: "sales" });
-            lines.push({ label: "Register — cash", get: (a) => a.registerCash, group: "sales" });
+            lines.push({ label: "Card", get: (a) => a.registerCard, group: "sales" });
+            lines.push({ label: "Cash", get: (a) => a.registerCash, group: "sales" });
             lines.push({ label: "Lottery (track only)", get: (a) => a.lotteryCash, group: "track" });
             lines.push({ label: "Pulltab (track only)", get: (a) => a.pulltabCash, group: "track" });
             lines.push({ label: "Wind station (track only)", get: (a) => a.windStationCash, group: "track" });
@@ -1060,7 +1060,7 @@
                 "Merch",
                 "Fuel (gal)",
                 "Fuel ($)",
-                "Credit card",
+                "Network Card",
                 "Cash exp.",
                 "Check Exp",
                 "Other",
