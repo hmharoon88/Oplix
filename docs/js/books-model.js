@@ -443,6 +443,7 @@
             customAmounts: {},
             monthAdjustments: [],
             closeNotes: "",
+            lastCheckNo: null,
             closed: false,
             closedAt: null,
             closedBy: null,
@@ -484,6 +485,10 @@
         m.customAmounts = normalizeCustomAmounts(m.customAmounts);
         m.monthAdjustments = (m.monthAdjustments || []).map(normalizeMonthAdjustment);
         m.closeNotes = m.closeNotes || "";
+        m.lastCheckNo =
+            m.lastCheckNo != null && Number.isFinite(Number(m.lastCheckNo))
+                ? Math.floor(Number(m.lastCheckNo))
+                : null;
         m.closed = !!m.closed;
         m.closedAt = m.closedAt || null;
         m.closedBy = m.closedBy || null;
@@ -2299,6 +2304,117 @@
         };
     }
 
+    /**
+     * Parse a numeric check number from Checks/ACH "checkNo" text.
+     * Ignores ACH/wire-style values; accepts "1042", "#1042", "Check 1042".
+     */
+    function parseCheckNumber(raw) {
+        const s = String(raw || "").trim();
+        if (!s) return null;
+        const compact = s.replace(/[,\s]/g, "");
+        if (/^(ach|wire|eft|transfer|cc|card)/i.test(compact)) return null;
+        if (/ach|wire|eft|transfer/i.test(s) && !/^\d+$/.test(compact.replace(/^#/, ""))) {
+            return null;
+        }
+        const digits = compact.replace(/^#/, "").match(/^(\d{1,10})$/);
+        if (!digits) {
+            const embedded = s.match(/(?:^|[^\d])(\d{3,10})(?:[^\d]|$)/);
+            if (!embedded) return null;
+            const n = parseInt(embedded[1], 10);
+            return Number.isFinite(n) ? n : null;
+        }
+        const n = parseInt(digits[1], 10);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function collectCheckNumberEntries(daysById, extraRows) {
+        const entries = [];
+        Object.entries(daysById || {}).forEach(([dayId, day]) => {
+            (day?.checksAch || []).forEach((row, idx) => {
+                const n = parseCheckNumber(row.checkNo);
+                if (n == null) return;
+                entries.push({
+                    n,
+                    dayId: row.date || dayId,
+                    description: String(row.description || "").trim(),
+                    idx,
+                });
+            });
+        });
+        (extraRows || []).forEach((row, idx) => {
+            const n = parseCheckNumber(row.checkNo);
+            if (n == null) return;
+            entries.push({
+                n,
+                dayId: row.date || "",
+                description: String(row.description || "").trim(),
+                idx,
+            });
+        });
+        return entries;
+    }
+
+    function findCheckNumberGaps(sortedUnique, maxSpan = 200, maxGaps = 25) {
+        if (!sortedUnique.length) return [];
+        const first = sortedUnique[0];
+        const last = sortedUnique[sortedUnique.length - 1];
+        if (last - first > maxSpan) return [];
+        const set = new Set(sortedUnique);
+        const gaps = [];
+        for (let i = first; i <= last; i++) {
+            if (!set.has(i)) {
+                gaps.push(i);
+                if (gaps.length >= maxGaps) break;
+            }
+        }
+        return gaps;
+    }
+
+    /**
+     * Sequence summary for facility check numbers in the loaded month.
+     * lastCheckNoHint: persisted month.lastCheckNo for continuity when few checks yet.
+     */
+    function checkSequenceSummary(daysById, options = {}) {
+        const entries = collectCheckNumberEntries(daysById, options.extraRows);
+        const byNum = new Map();
+        entries.forEach((e) => {
+            const prev = byNum.get(e.n);
+            if (!prev || String(e.dayId) > String(prev.dayId)) byNum.set(e.n, e);
+        });
+        const used = [...byNum.keys()].sort((a, b) => a - b);
+        const hint =
+            options.lastCheckNoHint != null && Number.isFinite(Number(options.lastCheckNoHint))
+                ? Math.floor(Number(options.lastCheckNoHint))
+                : null;
+        const lastFromData = used.length ? used[used.length - 1] : null;
+        const last =
+            lastFromData != null && hint != null
+                ? Math.max(lastFromData, hint)
+                : lastFromData != null
+                  ? lastFromData
+                  : hint;
+        const gaps = findCheckNumberGaps(used);
+        const lastEntry = entries.length
+            ? [...entries].sort((a, b) => {
+                  const d = String(b.dayId).localeCompare(String(a.dayId));
+                  return d !== 0 ? d : b.idx - a.idx;
+              })[0]
+            : null;
+        return {
+            last,
+            next: last != null ? last + 1 : null,
+            used,
+            gaps,
+            lastEntry,
+            count: used.length,
+        };
+    }
+
+    function maxCheckNumberInDays(daysById, extraRows) {
+        const summary = checkSequenceSummary(daysById, { extraRows });
+        return summary.last;
+    }
+
     window.OplixBooksModel = {
         UTILITY_KEYS,
         UTILITY_VENDOR_GROUPS,
@@ -2398,5 +2514,9 @@
         defaultEntryDayId,
         listClosedDayIds,
         booksHealthSummary,
+        parseCheckNumber,
+        collectCheckNumberEntries,
+        checkSequenceSummary,
+        maxCheckNumberInDays,
     };
 })();

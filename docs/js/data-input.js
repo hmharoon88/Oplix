@@ -963,7 +963,7 @@
             id: lineId(),
             date: state.dayId,
             description: payable.payTo || "",
-            checkNo: "",
+            checkNo: suggestedNextCheckNo(),
             amount: M().num(payable.amount),
             payableId: payable.id,
         });
@@ -1386,7 +1386,7 @@
         if (list === "cashExpenses") {
             state.day.cashExpenses.push(emptyCashExpenseRow());
         } else if (list === "checksAch") {
-            state.day.checksAch.push(emptyChecksAchRow());
+            state.day.checksAch.push(emptyChecksAchRow(suggestedNextCheckNo()));
         } else if (list === "otherExpenses") {
             state.day.otherExpenses.push(emptyOtherExpenseRow());
         } else if (list === "pulltabs") {
@@ -1768,15 +1768,46 @@
 
     const EXPENSE_LINE_MIN_ROWS = 5;
 
-    function emptyChecksAchRow() {
+    function emptyChecksAchRow(prefillCheckNo) {
         return {
             id: lineId(),
             date: state.dayId,
             description: "",
-            checkNo: "",
+            checkNo: prefillCheckNo != null && prefillCheckNo !== "" ? String(prefillCheckNo) : "",
             amount: 0,
             payableId: null,
         };
+    }
+
+    function currentCheckSequence() {
+        const days = { ...(state.daysById || {}), [state.dayId]: state.day };
+        return M().checkSequenceSummary(days, {
+            lastCheckNoHint: state.month?.lastCheckNo,
+        });
+    }
+
+    function suggestedNextCheckNo() {
+        const seq = currentCheckSequence();
+        return seq.next != null ? String(seq.next) : "";
+    }
+
+    function formatCheckSequenceHint() {
+        const seq = currentCheckSequence();
+        if (seq.last == null) {
+            return "Enter check numbers in order. After the first save, the last # and suggested next will show here so you can spot gaps.";
+        }
+        const parts = [`Last check #: <strong>${seq.last}</strong>`, `Suggested next: <strong>${seq.next}</strong>`];
+        if (seq.lastEntry?.dayId && seq.lastEntry.dayId !== state.dayId) {
+            parts.push(`Most recent entry: #${seq.lastEntry.n} on ${escapeHtml(formatDayLabel(seq.lastEntry.dayId))}`);
+        } else if (seq.lastEntry?.dayId === state.dayId) {
+            parts.push(`Most recent on this day: #${seq.lastEntry.n}`);
+        }
+        if (seq.gaps.length) {
+            const more = seq.used.length && seq.used[seq.used.length - 1] - seq.used[0] > 200;
+            const gapText = seq.gaps.join(", ") + (seq.gaps.length >= 25 || more ? "…" : "");
+            parts.push(`Possible missed #: ${gapText}`);
+        }
+        return parts.join(" · ");
     }
 
     function emptyCashExpenseRow() {
@@ -1944,6 +1975,11 @@
         captureFormToState();
         pruneEmptyDailyExpenseLines();
         pruneAllReconPayOuts();
+        const seqMax = currentCheckSequence().last;
+        if (seqMax != null) {
+            const prev = state.month.lastCheckNo != null ? Number(state.month.lastCheckNo) : null;
+            if (prev == null || seqMax > prev) state.month.lastCheckNo = seqMax;
+        }
         beginBooksSave();
         if (!options.silent) setBooksStatus("Saving…", { saving: true });
         try {
@@ -2853,16 +2889,22 @@
     }
 
     function renderChecksAchList() {
+        const seq = currentCheckSequence();
+        const nextPh = seq.next != null ? `Next: ${seq.next}` : "Check # or ACH";
         return renderExpenseGroupCards(
             "checksAch",
             "Checks / ACH",
             [
                 { name: "description", label: "Description", placeholder: "Payee / description" },
-                { name: "checkNo", label: "Check # / ACH", placeholder: "Check # or ACH" },
+                {
+                    name: "checkNo",
+                    label: "Check # / ACH",
+                    placeholder: nextPh,
+                },
                 { name: "amount", label: "Amount", type: "number" },
             ],
             "+ Add check / ACH",
-            "Five rows ready; use + if you need more."
+            formatCheckSequenceHint()
         );
     }
 
