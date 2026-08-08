@@ -33,11 +33,7 @@ struct LotteryCashFlowSummaryView: View {
 
             flowBlock(
                 title: "Cash in",
-                lines: [
-                    (LotterySummaryDisplayName.instantSales, summary.instantTotal),
-                    (LotterySummaryDisplayName.onlineSales, summary.onlineTotal),
-                    (LotterySummaryDisplayName.registerStartingCash, summary.registerCash)
-                ],
+                lines: cashInLines,
                 totalLabel: LotterySummaryDisplayName.totalCashIn,
                 totalValue: summary.totalCash,
                 totalTint: Color.green.opacity(0.12)
@@ -60,6 +56,28 @@ struct LotteryCashFlowSummaryView: View {
         .background(Theme.cloudWhite)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 3)
+    }
+
+    private var cashInLines: [(String, Double)] {
+        var lines: [(String, Double)] = []
+        let closeout = summary.lotteryPackCloseoutAddition ?? 0
+        let deduction = summary.lotteryReturnDeduction ?? 0
+        let binInstant = summary.instantTotal - closeout + deduction
+
+        if closeout > 0.005 || deduction > 0.005 {
+            lines.append((LotterySummaryDisplayName.instantSales, binInstant))
+            if closeout > 0.005 {
+                lines.append((LotterySummaryDisplayName.finishedPackSales, closeout))
+            }
+            if deduction > 0.005 {
+                lines.append((LotterySummaryDisplayName.packReturns, -deduction))
+            }
+        } else {
+            lines.append((LotterySummaryDisplayName.instantSales, summary.instantTotal))
+        }
+        lines.append((LotterySummaryDisplayName.onlineSales, summary.onlineTotal))
+        lines.append((LotterySummaryDisplayName.registerStartingCash, summary.registerCash))
+        return lines
     }
 
   @ViewBuilder

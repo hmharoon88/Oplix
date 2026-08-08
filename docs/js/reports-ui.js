@@ -236,7 +236,8 @@
         const val =
             r.fmt === "number" ? formatValue(r.value, "number") : money(r.value);
         const labelCls = r.subRow ? "rpt-sub-row-label" : "";
-        return `<tr><td class="${labelCls}">${escapeHtml(r.label)}</td><td class="home-cc-num">${val}</td></tr>`;
+        const labelStyle = r.subRow ? ' style="padding-left:1.25rem;color:#475569"' : "";
+        return `<tr><td class="${labelCls}"${labelStyle}>${escapeHtml(r.label)}</td><td class="home-cc-num">${val}</td></tr>`;
     }
 
     function renderExpenseDetailTable(expenseDetail, totalExpenses) {

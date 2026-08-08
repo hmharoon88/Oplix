@@ -71,7 +71,35 @@ struct LotteryScreen: View {
                         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
                     }
                     .buttonStyle(.plain)
-                    
+
+                    // Pack inventory
+                    if let location = viewModel.location {
+                        NavigationLink {
+                            LotteryPackInventoryView(managerUserId: viewModel.userId, location: location)
+                        } label: {
+                            VStack(spacing: 12) {
+                                Image(systemName: "shippingbox.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.orange)
+
+                                Text("Pack inventory")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.black)
+
+                                Text("View rack and assign packs to bins")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                            .background(Theme.cloudWhite)
+                            .cornerRadius(16)
+                            .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     // Previous Shifts
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Previous Shifts")
@@ -296,6 +324,13 @@ struct PreviousLotteryShiftCard: View {
                 Divider()
 
                 LotteryCashFlowSummaryView(summary: summary)
+
+                if let returns = summary.packReturns, !returns.isEmpty {
+                    PackReturnsBreakdownView(
+                        title: "Pack returns this close",
+                        lines: returns
+                    )
+                }
             }
             .padding(.horizontal, 0)
         }

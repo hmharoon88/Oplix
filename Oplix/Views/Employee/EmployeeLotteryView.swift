@@ -10,6 +10,7 @@ import UIKit
 
 struct EmployeeLotteryView: View {
     @ObservedObject var viewModel: EmployeeHomeViewModel
+    @EnvironmentObject var authViewModel: AuthViewModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var isLoading = true
     @State private var showingLotterySelection = false
@@ -27,6 +28,10 @@ struct EmployeeLotteryView: View {
         }
         return false
     }
+
+    private var isSupervisor: Bool {
+        authViewModel.currentUser?.role == .supervisor
+    }
     
     var body: some View {
         ZStack {
@@ -42,10 +47,31 @@ struct EmployeeLotteryView: View {
                         .foregroundColor(.secondary)
                 }
             } else if hasUsableLotteryForm {
-                // Show selection view first
-                LotterySelectionView(viewModel: viewModel)
+                // Show selection view first (supervisors also get Pack inventory there)
+                LotterySelectionView(viewModel: viewModel, showsPackInventory: isSupervisor)
             } else {
                 VStack(spacing: 20) {
+                    if isSupervisor,
+                       let employee = viewModel.employee,
+                       let location = viewModel.location {
+                        NavigationLink {
+                            LotteryPackInventoryView(
+                                managerUserId: employee.managerUserId,
+                                location: location
+                            )
+                        } label: {
+                            LotterySelectionCard(
+                                title: "Pack inventory",
+                                subtitle: "Assign, return, and move packs",
+                                icon: "shippingbox.fill",
+                                color: .orange,
+                                isEnabled: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                    }
+
                     Image(systemName: "doc.text")
                         .font(.system(size: 60))
                         .foregroundColor(Theme.darkGray)

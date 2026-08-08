@@ -7,6 +7,13 @@
 
 import Foundation
 
+/// Operational state of the physical pack in a bin (optional on legacy rows).
+enum LotteryPackStatus: String, Codable, CaseIterable {
+    case active
+    case returned
+    case empty
+}
+
 struct LotteryFormTemplateRow: Identifiable, Codable {
     let id: String
     var binNumber: String
@@ -18,8 +25,24 @@ struct LotteryFormTemplateRow: Identifiable, Codable {
     var sold: String
     var dollar: String
     var books: String
-    
-    init(id: String = UUID().uuidString, binNumber: String = "", gameNumber: String = "", value: String = "", tickets: String = "", beginningNumber: String = "", endingNumber: String = "", sold: String = "", dollar: String = "", books: String = "") {
+    /// Pack serial from barcode (e.g. `0017360` in `1091-0017360-000-2`).
+    var packSerial: String?
+    var packStatus: LotteryPackStatus?
+
+    init(
+        id: String = UUID().uuidString,
+        binNumber: String = "",
+        gameNumber: String = "",
+        value: String = "",
+        tickets: String = "",
+        beginningNumber: String = "",
+        endingNumber: String = "",
+        sold: String = "",
+        dollar: String = "",
+        books: String = "",
+        packSerial: String? = nil,
+        packStatus: LotteryPackStatus? = nil
+    ) {
         self.id = id
         self.binNumber = binNumber
         self.gameNumber = gameNumber
@@ -30,6 +53,7 @@ struct LotteryFormTemplateRow: Identifiable, Codable {
         self.sold = sold
         self.dollar = dollar
         self.books = books
+        self.packSerial = packSerial
+        self.packStatus = packStatus
     }
 }
-

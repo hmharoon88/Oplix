@@ -598,6 +598,47 @@
         );
     }
 
+    function receivableReportLines(agg, monthId) {
+        const fromBooks = (agg.receivables || [])
+            .map((r) => ({
+                description: String(r.description || "").trim() || "Receivable",
+                amount: num(r.amount),
+            }))
+            .filter((r) => r.amount !== 0);
+
+        if (fromBooks.length) return fromBooks;
+
+        const RM = window.OplixReceivablesModel;
+        const facility = agg.facilityReceivables || [];
+        if (!RM || !monthId || !facility.length) return [];
+
+        return RM.receivedReceivablesForMonth(facility, monthId)
+            .map((r) => {
+                const n = RM.normalizeReceivable(r, r.locationId);
+                return {
+                    description: n.receiveFrom || "Receivable",
+                    amount: num(n.amount),
+                };
+            })
+            .filter((r) => r.amount !== 0);
+    }
+
+    function openReceivableReportLines(agg) {
+        const RM = window.OplixReceivablesModel;
+        const facility = agg.facilityReceivables || [];
+        if (!RM || !facility.length) return [];
+        return RM.openReceivables(facility)
+            .map((r) => {
+                const n = RM.normalizeReceivable(r, r.locationId);
+                return {
+                    description: n.receiveFrom || "Receivable",
+                    amount: num(n.amount),
+                    dueDate: RM.isoDateInput(n.dueDate) || "",
+                };
+            })
+            .filter((r) => r.amount !== 0);
+    }
+
     function buildMonthlyBooksReport(agg, meta) {
         const M = window.OplixBooksModel;
         const rows = [];
@@ -617,7 +658,32 @@
             });
         }
 
-        add("Receivables", agg.receivablesTotal);
+        const receivableLines = receivableReportLines(agg, meta.monthId);
+        const receivablesTotal =
+            receivableLines.length > 0
+                ? receivableLines.reduce((s, r) => s + r.amount, 0)
+                : num(agg.receivablesTotal);
+
+        if (receivableLines.length) {
+            rows.push({ label: "Receivables", value: null, section: true });
+            receivableLines.forEach((r) => add(r.description, r.amount, null, true));
+            add("Receivables total", receivablesTotal);
+        } else if (receivablesTotal !== 0) {
+            add("Receivables", receivablesTotal);
+        }
+
+        const openReceivableLines = openReceivableReportLines(agg);
+        if (openReceivableLines.length) {
+            rows.push({ label: "Open receivables (not in Net yet)", value: null, section: true });
+            openReceivableLines.forEach((r) => {
+                const due = r.dueDate ? ` · due ${r.dueDate}` : "";
+                add(`${r.description}${due}`, r.amount, null, true);
+            });
+            add(
+                "Open receivables total",
+                openReceivableLines.reduce((s, r) => s + r.amount, 0)
+            );
+        }
 
         const trackOnly = agg.trackOnlyBreakdown || M.trackOnlyBreakdownFromAggregate?.(agg) || [];
         if (trackOnly.length) {
@@ -660,6 +726,8 @@
                 { label: "Net", value: agg.net },
             ],
             rows,
+            receivableLines,
+            openReceivableLines,
             expenseDetail: agg.expenseDetail || [],
             totalExpenses: agg.expenses,
             supplement: buildBooksSupplement(agg),
@@ -800,6 +868,33 @@
             lines.push({ label: "Total sales", get: (a) => a.sales, group: "sales" });
         }
         lines.push({ label: "Total revenue", get: (a) => a.totalRevenue ?? a.sales, group: "sales" });
+
+        const receivableDescs = new Set();
+        packs.forEach((p) => {
+            (p.aggregate?.receivables || []).forEach((r) => {
+                if (num(r.amount) === 0) return;
+                const label = String(r.description || "").trim() || "Receivable";
+                receivableDescs.add(label);
+            });
+        });
+        [...receivableDescs]
+            .sort((a, b) => a.localeCompare(b))
+            .forEach((label) => {
+                lines.push({
+                    label,
+                    get: (a) =>
+                        (a.receivables || [])
+                            .filter((r) => (String(r.description || "").trim() || "Receivable") === label)
+                            .reduce((s, r) => s + num(r.amount), 0),
+                    group: "sales",
+                });
+            });
+        lines.push({
+            label: "Receivables total",
+            get: (a) => a.receivablesTotal,
+            group: "sales",
+            emphasis: true,
+        });
 
         lines.push({ label: "Cash expense", get: (a) => a.cashExpense, group: "daily" });
         lines.push({ label: "Checks / ACH", get: (a) => a.checksAch, group: "daily" });

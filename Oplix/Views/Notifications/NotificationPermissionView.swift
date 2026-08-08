@@ -19,9 +19,10 @@ struct NotificationPermissionView: View {
     @ObservedObject private var notificationService = NotificationService.shared
     @State private var isRequesting = false
 
-    /// One-shot defaults flag: once set, this sheet never shows
-    /// again automatically. Cleared by sign-out so users on a
-    /// shared device aren't denied the explainer on each login.
+    /// Per-install explainer flag. Cleared on sign-out so the next
+    /// account on a shared phone (employee vs manager) still sees
+    /// the sheet. If they tap "Maybe later", sign-in retries iOS
+    /// permission on the next login.
     static let didShowPrepromptKey = "oplix.notifications.didShowPreprompt"
 
     var body: some View {

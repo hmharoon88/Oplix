@@ -9,6 +9,7 @@ import SwiftUI
 
 struct LotterySelectionView: View {
     @ObservedObject var viewModel: EmployeeHomeViewModel
+    var showsPackInventory: Bool = false
     @Environment(\.dismiss) var dismiss
     @State private var showingActiveShiftForm = false
     @State private var showingLastShiftSummary = false
@@ -52,7 +53,7 @@ struct LotterySelectionView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
                     
-                    // Two cards at the top
+                    // Lottery actions (+ Pack inventory for supervisors)
                     VStack(spacing: 24) {
                         // Active Shift Card
                         Button(action: {
@@ -91,6 +92,27 @@ struct LotterySelectionView: View {
                         }
                         .padding(.horizontal, 20)
                         .disabled(lastShiftLotteryForm == nil)
+
+                        if showsPackInventory,
+                           let employee = viewModel.employee,
+                           let location = viewModel.location {
+                            NavigationLink {
+                                LotteryPackInventoryView(
+                                    managerUserId: employee.managerUserId,
+                                    location: location
+                                )
+                            } label: {
+                                LotterySelectionCard(
+                                    title: "Pack inventory",
+                                    subtitle: "Assign, return, and move packs",
+                                    icon: "shippingbox.fill",
+                                    color: .orange,
+                                    isEnabled: true
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 20)
+                        }
                     }
                     
                     Spacer()

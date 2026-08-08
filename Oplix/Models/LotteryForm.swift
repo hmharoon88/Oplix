@@ -61,6 +61,8 @@ enum LotterySummaryDisplayName {
 
     static let onlinePayouts = "Online payouts"
     static let instantPayouts = "Instant payouts"
+    static let packReturns = "Pack returns"
+    static let finishedPackSales = "Finished packs (mid-shift)"
     static let totalCashOut = "Total cash out"
 
     /// `cashInBag` — sales + register float minus payouts.
@@ -130,5 +132,60 @@ struct ShiftSummaryData: Codable {
     /// See `LotterySummaryDisplayName.expectedEnclosedCash`.
     let cashInBagNet: Double
     var overShort: Double? // Optional - entered by employee in shift summary
+    /// Dollars subtracted at close from pending pack returns.
+    var lotteryReturnDeduction: Double?
+    /// Dollars added at close from finished packs replaced mid-shift.
+    var lotteryPackCloseoutAddition: Double?
+    /// Line items for pack returns applied on this close (audit trail).
+    var packReturns: [LotteryPackReturnLineItem]?
+}
+
+/// One pack return applied (or pending) — shown on shift report and inventory.
+struct LotteryPackReturnLineItem: Identifiable, Codable, Equatable {
+    var id: String
+    var binNumber: String
+    var gameNumber: String
+    var packSerial: String
+    /// Ticket face value as stored on the bin (e.g. "10").
+    var ticketValue: String
+    var returnedTickets: Int
+    var returnedDollars: Double
+    var ticketNumber: String
+
+    init(
+        id: String = UUID().uuidString,
+        binNumber: String,
+        gameNumber: String,
+        packSerial: String,
+        ticketValue: String,
+        returnedTickets: Int,
+        returnedDollars: Double,
+        ticketNumber: String
+    ) {
+        self.id = id
+        self.binNumber = binNumber
+        self.gameNumber = gameNumber
+        self.packSerial = packSerial
+        self.ticketValue = ticketValue
+        self.returnedTickets = returnedTickets
+        self.returnedDollars = returnedDollars
+        self.ticketNumber = ticketNumber
+    }
+
+    init(from lotteryReturn: LotteryReturn, ticketValue: String) {
+        self.id = lotteryReturn.id
+        self.binNumber = lotteryReturn.binNumber
+        self.gameNumber = lotteryReturn.gameNumber
+        self.packSerial = lotteryReturn.packSerial
+        self.ticketValue = ticketValue
+        self.returnedTickets = lotteryReturn.returnedTickets
+        self.returnedDollars = lotteryReturn.returnedDollars
+        self.ticketNumber = lotteryReturn.ticketNumber
+    }
+
+    var formattedValue: String {
+        let clean = ticketValue.replacingOccurrences(of: "$", with: "")
+        return clean.isEmpty ? "—" : "$\(clean)"
+    }
 }
 

@@ -22,7 +22,15 @@
 
     async function loadBooksAggregate(userId, locationId, monthId, hasGasStation) {
         const { month, daysById } = await Books().loadMonth(userId, locationId, monthId);
-        return M().aggregateMonth(month, daysById, { hasGasStation });
+        const aggregate = M().aggregateMonth(month, daysById, { hasGasStation });
+        // Facility receivables for itemized report lines (open + received this month).
+        try {
+            const facilityReceivables = await fetchSub(userId, locationId, "receivables");
+            aggregate.facilityReceivables = facilityReceivables;
+        } catch (_) {
+            aggregate.facilityReceivables = [];
+        }
+        return aggregate;
     }
 
     async function loadAllLocationsBooks(userId, locations, monthId) {
@@ -44,11 +52,17 @@
         for (const loc of locations) {
             const hasGas = loc.facilityType === "c_store_gas";
             const { month, daysById } = await Books().loadMonth(userId, loc.id, monthId);
+            const aggregate = M().aggregateMonth(month, daysById, { hasGasStation: hasGas });
+            try {
+                aggregate.facilityReceivables = await fetchSub(userId, loc.id, "receivables");
+            } catch (_) {
+                aggregate.facilityReceivables = [];
+            }
             packs.push({
                 locationId: loc.id,
                 locationName: loc.name || "Facility",
                 hasGasStation: hasGas,
-                aggregate: M().aggregateMonth(month, daysById, { hasGasStation: hasGas }),
+                aggregate,
                 daysById,
             });
         }
