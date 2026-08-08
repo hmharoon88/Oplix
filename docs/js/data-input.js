@@ -835,7 +835,7 @@
         return `
             <div class="books-month-posting-form" data-month-posting-form>
                 <h4 class="books-month-posting-title">Add missed posting</h4>
-                <p class="books-hint">Use this for items missed on a daily sheet. Date and check # are optional — fill them when you have them. Check expenses land on that day (or today if date is blank) and update check # sequence when a number is entered. Checks Received works like Receivables → Mark received.</p>
+                <p class="books-hint">Use this for items missed on a daily sheet. Leave date or check # blank if you don’t need them. Check expenses land on that day (or today if date is blank) and update check # sequence when a number is entered. Checks Received works like Receivables → Mark received.</p>
                 <div class="books-month-posting-grid">
                     <label class="books-label">Category
                         <select class="books-select" name="postCategory" data-month-post-category>
@@ -847,14 +847,14 @@
                         </select>
                     </label>
                     <label class="books-label books-month-post-date-wrap" data-month-post-date-wrap>
-                        Date <span class="data-list-meta">(optional)</span>
+                        Date
                         <input class="books-input" type="date" name="postDate" value="" data-month-post-date>
                     </label>
                     <label class="books-label">Description / payee *
                         <input class="books-input" type="text" name="postDescription" placeholder="Payee or description" data-month-post-desc>
                     </label>
                     <label class="books-label books-month-post-check-wrap" data-month-post-check-wrap>
-                        Check # <span class="data-list-meta">(optional)</span>
+                        Check #
                         <input class="books-input" type="text" name="postCheckNo" value="" placeholder="Check #" data-month-post-check>
                     </label>
                     <label class="books-label">Amount ($) *
