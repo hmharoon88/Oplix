@@ -64,6 +64,15 @@
             locationAllOption: true,
         },
         {
+            id: "vendor_expenses",
+            label: "Vendor expenses",
+            desc: "Daily books expenses for one vendor name — one facility or all facilities.",
+            needsMonth: true,
+            needsLocation: true,
+            locationAllOption: true,
+            needsVendor: true,
+        },
+        {
             id: "compliance",
             label: "Licenses & renewals",
             desc: "Registrations with expiry dates and status for one or all facilities.",
@@ -1339,6 +1348,75 @@
         };
     }
 
+    function vendorKey(name) {
+        return String(name || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, " ");
+    }
+
+    function uniqueVendorNames(lines) {
+        const seen = new Map();
+        (lines || []).forEach((line) => {
+            const desc = String(line.description || "").trim();
+            const key = vendorKey(desc);
+            if (!key) return;
+            if (!seen.has(key)) seen.set(key, desc);
+        });
+        return [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    }
+
+    function buildVendorExpenseReport(lines, meta) {
+        const vendor = vendorKey(meta.vendorName);
+        const allLocations = !!meta.allLocations;
+        const matched = (lines || [])
+            .filter((line) => vendorKey(line.description) === vendor)
+            .sort((a, b) => {
+                const loc = String(a.locationName || "").localeCompare(String(b.locationName || ""));
+                if (loc) return loc;
+                return String(a.dayId || "").localeCompare(String(b.dayId || ""));
+            });
+        const total = matched.reduce((s, r) => s + num(r.amount), 0);
+        const locCount = new Set(matched.map((r) => r.locationId)).size;
+        const tableRows = matched.map((r) => ({
+            location: r.locationName,
+            date: r.dayId,
+            category: r.category,
+            description: r.description,
+            checkNo: r.checkNo || "",
+            amount: num(r.amount),
+        }));
+        const csvHeader = allLocations
+            ? ["Facility", "Date", "Category", "Description", "Check #", "Amount"]
+            : ["Date", "Category", "Description", "Check #", "Amount"];
+        const csvBody = tableRows.map((r) =>
+            allLocations
+                ? [r.location, r.date, r.category, r.description, r.checkNo, r.amount]
+                : [r.date, r.category, r.description, r.checkNo, r.amount]
+        );
+
+        return {
+            type: "vendor_expenses",
+            title: "Vendor expenses",
+            meta,
+            headline: meta.vendorName || "Vendor",
+            subhead: `${meta.locationName || "All facilities"} · ${meta.monthLabel || ""}`.trim(),
+            allLocations,
+            summary: [
+                { label: "Vendor", value: meta.vendorName || "—", format: "text" },
+                { label: "Entries", value: tableRows.length, format: "number" },
+                ...(allLocations ? [{ label: "Facilities", value: locCount, format: "number" }] : []),
+                { label: "Total", value: total },
+            ],
+            tableRows,
+            csvRows: [
+                csvHeader,
+                ...csvBody,
+                csvHeader.map((_, i) => (i === 0 ? "Total" : i === csvHeader.length - 1 ? total : "")),
+            ],
+        };
+    }
+
     window.OplixReportsModel = {
         REPORT_TYPES,
         PERIOD_PRESETS,
@@ -1361,6 +1439,9 @@
         buildAllLocationsCashReconReport,
         buildPayablesReceivablesReport,
         buildBooksPayrollPayoutsReport,
+        buildVendorExpenseReport,
+        uniqueVendorNames,
+        vendorKey,
         buildBooksSupplement,
     };
 })();

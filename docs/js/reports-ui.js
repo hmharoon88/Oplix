@@ -22,6 +22,11 @@
         loading: false,
         error: "",
         contextFromFacility: "",
+        vendorName: "",
+        vendorOptions: [],
+        vendorLoading: false,
+        vendorLines: [],
+        vendorOptionsKey: "",
     };
 
     function $(sel, root) {
@@ -152,6 +157,28 @@
             </label>`
             : "";
 
+        const vendorField = type.needsVendor
+            ? `<label class="books-label">Vendor
+                    <select id="rpt-vendor" class="books-select"${state.vendorLoading ? " disabled" : ""}>
+                        <option value="">${
+                            state.vendorLoading
+                                ? "Loading vendors…"
+                                : state.vendorOptions.length
+                                  ? "Select a vendor"
+                                  : "No vendors this month"
+                        }</option>
+                        ${state.vendorOptions
+                            .map(
+                                (name) =>
+                                    `<option value="${escapeHtml(name)}"${
+                                        name === state.vendorName ? " selected" : ""
+                                    }>${escapeHtml(name)}</option>`
+                            )
+                            .join("")}
+                    </select>
+                </label>`
+            : "";
+
         const rangeFields = type.needsRange
             ? `
             <label class="books-label">Period
@@ -200,6 +227,7 @@
                     </label>
                     ${locField}
                     ${monthField}
+                    ${vendorField}
                     ${rangeFields}
                 </div>
                 <button type="button" class="btn books-save" id="rpt-generate"${state.loading ? " disabled" : ""}>
@@ -621,6 +649,17 @@
                     { label: "Expenses", key: "expenses", num: true, money: true },
                     { label: "O/S", key: "overShort", num: true, money: true },
                 ]);
+            case "vendor_expenses": {
+                const cols = [
+                    ...(report.allLocations ? [{ label: "Facility", key: "location" }] : []),
+                    { label: "Date", key: "date" },
+                    { label: "Category", key: "category" },
+                    { label: "Description", key: "description" },
+                    { label: "Check #", key: "checkNo" },
+                    { label: "Amount", key: "amount", num: true, money: true },
+                ];
+                return renderShiftTableBody(report, cols);
+            }
             default:
                 return "";
         }
@@ -686,6 +725,56 @@
         if (startEl) state.customStart = startEl.value;
         const endEl = $("#rpt-end", root);
         if (endEl) state.customEnd = endEl.value;
+        const vendorEl = $("#rpt-vendor", root);
+        if (vendorEl) state.vendorName = vendorEl.value;
+    }
+
+    function vendorOptionsKey() {
+        const locId = state.locationScope === "all" ? "all" : effectiveLocationId() || "none";
+        return `${state.monthId}|${locId}`;
+    }
+
+    function reportLocations() {
+        if (state.locationScope === "all") return locations;
+        return locations.filter((l) => l.id === effectiveLocationId());
+    }
+
+    async function refreshVendorOptions() {
+        if (currentType().id !== "vendor_expenses") return;
+        const locs = reportLocations();
+        const key = vendorOptionsKey();
+        if (!locs.length) {
+            state.vendorOptions = [];
+            state.vendorLines = [];
+            state.vendorName = "";
+            state.vendorOptionsKey = key;
+            return;
+        }
+        if (state.vendorLoading && state.vendorOptionsKey === key) return;
+        state.vendorLoading = true;
+        state.vendorOptionsKey = key;
+        render();
+        try {
+            const lines = await RS().loadVendorExpenseLines(userId, locs, state.monthId);
+            if (vendorOptionsKey() !== key) return;
+            state.vendorLines = lines;
+            state.vendorOptions = RM().uniqueVendorNames(lines);
+            if (state.vendorName && !state.vendorOptions.includes(state.vendorName)) {
+                const match = state.vendorOptions.find(
+                    (n) => RM().vendorKey(n) === RM().vendorKey(state.vendorName)
+                );
+                state.vendorName = match || "";
+            }
+        } catch (err) {
+            console.warn("[Oplix] Vendor list load failed:", err);
+            if (vendorOptionsKey() === key) {
+                state.vendorOptions = [];
+                state.vendorLines = [];
+            }
+        } finally {
+            if (state.vendorOptionsKey === key) state.vendorLoading = false;
+            render();
+        }
     }
 
     async function generateReport() {
@@ -772,6 +861,25 @@
                 if (!locs.length) throw new Error("Select a location.");
                 const packs = await RS().loadAllLocationsBooks(userId, locs, state.monthId);
                 report = RM().buildBooksPayrollPayoutsReport(packs, {
+                    monthLabel: monthLabel(state.monthId),
+                    monthId: state.monthId,
+                    locationName: all ? null : locName(locId),
+                    allLocations: all,
+                });
+            } else if (state.reportType === "vendor_expenses") {
+                const all = state.locationScope === "all";
+                const locs = reportLocations();
+                if (!locs.length) throw new Error("Select a location.");
+                if (!state.vendorName) throw new Error("Select a vendor.");
+                let lines = state.vendorLines;
+                if (state.vendorOptionsKey !== vendorOptionsKey() || !lines.length) {
+                    lines = await RS().loadVendorExpenseLines(userId, locs, state.monthId);
+                    state.vendorLines = lines;
+                    state.vendorOptions = RM().uniqueVendorNames(lines);
+                    state.vendorOptionsKey = vendorOptionsKey();
+                }
+                report = RM().buildVendorExpenseReport(lines, {
+                    vendorName: state.vendorName,
                     monthLabel: monthLabel(state.monthId),
                     monthId: state.monthId,
                     locationName: all ? null : locName(locId),
@@ -891,8 +999,20 @@
             if (e.target.id === "rpt-type") {
                 state.generated = null;
                 state.error = "";
+                state.vendorOptions = [];
+                state.vendorLines = [];
+                state.vendorOptionsKey = "";
             }
             render();
+            if (
+                currentType().needsVendor &&
+                (e.target.id === "rpt-type" ||
+                    e.target.id === "rpt-month" ||
+                    e.target.id === "rpt-location" ||
+                    e.target.id === "rpt-location-scope")
+            ) {
+                refreshVendorOptions();
+            }
         });
 
         root.addEventListener("click", (e) => {

@@ -4088,8 +4088,8 @@
                 loadCurrent();
             }
         },
-        async openCashReconciliation(opts = {}) {
-            const { dayId, monthId, locationId } = opts;
+        async openDailySheet(opts = {}) {
+            const { dayId, monthId, locationId, tab } = opts;
             bindShell();
             viewMode = "daily";
             if (window.showDashboardPanel) {
@@ -4099,12 +4099,15 @@
             if (monthId) state.monthId = monthId;
             else if (dayId) state.monthId = String(dayId).slice(0, 7);
             if (dayId) state.dayId = dayId;
-            state.tab = "cash-recon";
+            state.tab = tab || "daily";
             if (state.locationId) {
-                await loadCurrent();
+                await loadCurrent({ force: true });
             } else {
                 render();
             }
+        },
+        async openCashReconciliation(opts = {}) {
+            return this.openDailySheet({ ...opts, tab: "cash-recon" });
         },
     };
 

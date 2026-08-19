@@ -115,6 +115,48 @@
         return { shifts, employees, lotteryForms };
     }
 
+    function collectDailyExpenseLines(daysById, locationId, locationName) {
+        const lines = [];
+        const lists = [
+            ["cashExpenses", "Cash expense"],
+            ["checksAch", "Check / ACH"],
+            ["otherExpenses", "Other expense"],
+        ];
+        Object.keys(daysById || {})
+            .sort()
+            .forEach((dayId) => {
+                const day = daysById[dayId] || {};
+                lists.forEach(([key, category]) => {
+                    (day[key] || []).forEach((row) => {
+                        const description = String(row.description || "").trim();
+                        const checkNo = String(row.checkNo || "").trim();
+                        const amount = M().num(row.amount);
+                        if (!description && !checkNo && amount === 0) return;
+                        if (!description) return;
+                        lines.push({
+                            locationId,
+                            locationName,
+                            dayId: row.date || dayId,
+                            category,
+                            description,
+                            checkNo,
+                            amount,
+                        });
+                    });
+                });
+            });
+        return lines;
+    }
+
+    async function loadVendorExpenseLines(userId, locations, monthId) {
+        const lines = [];
+        for (const loc of locations || []) {
+            const { daysById } = await Books().loadMonth(userId, loc.id, monthId);
+            lines.push(...collectDailyExpenseLines(daysById, loc.id, loc.name || "Facility"));
+        }
+        return lines;
+    }
+
     window.OplixReportsStore = {
         loadBooksAggregate,
         loadAllLocationsBooks,
@@ -124,5 +166,6 @@
         loadCompliance,
         loadComplianceAll,
         loadShiftReportData,
+        loadVendorExpenseLines,
     };
 })();
