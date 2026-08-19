@@ -650,6 +650,40 @@
                     { label: "O/S", key: "overShort", num: true, money: true },
                 ]);
             case "vendor_expenses": {
+                const locSummary =
+                    report.allLocations && report.locationTotals?.length
+                        ? `
+                    <h4 class="rpt-detail-subtitle">Totals by facility</h4>
+                    <table class="home-cc-table rpt-table">
+                        <thead>
+                            <tr>
+                                <th>Facility</th>
+                                <th class="home-cc-num">Entries</th>
+                                <th class="home-cc-num">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${report.locationTotals
+                                .map(
+                                    (r) => `
+                            <tr>
+                                <td>${escapeHtml(r.locationName)}</td>
+                                <td class="home-cc-num">${r.entries}</td>
+                                <td class="home-cc-num">${money(r.amount)}</td>
+                            </tr>`
+                                )
+                                .join("")}
+                            <tr class="an-total-row">
+                                <td><strong>Total</strong></td>
+                                <td class="home-cc-num"><strong>${report.tableRows.length}</strong></td>
+                                <td class="home-cc-num"><strong>${money(
+                                    report.locationTotals.reduce((s, r) => s + RM().num(r.amount), 0)
+                                )}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <h4 class="rpt-detail-subtitle">Date-by-date</h4>`
+                        : "";
                 const cols = [
                     ...(report.allLocations ? [{ label: "Facility", key: "location" }] : []),
                     { label: "Date", key: "date" },
@@ -658,7 +692,7 @@
                     { label: "Check #", key: "checkNo" },
                     { label: "Amount", key: "amount", num: true, money: true },
                 ];
-                return renderShiftTableBody(report, cols);
+                return `${locSummary}${renderShiftTableBody(report, cols)}`;
             }
             default:
                 return "";

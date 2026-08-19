@@ -1372,12 +1372,28 @@
         const matched = (lines || [])
             .filter((line) => vendorKey(line.description) === vendor)
             .sort((a, b) => {
-                const loc = String(a.locationName || "").localeCompare(String(b.locationName || ""));
-                if (loc) return loc;
-                return String(a.dayId || "").localeCompare(String(b.dayId || ""));
+                const day = String(a.dayId || "").localeCompare(String(b.dayId || ""));
+                if (day) return day;
+                return String(a.locationName || "").localeCompare(String(b.locationName || ""));
             });
         const total = matched.reduce((s, r) => s + num(r.amount), 0);
-        const locCount = new Set(matched.map((r) => r.locationId)).size;
+        const byLoc = new Map();
+        matched.forEach((r) => {
+            const id = r.locationId || r.locationName || "";
+            const prev = byLoc.get(id) || {
+                locationId: r.locationId,
+                locationName: r.locationName || "Facility",
+                entries: 0,
+                amount: 0,
+            };
+            prev.entries += 1;
+            prev.amount += num(r.amount);
+            byLoc.set(id, prev);
+        });
+        const locationTotals = [...byLoc.values()].sort((a, b) =>
+            String(a.locationName).localeCompare(String(b.locationName))
+        );
+        const locCount = locationTotals.length;
         const tableRows = matched.map((r) => ({
             location: r.locationName,
             date: r.dayId,
@@ -1394,6 +1410,19 @@
                 ? [r.location, r.date, r.category, r.description, r.checkNo, r.amount]
                 : [r.date, r.category, r.description, r.checkNo, r.amount]
         );
+        const csvRows = [];
+        if (allLocations && locationTotals.length) {
+            csvRows.push(["Totals by facility"]);
+            csvRows.push(["Facility", "Entries", "Total"]);
+            locationTotals.forEach((r) => csvRows.push([r.locationName, r.entries, r.amount]));
+            csvRows.push(["Total", matched.length, total]);
+            csvRows.push([]);
+            csvRows.push(["Date-by-date"]);
+        }
+        csvRows.push(csvHeader, ...csvBody);
+        csvRows.push(
+            csvHeader.map((_, i) => (i === 0 ? "Total" : i === csvHeader.length - 1 ? total : ""))
+        );
 
         return {
             type: "vendor_expenses",
@@ -1408,12 +1437,9 @@
                 ...(allLocations ? [{ label: "Facilities", value: locCount, format: "number" }] : []),
                 { label: "Total", value: total },
             ],
+            locationTotals,
             tableRows,
-            csvRows: [
-                csvHeader,
-                ...csvBody,
-                csvHeader.map((_, i) => (i === 0 ? "Total" : i === csvHeader.length - 1 ? total : "")),
-            ],
+            csvRows,
         };
     }
 
