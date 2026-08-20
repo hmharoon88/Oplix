@@ -302,6 +302,27 @@
         const locations = ctx.locations || [];
         const items = [];
 
+        if (window.OplixGlobalVendorsStore?.ensureMigrated) {
+            await OplixGlobalVendorsStore.ensureMigrated(uid, locations);
+        }
+        const globalVendors = window.OplixGlobalVendorsStore
+            ? await OplixGlobalVendorsStore.list(uid)
+            : [];
+
+        globalVendors.forEach((v) => {
+            if (v.active === false) return;
+            items.push(
+                makeItem({
+                    id: `ven:global:${v.id}`,
+                    type: "vendor",
+                    title: v.name || "Vendor",
+                    subtitle: "All facilities",
+                    searchText: `${v.name} ${v.category || ""} ${v.contactName || ""} vendor supplier directory global`,
+                    action: { panel: "vendors" },
+                })
+            );
+        });
+
         await Promise.all(
             locations.map(async (loc) => {
                 const locName = loc.name || "Facility";
@@ -390,19 +411,6 @@
                             subtitle: locName,
                             searchText: `${c.title} ${c.category} ${c.notes || ""} compliance license permit ${locName}`,
                             action: { panel: "facilities", locationId: loc.id, sectionId: "compliance" },
-                        })
-                    );
-                });
-
-                (directory.vendors || []).forEach((v) => {
-                    items.push(
-                        makeItem({
-                            id: `ven:${loc.id}:${v.id}`,
-                            type: "vendor",
-                            title: v.name || "Vendor",
-                            subtitle: locName,
-                            searchText: `${v.name} ${v.category || ""} ${v.contactName || ""} vendor supplier ${locName}`,
-                            action: { panel: "facilities", locationId: loc.id, sectionId: "vendors" },
                         })
                     );
                 });

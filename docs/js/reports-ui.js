@@ -792,7 +792,13 @@
             const lines = await RS().loadVendorExpenseLines(userId, locs, state.monthId);
             if (vendorOptionsKey() !== key) return;
             state.vendorLines = lines;
-            state.vendorOptions = RM().uniqueVendorNames(lines);
+            const fromBooks = RM().uniqueVendorNames(lines);
+            let fromDirectory = [];
+            if (window.OplixGlobalVendorsStore?.listNames) {
+                fromDirectory = await OplixGlobalVendorsStore.listNames(userId);
+            }
+            if (vendorOptionsKey() !== key) return;
+            state.vendorOptions = RM().uniqueVendorNames([...fromBooks, ...fromDirectory]);
             if (state.vendorName && !state.vendorOptions.includes(state.vendorName)) {
                 const match = state.vendorOptions.find(
                     (n) => RM().vendorKey(n) === RM().vendorKey(state.vendorName)

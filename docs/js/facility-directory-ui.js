@@ -4,6 +4,7 @@
 (function () {
     const M = () => window.OplixLocationDirectoryModel;
     const Store = () => window.OplixLocationDirectoryStore;
+    const GlobalVendors = () => window.OplixGlobalVendorsStore;
 
     const SECTION_TO_COLLECTION = {
         vendors: "vendors",
@@ -268,7 +269,7 @@
             sectionId === "utility-providers"
                 ? `<p class="books-hint dir-hint">Default types match <strong>Daily books</strong> (Internet, Water, Electric, Trash, Gas, Alarm, Rent). Custom utilities you add here also appear in Daily books for this facility.</p>`
                 : sectionId === "vendors"
-                  ? `<p class="books-hint dir-hint">Suppliers for this facility only. View all locations in sidebar <strong>Vendors</strong> — same data, filtered by facility.</p>`
+                  ? `<p class="books-hint dir-hint">Organization vendor directory — names added here are available at <strong>all facilities</strong> (Daily books expense descriptions and sidebar <strong>Vendors</strong>).</p>`
                   : `<p class="books-hint dir-hint">Saved for this facility in Firestore.</p>`;
 
         const toolbarBtn =
@@ -419,12 +420,16 @@
                     return;
                 }
                 setStatus("Deleting…");
-                await Store().remove(
-                    ctx.userId,
-                    ctx.locationId,
-                    M().COLLECTIONS[collectionKey(sectionId)],
-                    id
-                );
+                if (sectionId === "vendors" && GlobalVendors()) {
+                    await GlobalVendors().remove(ctx.userId, id);
+                } else {
+                    await Store().remove(
+                        ctx.userId,
+                        ctx.locationId,
+                        M().COLLECTIONS[collectionKey(sectionId)],
+                        id
+                    );
+                }
                 hideForm();
                 setStatus("Deleted.");
                 await ctx.onRefresh();
@@ -458,7 +463,11 @@
             setStatus("Saving…");
             try {
                 await OplixSaveBusy.run(async () => {
-                    await Store().save(ctx.userId, ctx.locationId, kind, id, payload);
+                    if (kind === "vendors" && GlobalVendors()) {
+                        await GlobalVendors().save(ctx.userId, id, payload);
+                    } else {
+                        await Store().save(ctx.userId, ctx.locationId, kind, id, payload);
+                    }
                 }, "Saving…");
                 hideForm();
                 setStatus("Saved.");

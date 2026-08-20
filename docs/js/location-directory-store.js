@@ -35,8 +35,15 @@
 
     async function loadAll(userId, locationId) {
         await ensureDefaultUtilityProviders(userId, locationId);
+        const GV = window.OplixGlobalVendorsStore;
         const [vendors, utilityProviders, servicers] = await Promise.all([
-            list(userId, locationId, M().COLLECTIONS.vendors),
+            GV
+                ? GV.list(userId).then((rows) =>
+                      rows
+                          .map((v) => ({ ...M().normalizeVendor(v), id: v.id }))
+                          .filter((v) => v.active !== false)
+                  )
+                : list(userId, locationId, M().COLLECTIONS.vendors),
             list(userId, locationId, M().COLLECTIONS.utilityProviders),
             list(userId, locationId, M().COLLECTIONS.servicers),
         ]);

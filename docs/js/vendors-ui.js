@@ -1,9 +1,9 @@
 /**
- * Sidebar Vendors tab — all supplier contacts across facilities.
+ * Sidebar Vendors tab — organization-wide supplier directory (all facilities).
  */
 (function () {
     const M = () => window.OplixLocationDirectoryModel;
-    const Store = () => window.OplixLocationDirectoryStore;
+    const GlobalStore = () => window.OplixGlobalVendorsStore;
     const DirUI = () => window.OplixFacilityDirectory;
 
     let userId = null;
@@ -12,6 +12,8 @@
     let filterLocationId = "";
     let editing = null;
     let saveReadyHandle = null;
+    let loadingList = false;
+    let loadError = "";
 
     function $(id) {
         return document.getElementById(id);
@@ -27,72 +29,222 @@
         return locations.find((l) => l.id === locationId)?.name || "Facility";
     }
 
+    function vendorKey(name) {
+        return GlobalStore()?.vendorKey(name) || String(name || "").trim().toLowerCase();
+    }
+
+    function recentMonthIds(count) {
+        const BM = window.OplixBooksModel;
+        if (!BM) return [];
+        const now = new Date();
+        const ids = [];
+        for (let i = 0; i < count; i++) {
+            ids.push(BM.monthIdFromDate(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+        }
+        return ids;
+    }
+
+    function money(v) {
+        return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+            parseFloat(v) || 0
+        );
+    }
+
+    function shortDayLabel(dayId) {
+        const [y, m, d] = String(dayId || "").split("-").map(Number);
+        if (!y || !m || !d) return "";
+        return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+        });
+    }
+
+    async function loadDirectoryVendors() {
+        const GS = GlobalStore();
+        if (!userId || !GS) return [];
+        return (await GS.list(userId))
+            .filter((v) => v.active !== false)
+            .map((v) => ({
+                ...M().normalizeVendor(v),
+                id: v.id,
+                fromDirectory: true,
+                fromBooks: false,
+                usage: {},
+            }));
+    }
+
+    async function loadBooksPayees() {
+        const RS = window.OplixReportsStore;
+        if (!userId || !locations.length || !RS?.loadVendorExpenseLines) return [];
+        const months = recentMonthIds(12);
+        const batches = await Promise.all(
+            months.map((monthId) => RS.loadVendorExpenseLines(userId, locations, monthId))
+        );
+        const byName = new Map();
+        batches.flat().forEach((line) => {
+            const name = String(line.description || "").trim();
+            if (!name) return;
+            const key = vendorKey(name);
+            const prev = byName.get(key) || {
+                name,
+                fromDirectory: false,
+                fromBooks: true,
+                usage: {},
+            };
+            const locId = line.locationId;
+            const usage = prev.usage[locId] || {
+                locationId: locId,
+                locationName: line.locationName,
+                booksEntries: 0,
+                booksTotal: 0,
+                lastDayId: line.dayId,
+            };
+            usage.booksEntries += 1;
+            usage.booksTotal += parseFloat(line.amount) || 0;
+            if (String(line.dayId) > String(usage.lastDayId || "")) usage.lastDayId = line.dayId;
+            prev.usage[locId] = usage;
+            byName.set(key, prev);
+        });
+        return [...byName.values()];
+    }
+
     async function loadVendors() {
-        if (!userId || !locations.length) {
+        loadError = "";
+        if (!userId) {
             vendors = [];
             return;
         }
-        const rows = await Promise.all(
-            locations.map(async (loc) => {
-                const list = await Store().list(userId, loc.id, M().COLLECTIONS.vendors);
-                return list
-                    .filter((v) => v.active !== false)
-                    .map((v) => ({
-                        ...M().normalizeVendor(v),
-                        id: v.id,
-                        locationId: loc.id,
-                        locationName: loc.name || "Facility",
-                    }));
-            })
-        );
-        vendors = rows.flat().sort((a, b) => {
-            const loc = a.locationName.localeCompare(b.locationName);
-            if (loc !== 0) return loc;
-            return (a.name || "").localeCompare(b.name || "");
-        });
+        try {
+            if (GlobalStore()?.ensureMigrated) {
+                await GlobalStore().ensureMigrated(userId, locations);
+            }
+            const [directory, payees] = await Promise.all([
+                loadDirectoryVendors(),
+                loadBooksPayees(),
+            ]);
+            const byKey = new Map();
+            directory.forEach((v) => {
+                byKey.set(vendorKey(v.name), { ...v, usage: { ...v.usage } });
+            });
+            payees.forEach((p) => {
+                const key = vendorKey(p.name);
+                const existing = byKey.get(key);
+                if (existing) {
+                    existing.fromBooks = true;
+                    Object.entries(p.usage).forEach(([locId, u]) => {
+                        const prev = existing.usage[locId];
+                        if (!prev) {
+                            existing.usage[locId] = { ...u };
+                            return;
+                        }
+                        prev.booksEntries += u.booksEntries;
+                        prev.booksTotal += u.booksTotal;
+                        if (String(u.lastDayId) > String(prev.lastDayId || "")) {
+                            prev.lastDayId = u.lastDayId;
+                        }
+                    });
+                } else {
+                    byKey.set(key, {
+                        ...p,
+                        id: `books:${key}`,
+                        category: "",
+                        phone: "",
+                        email: "",
+                        active: true,
+                    });
+                }
+            });
+            vendors = [...byKey.values()].sort((a, b) =>
+                (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" })
+            );
+        } catch (err) {
+            console.error("[Oplix] Vendors load failed:", err);
+            loadError = err.message || "Could not load vendors.";
+            vendors = [];
+        }
+    }
+
+    function usageSummary(v) {
+        const rows = Object.values(v.usage || {});
+        if (!rows.length) return null;
+        const entries = rows.reduce((n, r) => n + (r.booksEntries || 0), 0);
+        const total = rows.reduce((n, r) => n + (r.booksTotal || 0), 0);
+        const locCount = rows.length;
+        const last = rows.reduce((max, r) => (String(r.lastDayId) > String(max) ? r.lastDayId : max), "");
+        return { entries, total, locCount, lastDayId: last };
     }
 
     function filteredVendors() {
         if (!filterLocationId) return vendors;
-        return vendors.filter((v) => v.locationId === filterLocationId);
+        return vendors.filter((v) => {
+            if (v.fromDirectory) return true;
+            return Boolean(v.usage?.[filterLocationId]);
+        });
+    }
+
+    function renderUsageMeta(v) {
+        const bits = [];
+        if (filterLocationId) {
+            const u = v.usage?.[filterLocationId];
+            if (u?.booksEntries) {
+                bits.push(
+                    `${u.booksEntries} payment${u.booksEntries === 1 ? "" : "s"} at ${locationName(filterLocationId)} · ${money(u.booksTotal)}`
+                );
+                if (u.lastDayId) bits.push(`last ${shortDayLabel(u.lastDayId)}`);
+            }
+        } else {
+            const summary = usageSummary(v);
+            if (summary?.entries) {
+                bits.push(
+                    `${summary.entries} payment${summary.entries === 1 ? "" : "s"} · ${money(summary.total)}`
+                );
+                if (summary.locCount > 1) bits.push(`${summary.locCount} facilities`);
+                else if (summary.locCount === 1) {
+                    const locId = Object.keys(v.usage || {})[0];
+                    if (locId) bits.push(locationName(locId));
+                }
+                if (summary.lastDayId) bits.push(`last ${shortDayLabel(summary.lastDayId)}`);
+            }
+        }
+        if (v.fromBooks && !v.fromDirectory) bits.unshift("From Daily books");
+        else if (v.fromBooks && v.fromDirectory) bits.unshift("Also in Daily books");
+        return bits.filter(Boolean).join(" · ");
     }
 
     function renderVendorRow(v) {
-        const sub = [v.category, v.phone, v.email].filter(Boolean).join(" · ");
+        const bits = [v.category, v.phone, v.email].filter(Boolean);
+        const usageMeta = renderUsageMeta(v);
+        if (usageMeta) bits.push(usageMeta);
+        const sub = bits.filter(Boolean).join(" · ");
+        const booksOnly = v.fromBooks && !v.fromDirectory;
         return `
             <li class="loc-row-card dir-row vendors-hub-row">
                 <div class="vendors-hub-row-main">
                     <strong>${escapeHtml(v.name || "Unnamed vendor")}</strong>
                     ${sub ? `<span class="data-list-meta">${escapeHtml(sub)}</span>` : ""}
-                    ${!filterLocationId ? `<span class="vendors-hub-loc">${escapeHtml(v.locationName)}</span>` : ""}
                 </div>
                 <div class="dir-row-actions">
-                    <button type="button" class="dir-btn-edit" data-vendor-edit="${escapeHtml(v.id)}" data-vendor-loc="${escapeHtml(v.locationId)}">Edit</button>
-                    <button type="button" class="btn btn-nav-outline vendors-open-fac" data-vendor-open="${escapeHtml(v.locationId)}" title="Open facility">Open</button>
+                    ${
+                        booksOnly
+                            ? `<button type="button" class="btn btn-nav-outline" data-vendor-save="${escapeHtml(v.id)}">Save contact</button>`
+                            : `<button type="button" class="dir-btn-edit" data-vendor-edit="${escapeHtml(v.id)}">Edit</button>`
+                    }
                 </div>
             </li>`;
     }
 
-    function renderAddForm(defaultLocationId) {
-        const locId = defaultLocationId || locations[0]?.id || "";
-        const locOptions = locations
-            .map(
-                (l) =>
-                    `<option value="${escapeHtml(l.id)}"${l.id === locId ? " selected" : ""}>${escapeHtml(l.name)}</option>`
-            )
-            .join("");
+    function renderAddForm() {
         return `
             <div class="books-panel vendors-hub-form">
                 <h3 class="books-subtitle">${editing ? "Edit vendor" : "Add vendor"}</h3>
-                <label class="books-label">Facility
-                    <select class="books-select" id="vendors-form-location"${editing ? " disabled" : ""}>${locOptions}</select>
-                </label>
+                <p class="books-hint">Saved to your organization directory — available at every facility.</p>
                 <div id="vendors-form-fields"></div>
                 <div class="dir-form-actions">
                     <button type="button" class="btn" id="vendors-form-save">Save</button>
                     <button type="button" class="btn btn-nav-outline" id="vendors-form-cancel">Cancel</button>
                     ${
-                        editing
+                        editing?.fromDirectory
                             ? `<button type="button" class="btn dir-btn-delete" id="vendors-form-delete">Delete</button>`
                             : ""
                     }
@@ -122,50 +274,34 @@
             ),
         ].join("");
 
-        let grouped = "";
-        if (!filterLocationId) {
-            const byLoc = {};
-            list.forEach((v) => {
-                if (!byLoc[v.locationId]) byLoc[v.locationId] = [];
-                byLoc[v.locationId].push(v);
-            });
-            grouped = Object.entries(byLoc)
-                .map(
-                    ([locId, items]) => `
-                <section class="vendors-hub-group">
-                    <h2 class="vendors-hub-group-title">${escapeHtml(locationName(locId))}</h2>
-                    <ul class="loc-row-list dir-list">${items.map(renderVendorRow).join("")}</ul>
-                </section>`
-                )
-                .join("");
-        } else {
-            grouped =
-                list.length > 0
-                    ? `<ul class="loc-row-list dir-list">${list.map(renderVendorRow).join("")}</ul>`
-                    : `<p class="data-list-empty">No vendors for this facility yet.</p>`;
-        }
-
         root.innerHTML = `
             <div class="vendors-hub" data-vendors-hub>
-                <p class="books-hint">Supplier contacts saved per facility — same data as <strong>Facilities → Vendors</strong>.</p>
+                <p class="books-hint">Global vendor directory for your organization. Names here appear in <strong>Daily books</strong> expense descriptions at every facility. Payees from the last 12 months are listed until you save contact details.</p>
                 <div class="vendors-hub-toolbar">
                     <label class="books-label vendors-hub-filter">
-                        <span class="vendors-hub-filter-label">Facility</span>
+                        <span class="vendors-hub-filter-label">Filter</span>
                         <select class="books-select" id="vendors-filter-loc">${locOptions}</select>
                     </label>
-                    <button type="button" class="btn" id="vendors-add-btn"${locations.length ? "" : " disabled"}>Add vendor</button>
+                    <button type="button" class="btn" id="vendors-add-btn">Add vendor</button>
                 </div>
                 <div id="vendors-form-slot" hidden></div>
                 ${
-                    list.length
-                        ? grouped
-                        : `<p class="data-list-empty">No vendors yet.${locations.length ? " Add one above or open a facility." : ""}</p>`
+                    loadingList
+                        ? `<p class="data-list-empty">Loading vendor directory…</p>`
+                        : loadError
+                          ? `<p class="app-error">${escapeHtml(loadError)}</p>`
+                          : list.length
+                            ? `<ul class="loc-row-list dir-list">${list.map(renderVendorRow).join("")}</ul>`
+                            : `<p class="data-list-empty">No vendors yet. Add one above, or names will appear after you enter them on Daily books expenses.</p>`
                 }
             </div>`;
     }
 
     async function refresh() {
+        loadingList = true;
+        renderPanel();
         await loadVendors();
+        loadingList = false;
         renderPanel();
     }
 
@@ -179,15 +315,14 @@
         const slot = $("vendors-form-slot");
         if (!slot) return;
         saveReadyHandle?.detach();
-        const locId = record?.locationId || filterLocationId || locations[0]?.id;
         slot.hidden = false;
-        slot.innerHTML = renderAddForm(locId);
+        slot.innerHTML = renderAddForm();
         mountVendorFields(record || {});
         slot.scrollIntoView({ behavior: "smooth", block: "nearest" });
         if (window.OplixFormSaveReady) {
             saveReadyHandle = OplixFormSaveReady.watch(slot, {
                 saveButton: "#vendors-form-save",
-                mode: record?.id ? "edit" : "new",
+                mode: record?.fromDirectory && record?.id ? "edit" : "new",
             });
         }
     }
@@ -225,23 +360,15 @@
                 await deleteForm();
                 return;
             }
-            const editBtn = e.target.closest("[data-vendor-edit]");
-            if (editBtn) {
-                const v = vendors.find(
-                    (x) => x.id === editBtn.dataset.vendorEdit && x.locationId === editBtn.dataset.vendorLoc
-                );
-                if (v) showForm(v);
+            const saveBtn = e.target.closest("[data-vendor-save]");
+            if (saveBtn) {
+                await saveBooksPayee(saveBtn.dataset.vendorSave);
                 return;
             }
-            const openBtn = e.target.closest("[data-vendor-open]");
-            if (openBtn) {
-                const locId = openBtn.dataset.vendorOpen;
-                if (typeof window.showDashboardPanel === "function") {
-                    showDashboardPanel("facilities");
-                }
-                if (window.OplixFacilities?.openLocation) {
-                    await OplixFacilities.openLocation(locId, { sectionId: "vendors" });
-                }
+            const editBtn = e.target.closest("[data-vendor-edit]");
+            if (editBtn) {
+                const v = vendors.find((x) => x.id === editBtn.dataset.vendorEdit);
+                if (v) showForm(v);
                 return;
             }
         });
@@ -256,14 +383,30 @@
         });
     }
 
+    async function saveBooksPayee(rowId) {
+        const v = vendors.find((x) => x.id === rowId);
+        const GS = GlobalStore();
+        if (!v?.name || !GS) return;
+        const payload = {
+            ...M().defaultVendor(),
+            name: v.name,
+        };
+        const id = GS.newId();
+        try {
+            await OplixSaveBusy.run(async () => {
+                await GS.save(userId, id, payload);
+            }, "Saving…");
+            await refresh();
+        } catch (err) {
+            window.alert(err.message || "Could not save vendor contact.");
+        }
+    }
+
     async function saveForm() {
         const status = $("vendors-form-status");
         const form = $("vendors-form-fields")?.querySelector("form");
-        if (!form || !DirUI()?.readVendorForm) return;
-
-        const locationId =
-            editing?.locationId || $("vendors-form-location")?.value || locations[0]?.id;
-        if (!locationId) return;
+        const GS = GlobalStore();
+        if (!form || !DirUI()?.readVendorForm || !GS) return;
 
         const payload = DirUI().readVendorForm(form);
         if (!payload.name.trim()) {
@@ -271,18 +414,18 @@
             return;
         }
 
-        let id = editing?.id;
+        let id = editing?.fromDirectory ? editing.id : null;
         if (id) {
-            const existing = vendors.find((v) => v.id === id && v.locationId === locationId);
+            const existing = vendors.find((v) => v.id === id);
             if (existing?.createdAt) payload.createdAt = existing.createdAt;
         } else {
-            id = Store().newId();
+            id = GS.newId();
         }
 
         if (status) status.textContent = "Saving…";
         try {
             await OplixSaveBusy.run(async () => {
-                await Store().save(userId, locationId, M().COLLECTIONS.vendors, id, payload);
+                await GS.save(userId, id, payload);
             }, "Saving…");
             hideForm();
             await refresh();
@@ -292,18 +435,14 @@
     }
 
     async function deleteForm() {
-        if (!editing?.id || !editing.locationId) return;
-        if (!confirm("Delete this vendor?")) return;
+        const GS = GlobalStore();
+        if (!editing?.fromDirectory || !editing.id || !GS) return;
+        if (!confirm("Delete this vendor from the organization directory?")) return;
 
         const status = $("vendors-form-status");
         if (status) status.textContent = "Deleting…";
         try {
-            await Store().remove(
-                userId,
-                editing.locationId,
-                M().COLLECTIONS.vendors,
-                editing.id
-            );
+            await GS.remove(userId, editing.id);
             hideForm();
             await refresh();
         } catch (err) {

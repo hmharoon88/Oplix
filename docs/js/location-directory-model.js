@@ -1,8 +1,8 @@
 /**
  * Per-facility directory records.
  *
- * Firestore (new subcollections only — does not touch books, shifts, payables, etc.):
- *   users/{uid}/locations/{locationId}/vendors/{id}
+ * Firestore:
+ *   users/{uid}/vendors/{id}  — organization-wide (all facilities)
  *   users/{uid}/locations/{locationId}/utilityProviders/{id}  — doc id = utilityType key
  *   users/{uid}/locations/{locationId}/servicers/{id}
  *

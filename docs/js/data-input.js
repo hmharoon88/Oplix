@@ -25,6 +25,7 @@
         receivables: [],
         dirty: false,
         expenseDescriptions: [],
+        globalVendorNames: [],
         entryDayId: M().dayIdFromDate(new Date()),
         showLayoutCustomize: false,
     };
@@ -592,9 +593,23 @@
         }
         state.expenseDescriptions = mergeExpenseDescriptions(
             loadStoredExpenseDescriptions(),
-            collectExpenseDescriptionsFromDays(state.daysById)
+            collectExpenseDescriptionsFromDays(state.daysById),
+            state.globalVendorNames
         );
         saveStoredExpenseDescriptions(state.expenseDescriptions);
+    }
+
+    async function loadGlobalVendorNames() {
+        const GS = window.OplixGlobalVendorsStore;
+        if (!userId || !GS?.listNames) {
+            state.globalVendorNames = [];
+            return;
+        }
+        try {
+            state.globalVendorNames = await GS.listNames(userId);
+        } catch {
+            state.globalVendorNames = [];
+        }
     }
 
     function rememberExpenseDescriptionsFromDay(day) {
@@ -2242,7 +2257,7 @@
                 state.monthId,
                 loadOpts
             );
-            await Promise.all([loadUtilityProviders(), loadPayables(), loadReceivables()]);
+            await Promise.all([loadUtilityProviders(), loadPayables(), loadReceivables(), loadGlobalVendorNames()]);
             state.month = M().normalizeMonthDoc(month);
             state.month.utilities = M().normalizeMonthUtilities(
                 state.month.utilities,
