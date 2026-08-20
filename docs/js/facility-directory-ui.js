@@ -458,6 +458,7 @@
             else {
                 const existing = itemsForSection(sectionId, ctx.data).find((i) => i.id === id);
                 if (existing?.createdAt) payload.createdAt = existing.createdAt;
+                if (kind === "vendors" && existing?.aliases?.length) payload.aliases = existing.aliases;
             }
 
             setStatus("Saving…");

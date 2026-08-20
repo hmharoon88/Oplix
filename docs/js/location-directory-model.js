@@ -38,6 +38,7 @@
             email: "",
             accountNumber: "",
             notes: "",
+            aliases: [],
             active: true,
         };
     }
@@ -73,7 +74,11 @@
     }
 
     function normalizeVendor(raw) {
-        return { ...defaultVendor(), ...(raw || {}) };
+        const base = { ...defaultVendor(), ...(raw || {}) };
+        const aliases = Array.isArray(raw?.aliases)
+            ? raw.aliases.map((a) => String(a || "").trim()).filter(Boolean)
+            : [];
+        return { ...base, aliases };
     }
 
     function normalizeUtilityProvider(raw) {

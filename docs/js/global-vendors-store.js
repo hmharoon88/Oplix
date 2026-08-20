@@ -101,6 +101,57 @@
         }
     }
 
+    function seedKey(userId) {
+        return `oplix.canonicalVendorsSeeded.20260819v1.${userId}`;
+    }
+
+    async function ensureCanonicalSeed(userId) {
+        if (!userId || !M()) return;
+        try {
+            if (localStorage.getItem(seedKey(userId)) === "1") return;
+        } catch {
+            /* ignore */
+        }
+
+        const seed = window.OplixVendorDirectorySeed;
+        if (!Array.isArray(seed) || !seed.length) return;
+
+        const existing = await list(userId);
+        const have = new Set();
+        existing.forEach((row) => {
+            const norm = M().normalizeVendor(row);
+            have.add(vendorKey(norm.name));
+            (norm.aliases || []).forEach((a) => have.add(vendorKey(a)));
+        });
+
+        const toAdd = seed.filter((item) => {
+            const name = String(item.name || "").trim();
+            if (!name || have.has(vendorKey(name))) return false;
+            return !(item.aliases || []).some((a) => have.has(vendorKey(a)));
+        });
+
+        const chunk = 20;
+        for (let i = 0; i < toAdd.length; i += chunk) {
+            await Promise.all(
+                toAdd.slice(i, i + chunk).map((item) => {
+                    const payload = M().normalizeVendor({
+                        name: item.name,
+                        aliases: item.aliases || [],
+                        active: true,
+                    });
+                    have.add(vendorKey(payload.name));
+                    return save(userId, newId(), payload);
+                })
+            );
+        }
+
+        try {
+            localStorage.setItem(seedKey(userId), "1");
+        } catch {
+            /* ignore */
+        }
+    }
+
     async function listNames(userId) {
         const rows = await list(userId);
         const seen = new Set();
@@ -123,6 +174,7 @@
         remove,
         newId,
         ensureMigrated,
+        ensureCanonicalSeed,
         listNames,
         vendorKey,
     };

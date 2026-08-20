@@ -119,16 +119,25 @@
             if (GlobalStore()?.ensureMigrated) {
                 await GlobalStore().ensureMigrated(userId, locations);
             }
+            if (GlobalStore()?.ensureCanonicalSeed) {
+                await GlobalStore().ensureCanonicalSeed(userId);
+            }
             const [directory, payees] = await Promise.all([
                 loadDirectoryVendors(),
                 loadBooksPayees(),
             ]);
+            const aliasToKey = new Map();
+            directory.forEach((v) => {
+                const key = vendorKey(v.name);
+                aliasToKey.set(key, key);
+                (v.aliases || []).forEach((a) => aliasToKey.set(vendorKey(a), key));
+            });
             const byKey = new Map();
             directory.forEach((v) => {
                 byKey.set(vendorKey(v.name), { ...v, usage: { ...v.usage } });
             });
             payees.forEach((p) => {
-                const key = vendorKey(p.name);
+                const key = aliasToKey.get(vendorKey(p.name)) || vendorKey(p.name);
                 const existing = byKey.get(key);
                 if (existing) {
                     existing.fromBooks = true;
@@ -418,6 +427,7 @@
         if (id) {
             const existing = vendors.find((v) => v.id === id);
             if (existing?.createdAt) payload.createdAt = existing.createdAt;
+            if (existing?.aliases?.length) payload.aliases = existing.aliases;
         } else {
             id = GS.newId();
         }
