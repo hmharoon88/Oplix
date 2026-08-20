@@ -49,7 +49,7 @@
         servicer: "Servicer",
         task: "Task",
         orgTodo: "Home to-do",
-        expense: "Daily books expense",
+        expense: "Vendor expense",
         section: "Section",
         page: "Page",
     };
@@ -235,55 +235,122 @@
         return hits;
     }
 
-    function expenseGroupItems(loc, packs) {
+    function expenseNameKey(name) {
+        return String(name || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, " ");
+    }
+
+    function loadStoredExpenseNames(uid, locations) {
+        const sources = [];
+        try {
+            const raw = localStorage.getItem(`oplix.expenseDescriptions.${uid || "anon"}`);
+            const parsed = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(parsed)) sources.push(parsed);
+        } catch {
+            /* ignore */
+        }
+        (locations || []).forEach((loc) => {
+            try {
+                const raw = localStorage.getItem(
+                    `oplix.expenseDescriptions.${uid || "anon"}.${loc.id}`
+                );
+                const parsed = raw ? JSON.parse(raw) : [];
+                if (Array.isArray(parsed)) sources.push(parsed);
+            } catch {
+                /* ignore */
+            }
+        });
+        return sources.flat().map((n) => String(n || "").trim()).filter(Boolean);
+    }
+
+    function globalExpenseNameItems(locations, packsByLoc, extraNames) {
         const groups = new Map();
-        (packs || []).forEach((pack) => {
-            collectBooksExpenseHits(pack.daysById).forEach((hit) => {
-                const descKey = (hit.description || "").toLowerCase();
-                const key = descKey || `check:${hit.checkNo}`;
-                if (!key) return;
-                const group = groups.get(key) || {
-                    description: hit.description,
+
+        function ensureGroup(name) {
+            const key = expenseNameKey(name);
+            if (!key) return null;
+            if (!groups.has(key)) {
+                groups.set(key, {
+                    description: String(name).trim(),
+                    locationIds: new Set(),
+                    locationNames: [],
                     checkNos: [],
                     categories: new Set(),
                     count: 0,
                     total: 0,
-                    lastDayId: hit.dayId,
-                };
-                group.count += 1;
-                group.total += hit.amount;
-                group.categories.add(hit.category);
-                if (hit.checkNo && !group.checkNos.includes(hit.checkNo)) {
-                    group.checkNos.push(hit.checkNo);
-                }
-                if (!group.description && hit.description) group.description = hit.description;
-                if (String(hit.dayId) > String(group.lastDayId)) group.lastDayId = hit.dayId;
-                groups.set(key, group);
+                    lastDayId: "",
+                    lastLocationId: "",
+                });
+            }
+            return groups.get(key);
+        }
+
+        (locations || []).forEach((loc) => {
+            const locName = loc.name || "Facility";
+            (packsByLoc[loc.id] || []).forEach((pack) => {
+                collectBooksExpenseHits(pack.daysById).forEach((hit) => {
+                    const name = hit.description;
+                    if (!name) return;
+                    const group = ensureGroup(name);
+                    if (!group) return;
+                    group.count += 1;
+                    group.total += hit.amount;
+                    group.categories.add(hit.category);
+                    if (!group.locationIds.has(loc.id)) {
+                        group.locationIds.add(loc.id);
+                        group.locationNames.push(locName);
+                    }
+                    if (hit.checkNo && !group.checkNos.includes(hit.checkNo)) {
+                        group.checkNos.push(hit.checkNo);
+                    }
+                    if (String(hit.dayId) > String(group.lastDayId || "")) {
+                        group.lastDayId = hit.dayId;
+                        group.lastLocationId = loc.id;
+                    }
+                });
             });
         });
 
-        const locName = loc.name || "Facility";
-        return [...groups.values()].map((g) => {
-            const title =
-                g.description || (g.checkNos[0] ? `Check #${g.checkNos[0]}` : "Expense");
-            const cat = [...g.categories].join(" · ");
-            const last = shortDayLabel(g.lastDayId);
-            const countLabel = g.count === 1 ? "1 entry" : `${g.count} entries`;
-            return makeItem({
-                id: `exp:${loc.id}:${normalize(title)}`,
-                type: "expense",
-                title,
-                subtitle: `${locName} · ${cat} · ${countLabel} · last ${last} · ${money(g.total)}`,
-                searchText: `${title} ${g.checkNos.join(" ")} ${cat} expense daily books check vendor ${locName}`,
-                action: {
-                    panel: "data-input",
-                    locationId: loc.id,
-                    monthId: String(g.lastDayId || "").slice(0, 7),
-                    dayId: g.lastDayId,
-                    booksTab: "daily",
-                },
+        (extraNames || []).forEach((name) => ensureGroup(name));
+
+        return [...groups.values()]
+            .sort((a, b) => a.description.localeCompare(b.description, undefined, { sensitivity: "base" }))
+            .map((g) => {
+                const locCount = g.locationIds.size;
+                const locLabel =
+                    locCount === 0
+                        ? "All facilities"
+                        : locCount === 1
+                          ? g.locationNames[0]
+                          : `${locCount} facilities`;
+                const bits = [locLabel];
+                if (g.count) {
+                    bits.push(g.count === 1 ? "1 entry" : `${g.count} entries`);
+                    if (g.lastDayId) bits.push(`last ${shortDayLabel(g.lastDayId)}`);
+                    bits.push(money(g.total));
+                } else {
+                    bits.push("Saved name");
+                }
+                const locSearch = g.locationNames.join(" ");
+                return makeItem({
+                    id: `exp:all:${expenseNameKey(g.description)}`,
+                    type: "expense",
+                    title: g.description,
+                    subtitle: bits.join(" · "),
+                    searchText: `${g.description} ${g.checkNos.join(" ")} ${[...g.categories].join(" ")} expense vendor daily books payee ${locSearch} all facilities`,
+                    action: g.lastDayId
+                        ? {
+                              panel: "data-input",
+                              locationId: g.lastLocationId,
+                              monthId: String(g.lastDayId).slice(0, 7),
+                              dayId: g.lastDayId,
+                              booksTab: "daily",
+                          }
+                        : { panel: "vendors" },
+                });
             });
-        });
     }
 
     async function fetchSub(uid, locationId, name) {
@@ -323,6 +390,8 @@
             );
         });
 
+        const packsByLoc = {};
+
         await Promise.all(
             locations.map(async (loc) => {
                 const locName = loc.name || "Facility";
@@ -346,9 +415,10 @@
                         ? OplixLocationDirectoryStore.loadAll(uid, loc.id)
                         : Promise.resolve({ vendors: [], utilityProviders: [], servicers: [] }),
                     window.OplixBooksStore
-                        ? OplixBooksStore.loadMonthsForCompare(uid, [loc.id], recentMonthIds(3), {})
+                        ? OplixBooksStore.loadMonthsForCompare(uid, [loc.id], recentMonthIds(12), {})
                         : Promise.resolve([]),
                 ]);
+                packsByLoc[loc.id] = booksPacks || [];
 
                 documents.forEach((doc) => {
                     items.push(
@@ -444,10 +514,14 @@
                         })
                     );
                 });
-
-                expenseGroupItems(loc, booksPacks).forEach((item) => items.push(item));
             })
         );
+
+        const extraNames = [
+            ...loadStoredExpenseNames(uid, locations),
+            ...globalVendors.map((v) => v.name),
+        ];
+        globalExpenseNameItems(locations, packsByLoc, extraNames).forEach((item) => items.push(item));
 
         if (window.OplixOrgTodosStore) {
             try {
@@ -515,7 +589,8 @@
             else if (item.title && normalize(item.title).includes(tok)) score += 12;
             if (idx === 0) score += 5;
         });
-        if (item.type === "facility") score += 2;
+        if (item.type === "expense") score += 4;
+        if (item.type === "vendor") score += 3;
         if (item.type === "page") score += 1;
         return score;
     }
@@ -528,7 +603,7 @@
             .filter((item) => queryTokens.every((tok) => item.searchText.includes(tok)))
             .map((item) => ({ item, score: scoreItem(item, queryTokens) }))
             .sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title))
-            .slice(0, 24)
+            .slice(0, 40)
             .map((row) => row.item);
 
         return matched;

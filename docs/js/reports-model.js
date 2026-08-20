@@ -66,7 +66,7 @@
         {
             id: "vendor_expenses",
             label: "Vendor expenses",
-            desc: "Daily books expenses for one vendor name — one facility or all facilities.",
+            desc: "Daily books expenses for one vendor or all vendors — one facility or all facilities.",
             needsMonth: true,
             needsLocation: true,
             locationAllOption: true,
@@ -1348,6 +1348,8 @@
         };
     }
 
+    const ALL_VENDORS = "__all__";
+
     function vendorKey(name) {
         return String(name || "")
             .trim()
@@ -1355,10 +1357,16 @@
             .replace(/\s+/g, " ");
     }
 
+    function isAllVendors(name) {
+        return name === ALL_VENDORS;
+    }
+
     function uniqueVendorNames(lines) {
         const seen = new Map();
         (lines || []).forEach((line) => {
-            const desc = String(line.description || "").trim();
+            const desc = String(
+                typeof line === "string" ? line : line?.description || ""
+            ).trim();
             const key = vendorKey(desc);
             if (!key) return;
             if (!seen.has(key)) seen.set(key, desc);
@@ -1367,32 +1375,63 @@
     }
 
     function buildVendorExpenseReport(lines, meta) {
-        const vendor = vendorKey(meta.vendorName);
+        const allVendors = isAllVendors(meta.vendorName);
+        const vendor = allVendors ? "" : vendorKey(meta.vendorName);
         const allLocations = !!meta.allLocations;
         const matched = (lines || [])
-            .filter((line) => vendorKey(line.description) === vendor)
+            .filter((line) => {
+                const key = vendorKey(line.description);
+                if (!key) return false;
+                return allVendors || key === vendor;
+            })
             .sort((a, b) => {
+                const name = String(a.description || "").localeCompare(String(b.description || ""), undefined, {
+                    sensitivity: "base",
+                });
+                if (name) return name;
                 const day = String(a.dayId || "").localeCompare(String(b.dayId || ""));
                 if (day) return day;
                 return String(a.locationName || "").localeCompare(String(b.locationName || ""));
             });
         const total = matched.reduce((s, r) => s + num(r.amount), 0);
         const byLoc = new Map();
+        const byVendor = new Map();
         matched.forEach((r) => {
-            const id = r.locationId || r.locationName || "";
-            const prev = byLoc.get(id) || {
+            const locId = r.locationId || r.locationName || "";
+            const locPrev = byLoc.get(locId) || {
                 locationId: r.locationId,
                 locationName: r.locationName || "Facility",
                 entries: 0,
                 amount: 0,
             };
-            prev.entries += 1;
-            prev.amount += num(r.amount);
-            byLoc.set(id, prev);
+            locPrev.entries += 1;
+            locPrev.amount += num(r.amount);
+            byLoc.set(locId, locPrev);
+
+            const vKey = vendorKey(r.description);
+            const vPrev = byVendor.get(vKey) || {
+                name: r.description,
+                locationIds: new Set(),
+                entries: 0,
+                amount: 0,
+            };
+            vPrev.entries += 1;
+            vPrev.amount += num(r.amount);
+            if (r.locationId || r.locationName) vPrev.locationIds.add(r.locationId || r.locationName);
+            if (!vPrev.name && r.description) vPrev.name = r.description;
+            byVendor.set(vKey, vPrev);
         });
         const locationTotals = [...byLoc.values()].sort((a, b) =>
             String(a.locationName).localeCompare(String(b.locationName))
         );
+        const vendorTotals = [...byVendor.values()]
+            .map((v) => ({
+                name: v.name,
+                facilities: v.locationIds.size,
+                entries: v.entries,
+                amount: v.amount,
+            }))
+            .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: "base" }));
         const locCount = locationTotals.length;
         const tableRows = matched.map((r) => ({
             location: r.locationName,
@@ -1411,6 +1450,13 @@
                 : [r.date, r.category, r.description, r.checkNo, r.amount]
         );
         const csvRows = [];
+        if (allVendors && vendorTotals.length) {
+            csvRows.push(["All vendors"]);
+            csvRows.push(["Vendor", "Facilities", "Entries", "Total"]);
+            vendorTotals.forEach((r) => csvRows.push([r.name, r.facilities, r.entries, r.amount]));
+            csvRows.push(["Total", locCount, matched.length, total]);
+            csvRows.push([]);
+        }
         if (allLocations && locationTotals.length) {
             csvRows.push(["Totals by facility"]);
             csvRows.push(["Facility", "Entries", "Total"]);
@@ -1424,19 +1470,23 @@
             csvHeader.map((_, i) => (i === 0 ? "Total" : i === csvHeader.length - 1 ? total : ""))
         );
 
+        const vendorLabel = allVendors ? "All vendors" : meta.vendorName || "—";
         return {
             type: "vendor_expenses",
             title: "Vendor expenses",
             meta,
-            headline: meta.vendorName || "Vendor",
+            headline: vendorLabel,
             subhead: `${meta.locationName || "All facilities"} · ${meta.monthLabel || ""}`.trim(),
             allLocations,
+            allVendors,
             summary: [
-                { label: "Vendor", value: meta.vendorName || "—", format: "text" },
+                { label: "Vendor", value: vendorLabel, format: "text" },
+                ...(allVendors ? [{ label: "Vendors", value: vendorTotals.length, format: "number" }] : []),
                 { label: "Entries", value: tableRows.length, format: "number" },
                 ...(allLocations ? [{ label: "Facilities", value: locCount, format: "number" }] : []),
                 { label: "Total", value: total },
             ],
+            vendorTotals,
             locationTotals,
             tableRows,
             csvRows,
@@ -1465,9 +1515,11 @@
         buildAllLocationsCashReconReport,
         buildPayablesReceivablesReport,
         buildBooksPayrollPayoutsReport,
+        ALL_VENDORS,
         buildVendorExpenseReport,
         uniqueVendorNames,
         vendorKey,
+        isAllVendors,
         buildBooksSupplement,
     };
 })();

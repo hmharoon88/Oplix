@@ -22,7 +22,7 @@
         loading: false,
         error: "",
         contextFromFacility: "",
-        vendorName: "",
+        vendorName: "__all__",
         vendorOptions: [],
         vendorLoading: false,
         vendorLines: [],
@@ -160,11 +160,12 @@
         const vendorField = type.needsVendor
             ? `<label class="books-label">Vendor
                     <select id="rpt-vendor" class="books-select"${state.vendorLoading ? " disabled" : ""}>
-                        <option value="">${
+                        <option value="__all__"${state.vendorName === "__all__" ? " selected" : ""}>All vendors</option>
+                        <option value="" disabled>${
                             state.vendorLoading
                                 ? "Loading vendors…"
                                 : state.vendorOptions.length
-                                  ? "Select a vendor"
+                                  ? "— or pick one —"
                                   : "No vendors this month"
                         }</option>
                         ${state.vendorOptions
@@ -650,6 +651,52 @@
                     { label: "O/S", key: "overShort", num: true, money: true },
                 ]);
             case "vendor_expenses": {
+                const vendorList =
+                    report.allVendors && report.vendorTotals?.length
+                        ? `
+                    <h4 class="rpt-detail-subtitle">All vendors</h4>
+                    <table class="home-cc-table rpt-table">
+                        <thead>
+                            <tr>
+                                <th>Vendor</th>
+                                ${report.allLocations ? `<th class="home-cc-num">Facilities</th>` : ""}
+                                <th class="home-cc-num">Entries</th>
+                                <th class="home-cc-num">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${report.vendorTotals
+                                .map(
+                                    (r) => `
+                            <tr>
+                                <td>${escapeHtml(r.name)}</td>
+                                ${
+                                    report.allLocations
+                                        ? `<td class="home-cc-num">${r.facilities}</td>`
+                                        : ""
+                                }
+                                <td class="home-cc-num">${r.entries}</td>
+                                <td class="home-cc-num">${money(r.amount)}</td>
+                            </tr>`
+                                )
+                                .join("")}
+                            <tr class="an-total-row">
+                                <td><strong>Total</strong></td>
+                                ${
+                                    report.allLocations
+                                        ? `<td class="home-cc-num"><strong>${
+                                              report.locationTotals?.length || 0
+                                          }</strong></td>`
+                                        : ""
+                                }
+                                <td class="home-cc-num"><strong>${report.tableRows.length}</strong></td>
+                                <td class="home-cc-num"><strong>${money(
+                                    report.vendorTotals.reduce((s, r) => s + RM().num(r.amount), 0)
+                                )}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>`
+                        : "";
                 const locSummary =
                     report.allLocations && report.locationTotals?.length
                         ? `
@@ -681,9 +728,10 @@
                                 )}</strong></td>
                             </tr>
                         </tbody>
-                    </table>
-                    <h4 class="rpt-detail-subtitle">Date-by-date</h4>`
+                    </table>`
                         : "";
+                const detailHeading =
+                    vendorList || locSummary ? `<h4 class="rpt-detail-subtitle">Date-by-date</h4>` : "";
                 const cols = [
                     ...(report.allLocations ? [{ label: "Facility", key: "location" }] : []),
                     { label: "Date", key: "date" },
@@ -692,7 +740,7 @@
                     { label: "Check #", key: "checkNo" },
                     { label: "Amount", key: "amount", num: true, money: true },
                 ];
-                return `${locSummary}${renderShiftTableBody(report, cols)}`;
+                return `${vendorList}${locSummary}${detailHeading}${renderShiftTableBody(report, cols)}`;
             }
             default:
                 return "";
@@ -780,7 +828,7 @@
         if (!locs.length) {
             state.vendorOptions = [];
             state.vendorLines = [];
-            state.vendorName = "";
+            state.vendorName = "__all__";
             state.vendorOptionsKey = key;
             return;
         }
@@ -799,11 +847,11 @@
             }
             if (vendorOptionsKey() !== key) return;
             state.vendorOptions = RM().uniqueVendorNames([...fromBooks, ...fromDirectory]);
-            if (state.vendorName && !state.vendorOptions.includes(state.vendorName)) {
+            if (state.vendorName && state.vendorName !== "__all__" && !state.vendorOptions.includes(state.vendorName)) {
                 const match = state.vendorOptions.find(
                     (n) => RM().vendorKey(n) === RM().vendorKey(state.vendorName)
                 );
-                state.vendorName = match || "";
+                state.vendorName = match || "__all__";
             }
         } catch (err) {
             console.warn("[Oplix] Vendor list load failed:", err);
