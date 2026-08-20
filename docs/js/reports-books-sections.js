@@ -8,6 +8,13 @@
         return d.innerHTML;
     }
 
+    function renderFacilityTitle(name, address) {
+        const RM = window.OplixReportsModel;
+        const addr = RM?.formatAddress ? RM.formatAddress(address) : "";
+        if (!addr) return escapeHtml(name || "Facility");
+        return `<strong>${escapeHtml(name || "Facility")}</strong><span class="rpt-facility-addr">${escapeHtml(addr)}</span>`;
+    }
+
     function money(v) {
         return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
             parseFloat(v) || 0
@@ -308,7 +315,7 @@
                 };
                 return `
                 <section class="rpt-location-section">
-                    <h3 class="rpt-location-title">${escapeHtml(s.locationName)}</h3>
+                    <h3 class="rpt-location-title">${renderFacilityTitle(s.locationName, s.locationAddress)}</h3>
                     ${renderBooksSupplement(supplement, {
                         includeRecon: false,
                         payrollTotal: s.payrollTotal,

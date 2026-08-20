@@ -4826,6 +4826,32 @@ body.oplix-save-busy-active .sidebar-btn {
     color: var(--dash-muted, #64748b);
 }
 
+.rpt-preview-address,
+.rpt-facility-addr {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.8rem;
+    color: var(--dash-muted, #64748b);
+    font-weight: 400;
+}
+
+.rpt-location-title .rpt-facility-addr {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--dash-muted, #64748b);
+}
+
+.rpt-compare-loc .rpt-facility-addr {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.65rem;
+    font-weight: 400;
+    line-height: 1.25;
+    white-space: normal;
+}
+
 .rpt-export-actions {
     display: flex;
     flex-wrap: wrap;

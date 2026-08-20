@@ -20,6 +20,12 @@
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     }
 
+    function formatLocationAddress(value) {
+        return String(value || "")
+            .trim()
+            .replace(/\s*\n+\s*/g, ", ");
+    }
+
     async function loadBooksAggregate(userId, locationId, monthId, hasGasStation) {
         const { month, daysById } = await Books().loadMonth(userId, locationId, monthId);
         const aggregate = M().aggregateMonth(month, daysById, { hasGasStation });
@@ -41,6 +47,7 @@
             packs.push({
                 locationId: loc.id,
                 locationName: loc.name || "Facility",
+                locationAddress: formatLocationAddress(loc.address),
                 aggregate,
             });
         }
@@ -61,6 +68,7 @@
             packs.push({
                 locationId: loc.id,
                 locationName: loc.name || "Facility",
+                locationAddress: formatLocationAddress(loc.address),
                 hasGasStation: hasGas,
                 aggregate,
                 daysById,
@@ -69,7 +77,7 @@
         return packs;
     }
 
-    async function loadPayablesReceivables(userId, locationId, locationName) {
+    async function loadPayablesReceivables(userId, locationId, locationName, locationAddress) {
         const [payables, receivables] = await Promise.all([
             fetchSub(userId, locationId, "payables"),
             fetchSub(userId, locationId, "receivables"),
@@ -77,6 +85,7 @@
         return {
             locationId,
             locationName: locationName || "Facility",
+            locationAddress: formatLocationAddress(locationAddress),
             payables,
             receivables,
         };
@@ -85,7 +94,9 @@
     async function loadAllLocationsPayablesReceivables(userId, locations) {
         const packs = [];
         for (const loc of locations) {
-            packs.push(await loadPayablesReceivables(userId, loc.id, loc.name));
+            packs.push(
+                await loadPayablesReceivables(userId, loc.id, loc.name, loc.address)
+            );
         }
         return packs;
     }
@@ -100,7 +111,12 @@
         for (const loc of locations) {
             const items = await loadCompliance(userId, loc.id);
             items.forEach((item) => {
-                all.push({ ...item, _locationName: loc.name || "Facility", _locationId: loc.id });
+                all.push({
+                    ...item,
+                    _locationName: loc.name || "Facility",
+                    _locationId: loc.id,
+                    _locationAddress: formatLocationAddress(loc.address),
+                });
             });
         }
         return all;
@@ -115,7 +131,7 @@
         return { shifts, employees, lotteryForms };
     }
 
-    function collectDailyExpenseLines(daysById, locationId, locationName) {
+    function collectDailyExpenseLines(daysById, locationId, locationName, locationAddress) {
         const lines = [];
         const lists = [
             ["cashExpenses", "Cash expense"],
@@ -136,6 +152,7 @@
                         lines.push({
                             locationId,
                             locationName,
+                            locationAddress: formatLocationAddress(locationAddress),
                             dayId: row.date || dayId,
                             category,
                             description,
@@ -152,7 +169,14 @@
         const lines = [];
         for (const loc of locations || []) {
             const { daysById } = await Books().loadMonth(userId, loc.id, monthId);
-            lines.push(...collectDailyExpenseLines(daysById, loc.id, loc.name || "Facility"));
+            lines.push(
+                ...collectDailyExpenseLines(
+                    daysById,
+                    loc.id,
+                    loc.name || "Facility",
+                    loc.address
+                )
+            );
         }
         return lines;
     }

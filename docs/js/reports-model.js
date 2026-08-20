@@ -4,6 +4,23 @@
 (function () {
     const MAX_SPAN_DAYS = 366;
 
+    function formatAddress(value) {
+        return String(value || "")
+            .trim()
+            .replace(/\s*\n+\s*/g, ", ");
+    }
+
+    function facilityLabel(name, address) {
+        const label = String(name || "Facility").trim();
+        const addr = formatAddress(address);
+        return addr ? `${label} — ${addr}` : label;
+    }
+
+    function locationReportExtras(meta) {
+        const locationAddress = formatAddress(meta?.locationAddress);
+        return locationAddress ? { locationAddress } : {};
+    }
+
     const REPORT_TYPES = [
         {
             id: "monthly_books",
@@ -288,7 +305,7 @@
         const receivablesReceived = [];
 
         (packs || []).forEach((pack) => {
-            const loc = pack.locationName || "Facility";
+            const loc = facilityLabel(pack.locationName, pack.locationAddress);
             (pack.payables || []).forEach((raw) => {
                 const p = PM ? PM.normalizePayable(raw, pack.locationId) : raw;
                 const due = PM ? PM.toDate(p.dueDate) : toDate(p.dueDate);
@@ -330,6 +347,7 @@
             meta,
             headline: meta.allLocations ? "All facilities" : meta.locationName,
             subhead: `Open items · ${new Date().toLocaleDateString("en-US")}`,
+            ...locationReportExtras(meta),
             summary: [
                 { label: "Open payables", value: openPayablesTotal },
                 { label: "Open receivables", value: openReceivablesTotal },
@@ -362,6 +380,7 @@
             meta,
             headline: meta.locationName,
             subhead: meta.monthLabel,
+            ...locationReportExtras(meta),
             summary: [
                 { label: "Days reconciled", value: `${rollup.daysReconciled} / ${rollup.daysWithExpected}`, format: "text" },
                 { label: "Deposit variance", value: rollup.totalDepositVariance },
@@ -390,7 +409,7 @@
             const reg = p.aggregate?.cashReconciliation?.register || {};
             const rollup = reconRollupFromRegister(reg);
             return {
-                location: p.locationName,
+                location: facilityLabel(p.locationName, p.locationAddress),
                 ...rollup,
             };
         });
@@ -456,6 +475,7 @@
     function buildBooksPayrollPayoutsReport(packs, meta) {
         const sections = (packs || []).map((p) => ({
             locationName: p.locationName,
+            locationAddress: formatAddress(p.locationAddress),
             registerPayouts: registerPayoutRows(p.aggregate),
             booksPayroll: booksPayrollRows(p.aggregate),
             payrollTotal: num(p.aggregate?.payrollTotal),
@@ -476,6 +496,7 @@
             meta,
             headline: meta.allLocations ? "All facilities" : meta.locationName,
             subhead: meta.monthLabel,
+            ...locationReportExtras(meta),
             summary: [
                 { label: "Locations", value: sections.length, format: "number" },
                 { label: "Payroll total", value: totals.payroll },
@@ -485,10 +506,11 @@
             csvRows: [
                 ["Facility", "Line", "Hours", "Rate", "Amount", "Track only"],
                 ...sections.flatMap((s) => {
+                    const locLabel = facilityLabel(s.locationName, s.locationAddress);
                     const rows = [];
                     s.booksPayroll.forEach((l) => {
                         rows.push([
-                            s.locationName,
+                            locLabel,
                             l.label,
                             l.hours ?? "",
                             l.rate ?? "",
@@ -497,7 +519,7 @@
                         ]);
                     });
                     s.registerPayouts.forEach((p) => {
-                        rows.push([s.locationName, p.label, "", "", p.amount, p.trackOnly ? "Yes" : ""]);
+                        rows.push([locLabel, p.label, "", "", p.amount, p.trackOnly ? "Yes" : ""]);
                     });
                     return rows;
                 }),
@@ -729,6 +751,7 @@
             meta,
             headline: meta.locationName,
             subhead: meta.monthLabel,
+            ...locationReportExtras(meta),
             summary: [
                 { label: agg.hasGasStation ? "Merch sales" : "Total sales", value: agg.sales },
                 { label: "Expenses", value: agg.expenses },
@@ -768,7 +791,7 @@
             const a = p.aggregate;
             return {
                 locationId: p.locationId,
-                location: p.locationName,
+                location: facilityLabel(p.locationName, p.locationAddress),
                 hasGas: a.hasGasStation,
                 sales: a.sales,
                 registerCard: a.registerCard,
@@ -941,6 +964,7 @@
         const locations = packs.map((p) => ({
             id: p.locationId,
             name: p.locationName,
+            address: formatAddress(p.locationAddress),
             aggregate: p.aggregate,
         }));
         const lineDefs = compareLineDefs(packs);
@@ -973,7 +997,7 @@
         );
 
         const csvRows = [
-            ["Line item", ...locations.map((l) => l.name), "Total"],
+            ["Line item", ...locations.map((l) => facilityLabel(l.name, l.address)), "Total"],
             ...tableRows.map((r) => [
                 r.groupHeader ? `${COMPARE_GROUP_LABELS[r.group] || r.group}: ${r.label}` : r.label,
                 ...r.values.map((v) => v.value),
@@ -992,7 +1016,7 @@
                 { label: "Total expenses", value: totals.expenses },
                 { label: "Total net", value: totals.net },
             ],
-            locations: locations.map((l) => ({ id: l.id, name: l.name })),
+            locations: locations.map((l) => ({ id: l.id, name: l.name, address: l.address })),
             tableRows,
             groupLabels: COMPARE_GROUP_LABELS,
             csvRows,
@@ -1005,6 +1029,7 @@
             const agg = p.aggregate;
             const monthly = buildMonthlyBooksReport(agg, {
                 locationName: p.locationName,
+                locationAddress: formatAddress(p.locationAddress),
                 monthLabel: meta.monthLabel,
                 monthId: meta.monthId,
             });
@@ -1015,6 +1040,7 @@
             );
             return {
                 locationName: p.locationName,
+                locationAddress: formatAddress(p.locationAddress),
                 hasGas: agg.hasGasStation,
                 monthlyRows: monthly.rows,
                 monthlySummary: monthly.summary,
@@ -1038,7 +1064,8 @@
 
         const csvRows = [["Monthly breakdown"]];
         locationSections.forEach((s) => {
-            csvRows.push([s.locationName]);
+            const locLabel = facilityLabel(s.locationName, s.locationAddress);
+            csvRows.push([locLabel]);
             s.monthlyRows
                 .filter((r) => !r.section)
                 .forEach((r) => {
@@ -1051,7 +1078,7 @@
         locationSections.forEach((s) => {
             s.expenseDetail.forEach((line) => {
                 csvRows.push([
-                    s.locationName,
+                    facilityLabel(s.locationName, s.locationAddress),
                     line.category,
                     line.dayId || "",
                     line.description,
@@ -1080,7 +1107,7 @@
                 s.dailyRows.forEach((row) => {
                     if (!row.hasData) return;
                     csvRows.push([
-                        s.locationName,
+                        facilityLabel(s.locationName, s.locationAddress),
                         row.dayId,
                         s.hasGas ? row.merchSale : "",
                         s.hasGas ? row.fuelGallons : "",
@@ -1109,7 +1136,7 @@
                 s.dailyRows.forEach((row) => {
                     if (!row.hasData) return;
                     csvRows.push([
-                        s.locationName,
+                        facilityLabel(s.locationName, s.locationAddress),
                         row.dayId,
                         row.sales,
                         row.cashExpense,
@@ -1145,7 +1172,7 @@
         const tableRows = sorted.map((item) => {
             const disp = C.displayStatus(item);
             return {
-                facility: item._locationName || meta.locationName || "—",
+                facility: facilityLabel(item._locationName, item._locationAddress) || meta.locationName || "—",
                 type: C.recordTypeLabel(item.recordType),
                 name: item.title || C.categoryLabel(item.category),
                 category: C.categoryLabel(item.category),
@@ -1164,6 +1191,7 @@
             meta,
             headline: meta.locationName || "All facilities",
             subhead: `Generated ${new Date().toLocaleDateString("en-US")}`,
+            ...locationReportExtras(meta),
             summary: [
                 { label: "Total records", value: tableRows.length, format: "number" },
                 { label: "Need attention", value: attention, format: "number" },
@@ -1228,6 +1256,7 @@
             meta,
             headline: meta.locationName,
             subhead: formatRange(interval),
+            ...locationReportExtras(meta),
             summary: [
                 { label: "Closes", value: tableRows.length, format: "number" },
                 { label: "Total sold", value: totalSold },
@@ -1285,6 +1314,7 @@
             meta,
             headline: meta.locationName,
             subhead: formatRange(interval),
+            ...locationReportExtras(meta),
             summary: [
                 { label: "Employees", value: tableRows.length, format: "number" },
                 { label: "Total hours", value: totalHours, format: "number" },
@@ -1335,6 +1365,7 @@
             meta,
             headline: meta.locationName,
             subhead: formatRange(interval),
+            ...locationReportExtras(meta),
             summary: [
                 { label: "Shifts", value: tableRows.length, format: "number" },
                 { label: "Total sales", value: totalSales },
@@ -1401,6 +1432,7 @@
             const locPrev = byLoc.get(locId) || {
                 locationId: r.locationId,
                 locationName: r.locationName || "Facility",
+                locationAddress: formatAddress(r.locationAddress),
                 entries: 0,
                 amount: 0,
             };
@@ -1421,9 +1453,12 @@
             if (!vPrev.name && r.description) vPrev.name = r.description;
             byVendor.set(vKey, vPrev);
         });
-        const locationTotals = [...byLoc.values()].sort((a, b) =>
-            String(a.locationName).localeCompare(String(b.locationName))
-        );
+        const locationTotals = [...byLoc.values()]
+            .map((r) => ({
+                ...r,
+                locationLabel: facilityLabel(r.locationName, r.locationAddress),
+            }))
+            .sort((a, b) => String(a.locationName).localeCompare(String(b.locationName)));
         const vendorTotals = [...byVendor.values()]
             .map((v) => ({
                 name: v.name,
@@ -1434,7 +1469,7 @@
             .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: "base" }));
         const locCount = locationTotals.length;
         const tableRows = matched.map((r) => ({
-            location: r.locationName,
+            location: facilityLabel(r.locationName, r.locationAddress),
             date: r.dayId,
             category: r.category,
             description: r.description,
@@ -1460,7 +1495,7 @@
         if (allLocations && locationTotals.length) {
             csvRows.push(["Totals by facility"]);
             csvRows.push(["Facility", "Entries", "Total"]);
-            locationTotals.forEach((r) => csvRows.push([r.locationName, r.entries, r.amount]));
+            locationTotals.forEach((r) => csvRows.push([r.locationLabel, r.entries, r.amount]));
             csvRows.push(["Total", matched.length, total]);
             csvRows.push([]);
             csvRows.push(["Date-by-date"]);
@@ -1476,9 +1511,10 @@
             title: "Vendor expenses",
             meta,
             headline: vendorLabel,
-            subhead: `${meta.locationName || "All facilities"} · ${meta.monthLabel || ""}`.trim(),
+            subhead: meta.monthLabel || "",
             allLocations,
             allVendors,
+            ...locationReportExtras(allLocations ? {} : meta),
             summary: [
                 { label: "Vendor", value: vendorLabel, format: "text" },
                 ...(allVendors ? [{ label: "Vendors", value: vendorTotals.length, format: "number" }] : []),
@@ -1502,6 +1538,8 @@
         intervalFromPreset,
         spanExceedsLimit,
         formatRange,
+        formatAddress,
+        facilityLabel,
         buildMonthlyBooksReport,
         buildAllLocationsBooksReport,
         buildAllLocationsCompareReport,

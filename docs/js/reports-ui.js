@@ -101,6 +101,52 @@
         return locations.find((l) => l.id === id)?.name || "Facility";
     }
 
+    function locAddress(id) {
+        return RM().formatAddress(locations.find((l) => l.id === id)?.address);
+    }
+
+    function locMeta(id) {
+        const loc = locations.find((l) => l.id === id);
+        return {
+            locationName: loc?.name || "Facility",
+            locationAddress: RM().formatAddress(loc?.address),
+        };
+    }
+
+    function renderFacilityHeading(name, address) {
+        const addr = RM().formatAddress(address);
+        if (!addr) return escapeHtml(name || "Facility");
+        return `<strong>${escapeHtml(name || "Facility")}</strong><span class="rpt-facility-addr">${escapeHtml(addr)}</span>`;
+    }
+
+    function renderReportMeta(report) {
+        const bits = [];
+        if (report.headline) bits.push(`<strong>${escapeHtml(report.headline)}</strong>`);
+        if (report.locationAddress) {
+            const facility =
+                report.meta?.locationName && report.headline !== report.meta.locationName
+                    ? RM().facilityLabel(report.meta.locationName, report.locationAddress)
+                    : escapeHtml(report.locationAddress);
+            bits.push(`<span class="rpt-preview-address">${facility}</span>`);
+        }
+        if (report.subhead) bits.push(escapeHtml(report.subhead));
+        return `<p class="rpt-preview-meta">${bits.join(" · ")}</p>`;
+    }
+
+    function renderPrintMeta(report) {
+        const bits = [];
+        if (report.headline) bits.push(`<strong>${escapeHtml(report.headline)}</strong>`);
+        if (report.locationAddress) {
+            const facility =
+                report.meta?.locationName && report.headline !== report.meta.locationName
+                    ? RM().facilityLabel(report.meta.locationName, report.locationAddress)
+                    : escapeHtml(report.locationAddress);
+            bits.push(`<span class="rpt-print-address">${facility}</span>`);
+        }
+        if (report.subhead) bits.push(escapeHtml(report.subhead));
+        return `<p class="rpt-print-meta">${bits.join("<br>")}</p>`;
+    }
+
     function hasGas(locId) {
         const loc = locations.find((l) => l.id === locId);
         return loc?.facilityType === "c_store_gas";
@@ -410,7 +456,7 @@
                     <thead>
                         <tr>
                             <th class="rpt-compare-sticky">Line item</th>
-                            ${locs.map((l) => `<th class="home-cc-num rpt-compare-loc">${escapeHtml(l.name)}</th>`).join("")}
+                            ${locs.map((l) => `<th class="home-cc-num rpt-compare-loc">${renderFacilityHeading(l.name, l.address)}</th>`).join("")}
                             <th class="home-cc-num rpt-compare-total-col">Total</th>
                         </tr>
                     </thead>
@@ -537,7 +583,7 @@
 
                 return `
                     <section class="rpt-location-section">
-                        <h3 class="rpt-location-title">${escapeHtml(section.locationName)}</h3>
+                        <h3 class="rpt-location-title">${renderFacilityHeading(section.locationName, section.locationAddress)}</h3>
                         <h4 class="rpt-detail-subtitle">Monthly breakdown</h4>
                         ${monthlyTable}
                         ${expenseBlock}
@@ -714,7 +760,7 @@
                                 .map(
                                     (r) => `
                             <tr>
-                                <td>${escapeHtml(r.locationName)}</td>
+                                <td>${escapeHtml(r.locationLabel || r.locationName)}</td>
                                 <td class="home-cc-num">${r.entries}</td>
                                 <td class="home-cc-num">${money(r.amount)}</td>
                             </tr>`
@@ -757,7 +803,7 @@
                 <header class="rpt-preview-head">
                     <div>
                         <h2 class="rpt-preview-title">${escapeHtml(report.title)}</h2>
-                        <p class="rpt-preview-meta">${escapeHtml(report.headline)}${report.subhead ? ` · ${escapeHtml(report.subhead)}` : ""}</p>
+                        ${renderReportMeta(report)}
                     </div>
                     <div class="rpt-export-actions">
                         <button type="button" class="btn btn-nav-outline" id="rpt-csv">Download CSV</button>
@@ -878,7 +924,7 @@
                 if (!locId) throw new Error("Select a location.");
                 const agg = await RS().loadBooksAggregate(userId, locId, state.monthId, hasGas(locId));
                 report = RM().buildMonthlyBooksReport(agg, {
-                    locationName: locName(locId),
+                    ...locMeta(locId),
                     monthLabel: monthLabel(state.monthId),
                     monthId: state.monthId,
                 });
@@ -915,7 +961,7 @@
                 if (!locId) throw new Error("Select a location.");
                 const agg = await RS().loadBooksAggregate(userId, locId, state.monthId, hasGas(locId));
                 report = RM().buildCashReconciliationReport(agg, {
-                    locationName: locName(locId),
+                    ...locMeta(locId),
                     monthLabel: monthLabel(state.monthId),
                     monthId: state.monthId,
                 });
@@ -928,18 +974,20 @@
             } else if (state.reportType === "payables_receivables") {
                 const all =
                     state.locationScope === "all";
+                const singleLoc = all ? null : locMeta(locId);
                 const packs = all
                     ? await RS().loadAllLocationsPayablesReceivables(userId, locations)
                     : [
                           await RS().loadPayablesReceivables(
                               userId,
                               locId,
-                              locName(locId)
+                              singleLoc.locationName,
+                              singleLoc.locationAddress
                           ),
                       ];
                 if (!all && !locId) throw new Error("Select a location.");
                 report = RM().buildPayablesReceivablesReport(packs, {
-                    locationName: all ? null : locName(locId),
+                    ...(singleLoc || {}),
                     allLocations: all,
                 });
             } else if (state.reportType === "books_payroll_payouts") {
@@ -951,7 +999,7 @@
                 report = RM().buildBooksPayrollPayoutsReport(packs, {
                     monthLabel: monthLabel(state.monthId),
                     monthId: state.monthId,
-                    locationName: all ? null : locName(locId),
+                    ...(all ? {} : locMeta(locId)),
                     allLocations: all,
                 });
             } else if (state.reportType === "vendor_expenses") {
@@ -970,7 +1018,7 @@
                     vendorName: state.vendorName,
                     monthLabel: monthLabel(state.monthId),
                     monthId: state.monthId,
-                    locationName: all ? null : locName(locId),
+                    ...(all ? {} : locMeta(locId)),
                     allLocations: all,
                 });
             } else if (state.reportType === "compliance") {
@@ -981,7 +1029,7 @@
                     : await RS().loadCompliance(userId, locId);
                 if (!all && !items.length && !locId) throw new Error("Select a location.");
                 report = RM().buildComplianceReport(items, {
-                    locationName: all ? null : locName(locId),
+                    ...(all ? {} : locMeta(locId)),
                 });
             } else {
                 if (!locId) throw new Error("Select a location.");
@@ -997,7 +1045,7 @@
                     userId,
                     locId
                 );
-                const meta = { locationName: locName(locId) };
+                const meta = locMeta(locId);
                 if (state.reportType === "lottery") {
                     report = RM().buildLotteryReport(
                         lotteryForms,
@@ -1047,7 +1095,7 @@
         const html = `
             <div class="rpt-print-doc">
                 <h1>${escapeHtml(report.title)}</h1>
-                <p class="rpt-print-meta">${escapeHtml(report.headline)}${report.subhead ? ` · ${escapeHtml(report.subhead)}` : ""}</p>
+                ${renderPrintMeta(report)}
                 <p class="rpt-print-meta">Generated ${escapeHtml(new Date().toLocaleString("en-US"))}</p>
                 ${summary}
                 ${body}
@@ -1061,7 +1109,8 @@
             <style>
                 body { font-family: Inter, system-ui, sans-serif; padding: 24px; color: #0f172a; }
                 h1 { font-size: 1.25rem; margin: 0 0 8px; }
-                .rpt-print-meta { color: #64748b; font-size: 0.85rem; margin: 0 0 16px; }
+                .rpt-print-meta { color: #64748b; font-size: 0.85rem; margin: 0 0 8px; }
+                .rpt-print-address { color: #475569; font-size: 0.8rem; }
                 .rpt-summary { display: flex; gap: 24px; margin-bottom: 20px; }
                 .rpt-summary-stat span { display: block; font-size: 0.7rem; text-transform: uppercase; color: #64748b; }
                 .rpt-summary-stat strong { font-size: 1.1rem; }
