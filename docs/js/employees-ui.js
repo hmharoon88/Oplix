@@ -165,6 +165,7 @@
             canViewLotteryData: false,
             canEditSchedules: false,
             canViewReports: false,
+            canManagePayroll: false,
         };
     }
 
@@ -188,6 +189,7 @@
                 ${toggleRow("View lottery data", f.canViewLotteryData, `${p}canViewLotteryData`)}
                 ${toggleRow("Edit schedules", f.canEditSchedules, `${p}canEditSchedules`)}
                 ${toggleRow("View reports", f.canViewReports, `${p}canViewReports`)}
+                ${toggleRow("Manage payroll", f.canManagePayroll, `${p}canManagePayroll`)}
             </fieldset>`
                     : ""
             }`;
@@ -297,6 +299,7 @@
             canViewLotteryData: !!emp.canViewLotteryData,
             canEditSchedules: !!emp.canEditSchedules,
             canViewReports: !!emp.canViewReports,
+            canManagePayroll: !!emp.canManagePayroll,
         };
 
         const locChecks = locations
@@ -358,6 +361,7 @@
                             ${toggleRow("View lottery data", f.canViewLotteryData, "canViewLotteryData")}
                             ${toggleRow("Edit schedules", f.canEditSchedules, "canEditSchedules")}
                             ${toggleRow("View reports", f.canViewReports, "canViewReports")}
+                            ${toggleRow("Manage payroll", f.canManagePayroll, "canManagePayroll")}
                         </fieldset>`
                                 : ""
                         }
@@ -454,6 +458,7 @@
             canViewLotteryData: !!form.querySelector('[name="canViewLotteryData"]')?.checked,
             canEditSchedules: !!form.querySelector('[name="canEditSchedules"]')?.checked,
             canViewReports: !!form.querySelector('[name="canViewReports"]')?.checked,
+            canManagePayroll: !!form.querySelector('[name="canManagePayroll"]')?.checked,
         };
     }
 
@@ -516,6 +521,7 @@
             canViewLotteryData: !!form.querySelector('[name="canViewLotteryData"]')?.checked,
             canEditSchedules: !!form.querySelector('[name="canEditSchedules"]')?.checked,
             canViewReports: !!form.querySelector('[name="canViewReports"]')?.checked,
+            canManagePayroll: !!form.querySelector('[name="canManagePayroll"]')?.checked,
         };
     }
 
@@ -548,6 +554,7 @@
                     canViewLotteryData: !!emp.canViewLotteryData,
                     canEditSchedules: !!emp.canEditSchedules,
                     canViewReports: !!emp.canViewReports,
+                    canManagePayroll: !!emp.canManagePayroll,
                 });
                 const current = JSON.stringify({
                     ...form,
@@ -589,6 +596,7 @@
                     canViewLotteryData: isSupervisor ? form.canViewLotteryData : false,
                     canEditSchedules: isSupervisor ? form.canEditSchedules : false,
                     canViewReports: isSupervisor ? form.canViewReports : false,
+                    canManagePayroll: isSupervisor ? form.canManagePayroll : false,
                 };
 
                 await Store().updateEmployee(userId, updated, editOriginalAssigned);

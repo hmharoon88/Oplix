@@ -102,6 +102,7 @@
             profileSlotConfig: data.profileSlotConfig || {},
             notificationSettings: data.notificationSettings || {},
             booksFieldConfig: data.booksFieldConfig || {},
+            lotteryScanOnly: data.lotteryScanOnly === true,
         };
         payload.facilityType =
             data.facilityType === "c_store_gas" ? "c_store_gas" : "c_store";
@@ -158,6 +159,7 @@
             "servicers",
             "complianceItems",
             "payrollEntries",
+            "payrollRuns",
         ];
         for (const name of subcollections) {
             await deleteSubcollection(userId, locationId, name);

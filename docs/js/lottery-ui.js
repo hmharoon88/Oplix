@@ -25,6 +25,7 @@
         editRows: [],
         editRegister: "",
         editReverse: false,
+        lotteryScanOnly: false,
         closeEnding: {},
         closeOnlineTotals: [""],
         closeOnlineCashes: [""],
@@ -116,6 +117,10 @@
         state.editRows = (t.rows || []).map((r, i) => Store().normalizeRow(r, i));
         state.editRegister = t.lotteryRegisterAmount || "";
         state.editReverse = !!t.reverseOrder;
+    }
+
+    function locationScanOnly(loc) {
+        return loc?.lotteryScanOnly === true;
     }
 
     function syncCloseFromTemplate() {
@@ -276,6 +281,10 @@
                 <label class="lottery-check">
                     <input type="checkbox" id="lottery-reverse" ${state.editReverse ? "checked" : ""} />
                     Reverse ticket order
+                </label>
+                <label class="lottery-check">
+                    <input type="checkbox" id="lottery-scan-only" ${state.lotteryScanOnly ? "checked" : ""} />
+                    Scan only for End #
                 </label>
             </div>
             <div class="lottery-table-wrap">
@@ -575,6 +584,10 @@
             renderPanel();
         });
 
+        root.querySelector("#lottery-scan-only")?.addEventListener("change", (e) => {
+            state.lotteryScanOnly = e.target.checked;
+        });
+
         root.querySelector("#lottery-save-template")?.addEventListener("click", saveTemplate);
 
         root.querySelectorAll("[data-lottery-close-end]").forEach((inp) => {
@@ -658,6 +671,14 @@
                     reverseOrder: state.editReverse,
                     terminalNumber,
                 });
+                if (window.oplixDb) {
+                    await window.oplixDb
+                        .collection("users")
+                        .doc(userId)
+                        .collection("locations")
+                        .doc(embeddedLocationId)
+                        .set({ lotteryScanOnly: state.lotteryScanOnly === true }, { merge: true });
+                }
                 await loadData();
             }, "Saving…");
             setStatus("Template saved.", "success");
@@ -717,6 +738,7 @@
         embeddedLocationId = ctx.locationId;
         currentRootId = ctx.rootId || "lottery-embedded-root";
         state.terminalCount = terminalCountFromLocation(ctx.location);
+        state.lotteryScanOnly = locationScanOnly(ctx.location);
         state.shifts = ctx.shifts || [];
         const people = ctx.data?.allPeople || ctx.allPeople || [];
         state.peopleById = {};

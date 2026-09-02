@@ -11,42 +11,42 @@ struct WeeklyScheduleEditor: View {
     @Binding var schedule: WeeklySchedule
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Set working hours for each day")
-                .font(.caption)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Weekly hours")
+                .font(.caption2)
                 .foregroundColor(.secondary)
             
-            DayScheduleRow(dayName: "Monday", daySchedule: Binding(
+            DayScheduleRow(dayName: "Mon", daySchedule: Binding(
                 get: { schedule.monday },
                 set: { schedule.monday = $0 }
             ))
             
-            DayScheduleRow(dayName: "Tuesday", daySchedule: Binding(
+            DayScheduleRow(dayName: "Tue", daySchedule: Binding(
                 get: { schedule.tuesday },
                 set: { schedule.tuesday = $0 }
             ))
             
-            DayScheduleRow(dayName: "Wednesday", daySchedule: Binding(
+            DayScheduleRow(dayName: "Wed", daySchedule: Binding(
                 get: { schedule.wednesday },
                 set: { schedule.wednesday = $0 }
             ))
             
-            DayScheduleRow(dayName: "Thursday", daySchedule: Binding(
+            DayScheduleRow(dayName: "Thu", daySchedule: Binding(
                 get: { schedule.thursday },
                 set: { schedule.thursday = $0 }
             ))
             
-            DayScheduleRow(dayName: "Friday", daySchedule: Binding(
+            DayScheduleRow(dayName: "Fri", daySchedule: Binding(
                 get: { schedule.friday },
                 set: { schedule.friday = $0 }
             ))
             
-            DayScheduleRow(dayName: "Saturday", daySchedule: Binding(
+            DayScheduleRow(dayName: "Sat", daySchedule: Binding(
                 get: { schedule.saturday },
                 set: { schedule.saturday = $0 }
             ))
             
-            DayScheduleRow(dayName: "Sunday", daySchedule: Binding(
+            DayScheduleRow(dayName: "Sun", daySchedule: Binding(
                 get: { schedule.sunday },
                 set: { schedule.sunday = $0 }
             ))
@@ -82,7 +82,7 @@ struct DayScheduleRow: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Toggle(dayName, isOn: Binding(
                 get: { isWorking },
                 set: { newValue in
@@ -90,19 +90,26 @@ struct DayScheduleRow: View {
                     updateSchedule()
                 }
             ))
+            .font(.subheadline)
             
             if isWorking {
-                HStack {
+                HStack(spacing: 8) {
                     DatePicker("Start", selection: $startTime, displayedComponents: .hourAndMinute)
                         .onChange(of: startTime) { _, _ in updateSchedule() }
+                        .labelsHidden()
+                    
+                    Text("–")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                     
                     DatePicker("End", selection: $endTime, displayedComponents: .hourAndMinute)
                         .onChange(of: endTime) { _, _ in updateSchedule() }
+                        .labelsHidden()
                 }
                 .font(.caption)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
     
     private func updateSchedule() {

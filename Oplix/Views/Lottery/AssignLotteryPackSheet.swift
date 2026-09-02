@@ -93,7 +93,7 @@ struct AssignLotteryPackSheet: View {
                         LabeledContent("Book #", value: parsed.dashedLabel)
                         LabeledContent("Game", value: parsed.gameNumber)
                         LabeledContent("Pack serial", value: parsed.packSerial)
-                        LabeledContent("Begin #", value: parsed.ticketNumber)
+                        LabeledContent("Top ticket #", value: parsed.ticketNumber)
                         if parsed.extraScannerDigitCount > 0 {
                             Text("Scanner added \(parsed.extraScannerDigitCount) extra digits after the book number — those are ignored.")
                                 .font(.caption)
@@ -183,7 +183,7 @@ struct AssignLotteryPackSheet: View {
                     } header: {
                         Text(currentPackBin == nil ? "Assign to any bin" : "Move to any bin")
                     } footer: {
-                        Text("Multiple bins can hold the same game # — each pack is tracked by pack serial. Putting a new pack on a bin that already has one records the old pack as finished (sold Begin→00) for this shift.")
+                        Text("Multiple bins can hold the same game # — each pack is tracked by pack serial. Assign puts the pack on the bin without changing Begin/End. Different-game replace still credits the old pack as finished (Begin→00) at the next shift close.")
                     }
                 }
 
@@ -255,7 +255,7 @@ struct AssignLotteryPackSheet: View {
                 titleVisibility: .visible
             ) {
                 Button("Cancel", role: .cancel) { }
-                Button("Assign with Begin \(parsedBarcode?.ticketNumber ?? "")", role: .destructive) {
+                Button("Assign anyway", role: .destructive) {
                     Task { await confirmAssign() }
                 }
             } message: {
@@ -429,12 +429,12 @@ struct AssignLotteryPackSheet: View {
             barcode: parsed,
             ticketsInBookOverride: isNewGame ? resolvedNewGameTickets : nil
         ) else {
-            return "Open pack — Begin will be \(parsed.ticketNumber)."
+            return "Open pack — top ticket #\(parsed.ticketNumber). Assign will not change Begin/End on the bin."
         }
         if preview.alreadySold > 0 {
-            return "Open pack at #\(preview.ticketNumber) — about \(preview.alreadySold) tickets already sold. Begin will start at \(preview.ticketNumber); shift close counts from there to End #."
+            return "Open pack at #\(preview.ticketNumber) — about \(preview.alreadySold) tickets already sold from sealed. Assign does not change Begin/End; make sure the bin's Begin is correct."
         }
-        return "Open pack — barcode ticket #\(parsed.ticketNumber). Begin will start at that number."
+        return "Open pack — barcode ticket #\(parsed.ticketNumber). Assign does not change Begin/End on the bin."
     }
 
     private func attemptConfirmAssign() {

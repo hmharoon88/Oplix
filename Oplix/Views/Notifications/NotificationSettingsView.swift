@@ -32,6 +32,9 @@ struct NotificationSettingsView: View {
     @State private var assignmentEnabled: Bool = true
     @State private var shiftSummaryEnabled: Bool = true
     @State private var cashAlertEnabled: Bool = true
+    @State private var financeAlertEnabled: Bool = true
+    @State private var complianceAlertEnabled: Bool = true
+    @State private var dueReminderEnabled: Bool = true
     @State private var dailyDigestEnabled: Bool = false
 
     @State private var quietHoursEnabled: Bool = false
@@ -89,6 +92,12 @@ struct NotificationSettingsView: View {
                     if isManagerLike {
                         Toggle("Cash variance alert", isOn: $cashAlertEnabled)
                             .onChange(of: cashAlertEnabled) { _, _ in scheduleSave() }
+                        Toggle("Overdue payables & receivables", isOn: $financeAlertEnabled)
+                            .onChange(of: financeAlertEnabled) { _, _ in scheduleSave() }
+                        Toggle("Compliance & license expiry", isOn: $complianceAlertEnabled)
+                            .onChange(of: complianceAlertEnabled) { _, _ in scheduleSave() }
+                        Toggle("Due date reminders", isOn: $dueReminderEnabled)
+                            .onChange(of: dueReminderEnabled) { _, _ in scheduleSave() }
                         Toggle("Daily digest (email)", isOn: $dailyDigestEnabled)
                             .onChange(of: dailyDigestEnabled) { _, _ in scheduleSave() }
                     }
@@ -253,6 +262,9 @@ struct NotificationSettingsView: View {
             assignmentEnabled = categories.resolvedAssignment
             shiftSummaryEnabled = categories.resolvedShiftSummary
             cashAlertEnabled = categories.resolvedCashAlert
+            financeAlertEnabled = categories.resolvedFinanceAlert
+            complianceAlertEnabled = categories.resolvedComplianceAlert
+            dueReminderEnabled = categories.resolvedDueReminder
             dailyDigestEnabled = categories.resolvedDailyDigest
         }
         if let quiet = prefs.quietHours {
@@ -289,6 +301,9 @@ struct NotificationSettingsView: View {
                 assignment: assignmentEnabled,
                 shiftSummary: shiftSummaryEnabled,
                 cashAlert: cashAlertEnabled,
+                financeAlert: financeAlertEnabled,
+                complianceAlert: complianceAlertEnabled,
+                dueReminder: dueReminderEnabled,
                 dailyDigest: dailyDigestEnabled
             ),
             quietHours: NotificationPrefs.QuietHours(

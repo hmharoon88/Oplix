@@ -322,14 +322,17 @@ struct EmployeeHomeContent: View {
                                 .background(Theme.cloudWhite)
                                 .cornerRadius(12)
                                 .padding(.horizontal)
-                                
-                                // Weekly Stats Card
-                                WeeklyStatsCard(
-                                    hours: viewModel.thisWeekHours,
-                                    pay: viewModel.thisWeekPay
-                                )
-                                .padding(.horizontal)
 
+                                if let payroll = viewModel.latestPayroll {
+                                    EmployeeLatestPayrollCard(payroll: payroll)
+                                        .padding(.horizontal)
+                                }
+
+                                if let employee = viewModel.employee, !employee.activeLoans.isEmpty {
+                                    EmployeeOpenLoansCard(loans: employee.activeLoans)
+                                        .padding(.horizontal)
+                                }
+                                
                                 // Performance card — shows the employee's own
                                 // task progress today and how the whole
                                 // location is doing today + past week. Only
@@ -513,6 +516,7 @@ struct EmployeeHomeContent: View {
                 // Only load if not already loaded (allow loading even if isLoading is true initially)
                 guard viewModel.employee == nil || viewModel.location == nil else {
                     print("⚠️ Skipping loadData - data already loaded")
+                    await viewModel.refreshLatestPayroll()
                     return
                 }
                 await viewModel.loadData()
@@ -571,48 +575,106 @@ enum EmployeeTab: String, Identifiable, Hashable {
     var id: String { rawValue }
 }
 
-// MARK: - Weekly Stats Card
-struct WeeklyStatsCard: View {
-    let hours: Double
-    let pay: Double
-    
+// MARK: - Latest payroll card
+
+struct EmployeeLatestPayrollCard: View {
+    let payroll: EmployeeHomeViewModel.LatestPayrollSummary
+
     var body: some View {
-        HStack(spacing: 30) {
-            VStack(spacing: 4) {
-                Text("This Week")
-                    .font(.caption)
-                    .foregroundColor(Theme.darkGray)
-                Text("\(String(format: "%.1f", hours)) hrs")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.black)
+        VStack(spacing: 10) {
+            Text("Last pay period")
+                .font(.caption)
+                .foregroundColor(Theme.darkGray)
+
+            Text(LocationPayrollViewModel.formatPeriod(start: payroll.periodStart, end: payroll.periodEnd))
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.black)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 30) {
+                VStack(spacing: 4) {
+                    Text("\(String(format: "%.1f", payroll.hours)) hrs")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.black)
+                    Text("Hours paid")
+                        .font(.caption)
+                        .foregroundColor(Theme.darkGray)
+                }
+
+                Divider()
+                    .frame(height: 40)
+
+                VStack(spacing: 4) {
+                    Text(LocationPayrollViewModel.formatCurrency(payroll.pay))
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.green)
+                    Text("Net paid")
+                        .font(.caption)
+                        .foregroundColor(Theme.darkGray)
+                }
             }
-            
-            Divider()
-                .frame(height: 40)
-            
-            VStack(spacing: 4) {
-                Text("This Week")
+
+            if payroll.loanDeductions.isEmpty
+                && payroll.otherDeductionAmount < 0.005
+                && payroll.grossPay > payroll.pay + 0.009 {
+                Text("Gross \(LocationPayrollViewModel.formatCurrency(payroll.grossPay))")
                     .font(.caption)
-                    .foregroundColor(Theme.darkGray)
-                Text(formatCurrency(pay))
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.green)
+                    .foregroundColor(.secondary)
+            } else if !payroll.loanDeductions.isEmpty || payroll.otherDeductionAmount > 0.005 {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Gross \(LocationPayrollViewModel.formatCurrency(payroll.grossPay))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    ForEach(payroll.loanDeductions) { deduction in
+                        Text("− \(deduction.label): \(LocationPayrollViewModel.formatCurrency(deduction.amount))")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                    if payroll.otherDeductionAmount > 0.005 {
+                        let label = payroll.otherDeductionDescription.isEmpty
+                            ? "Other deduction"
+                            : payroll.otherDeductionDescription
+                        Text("− \(label): \(LocationPayrollViewModel.formatCurrency(payroll.otherDeductionAmount))")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding()
         .frame(maxWidth: .infinity)
         .oplixCard()
     }
-    
-    private func formatCurrency(_ amount: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        return formatter.string(from: NSNumber(value: amount)) ?? "$\(String(format: "%.2f", amount))"
+}
+
+struct EmployeeOpenLoansCard: View {
+    let loans: [EmployeeLoan]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Open company loans")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(Theme.darkGray)
+
+            ForEach(loans) { loan in
+                HStack {
+                    Text(loan.label)
+                        .font(.subheadline)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Remaining \(LocationPayrollViewModel.formatCurrency(loan.amountDue))")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.orange)
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .oplixCard()
     }
 }
 

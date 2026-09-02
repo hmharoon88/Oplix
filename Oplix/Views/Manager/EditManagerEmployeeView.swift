@@ -20,19 +20,18 @@ struct EditManagerEmployeeView: View {
     @State private var locationWorkingHoursStart: [String: Date] = [:] // Working hours start per location
     @State private var locationWorkingHoursEnd: [String: Date] = [:] // Working hours end per location
     @State private var hourlyRate = ""
+    @State private var loans: [EmployeeLoan] = []
     @State private var canTakeRegister = false
     @State private var canSubmitLottery = false
     @State private var is24Hours = false
     @State private var selectedLocationIds: Set<String> = []
     @State private var showingError = false
     @State private var errorMessage = ""
-    @State private var showingSuccess = false
     @State private var scheduleConflicts: [String: [String]] = [:] // locationId: [conflicting location names]
     @State private var hasLoadedData = false // Prevent multiple loads
 
     // Password change (mirrors EmployeeDetailView UX so credentials work the
     // same way no matter which entry point you used to reach the editor).
-    @State private var showingChangePassword = false
     /// When true, the password field uses plain text so the manager can read it.
     @State private var showPlaintextPassword = false
 
@@ -46,6 +45,7 @@ struct EditManagerEmployeeView: View {
     @State private var canViewLotteryData = false
     @State private var canEditSchedules = false
     @State private var canViewReports = false
+    @State private var canManagePayroll = false
 
     // Role promotion / demotion. `selectedRole` is what's currently
     // visible in the picker and drives the supervisor section visibility.
@@ -97,10 +97,12 @@ struct EditManagerEmployeeView: View {
         _canViewLotteryData = State(initialValue: employee.canViewLotteryData ?? false)
         _canEditSchedules = State(initialValue: employee.canEditSchedules ?? false)
         _canViewReports = State(initialValue: employee.canViewReports ?? false)
+        _canManagePayroll = State(initialValue: employee.canManagePayroll ?? false)
         
         if let rate = employee.hourlyRate {
             _hourlyRate = State(initialValue: String(format: "%.2f", rate))
         }
+        _loans = State(initialValue: (employee.loans ?? []).map { EmployeeLoan.preparedForSave($0) })
         
         // Initialize location schedules
         var schedules: [String: WeeklySchedule] = [:]
@@ -153,28 +155,18 @@ struct EditManagerEmployeeView: View {
             Form {
                 scheduleConflictBannerSection
                 employeeDetailsSection
+                companyLoansSection
                 assignToLocationsSection
                 scheduleSettingsSection
-                compensationSection
-                roleSection
-                permissionsSection
+                roleAndPermissionsSection
                 if isSupervisor {
                     supervisorPermissionsSection
                 }
-                loginCredentialsSection
             }
+            .listSectionSpacing(.compact)
+            .environment(\.defaultMinListRowHeight, 36)
         }
-        .sheet(isPresented: $showingChangePassword) {
-            ChangePasswordView(
-                employeeName: employee.name,
-                onSave: { newPassword in
-                    password = newPassword
-                    showingChangePassword = false
-                },
-                onCancel: { showingChangePassword = false }
-            )
-        }
-        .navigationTitle("Edit Employee")
+        .navigationTitle(employee.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -195,13 +187,6 @@ struct EditManagerEmployeeView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
-        }
-        .alert("Success", isPresented: $showingSuccess) {
-            Button("OK", role: .cancel) {
-                dismiss()
-            }
-        } message: {
-            Text("Employee updated successfully")
         }
         .alert(
             pendingRoleChange == .supervisor ? "Promote to Supervisor?" : "Demote to Employee?",
@@ -225,6 +210,7 @@ struct EditManagerEmployeeView: View {
                     canViewRegisterData = false
                     canViewLotteryData = false
                     canViewReports = false
+                    canManagePayroll = false
                 }
                 pendingRoleChange = nil
             }
@@ -334,28 +320,42 @@ struct EditManagerEmployeeView: View {
     private var scheduleConflictBannerSection: some View {
         if hasScheduleConflicts {
             Section {
-                HStack {
+                Label {
+                    Text("Fix overlapping shift times before saving.")
+                        .font(.caption)
+                } icon: {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Schedule Conflicts Detected")
-                            .font(.headline)
-                            .foregroundColor(.orange)
-                        Text("Fix overlapping shift times between locations before saving.")
-                            .font(.caption)
-                            .foregroundColor(.black)
-                    }
                 }
-                .padding(.vertical, 4)
             }
         }
     }
 
     @ViewBuilder
     private var employeeDetailsSection: some View {
-        Section("Employee Details") {
-            TextField("Employee Name", text: $name)
+        Section("Employee") {
+            TextField("Name", text: $name)
                 .textInputAutocapitalization(.words)
+            TextField("Hourly rate", text: $hourlyRate)
+                .keyboardType(.decimalPad)
+            HStack {
+                Text("Username")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(employee.username)
+                    .foregroundColor(.secondary)
+                    .font(.subheadline)
+            }
+            HStack {
+                Text("Email")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(generatedEmail)
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
             HStack(spacing: 8) {
                 Group {
                     if showPlaintextPassword {
@@ -380,8 +380,85 @@ struct EditManagerEmployeeView: View {
     }
 
     @ViewBuilder
+    private var companyLoansSection: some View {
+        Section {
+            if loans.isEmpty {
+                Text("No company loans")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach($loans) { $loan in
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Loan name", text: $loan.label)
+                        HStack {
+                            Text("Total loan amount")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            TextField("0.00", text: loanOriginalAmountBinding(for: $loan))
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(maxWidth: 120)
+                        }
+                        if $loan.wrappedValue.originalAmount > 0.005 {
+                            HStack {
+                                Text("Remaining")
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text(LocationPayrollViewModel.formatCurrency($loan.wrappedValue.amountDue))
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        Toggle("Active", isOn: $loan.isActive)
+                    }
+                    .padding(.vertical, 2)
+                }
+                .onDelete { indexSet in
+                    loans.remove(atOffsets: indexSet)
+                }
+            }
+
+            Button("Add loan") {
+                loans.append(EmployeeLoan(label: "Advance", originalAmount: 0))
+            }
+        } header: {
+            Text("Company Loans")
+        } footer: {
+            Text("Total loan and remaining start equal (e.g. both $500). Remaining drops only after you save payroll with a loan deduction.")
+                .font(.caption2)
+        }
+    }
+
+    private func loanOriginalAmountBinding(for loan: Binding<EmployeeLoan>) -> Binding<String> {
+        Binding(
+            get: {
+                loan.wrappedValue.originalAmount == 0
+                    ? ""
+                    : String(format: "%.2f", loan.wrappedValue.originalAmount)
+            },
+            set: { newValue in
+                let amount = Double(newValue) ?? 0
+                var updated = loan.wrappedValue
+                let previousOriginal = updated.originalAmount
+                let remaining = updated.remainingBalance
+                updated.originalAmount = amount
+                // Keep Remaining in lockstep with Total until a real deduction
+                // (remaining still 0 / unset, or still equal to the old total).
+                let shouldMatchTotal =
+                    remaining < 0.005 || abs(remaining - previousOriginal) < 0.01
+                if shouldMatchTotal {
+                    updated.remainingBalance = amount
+                } else if remaining > amount {
+                    updated.remainingBalance = amount
+                }
+                loan.wrappedValue = updated
+            }
+        )
+    }
+
+    @ViewBuilder
     private var assignToLocationsSection: some View {
-        Section("Assign to Locations") {
+        Section("Locations") {
             if viewModel.locations.isEmpty {
                 Text("No locations available")
                     .font(.caption)
@@ -423,25 +500,16 @@ struct EditManagerEmployeeView: View {
                         }
                     }
                 }
-        } header: {
-            Text("Schedule Settings")
         } footer: {
             if is24Hours {
-                Text("24/7 shift time allows this employee at multiple locations without overlap warnings.")
+                Text("Allows this employee at multiple locations without overlap warnings.")
+                    .font(.caption2)
             }
         }
     }
 
     @ViewBuilder
-    private var compensationSection: some View {
-        Section("Compensation") {
-            TextField("Hourly Rate (e.g., 25.50)", text: $hourlyRate)
-                .keyboardType(.decimalPad)
-        }
-    }
-
-    @ViewBuilder
-    private var roleSection: some View {
+    private var roleAndPermissionsSection: some View {
         Section {
             Picker("Role", selection: $selectedRole) {
                 Text("Employee").tag(User.UserRole.employee)
@@ -449,84 +517,35 @@ struct EditManagerEmployeeView: View {
             }
             .pickerStyle(.segmented)
             .oplixSegmentedPickerTint()
-        } header: {
-            Text("Role")
-        } footer: {
-            roleSectionFooter
-        }
-    }
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
 
-    @ViewBuilder
-    private var roleSectionFooter: some View {
-        if selectedRole != originalRole {
-            let message = selectedRole == .supervisor
-                ? "On save, \(employee.name) will be promoted to supervisor. They'll need to log out and back in to see supervisor controls."
-                : "On save, \(employee.name) will be demoted to a regular employee. All supervisor permissions will be cleared. They'll need to log out and back in for the change to take effect."
-            Text(message)
-                .foregroundColor(.orange)
-        }
-    }
-
-    @ViewBuilder
-    private var permissionsSection: some View {
-        Section("Permissions") {
             Toggle("Can Take Register", isOn: $canTakeRegister)
             Toggle("Can Submit Lottery", isOn: $canSubmitLottery)
+        } header: {
+            Text("Role & Permissions")
+        } footer: {
+            if selectedRole != originalRole {
+                Text(selectedRole == .supervisor
+                     ? "On save, \(employee.name) will be promoted. They must log out and back in."
+                     : "On save, supervisor permissions will be cleared. They must log out and back in.")
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+            }
         }
     }
 
     @ViewBuilder
     private var supervisorPermissionsSection: some View {
-        Section {
-            Toggle("Can View Employee Data", isOn: $canViewEmployeeData)
-            Toggle("Can Manage Tasks", isOn: $canManageTasks)
-            Toggle("Can Manage Documents", isOn: $canManageDocuments)
-            Toggle("Can Edit Schedules", isOn: $canEditSchedules)
-            Toggle("Can View Register Data", isOn: $canViewRegisterData)
-            Toggle("Can View Lottery Data", isOn: $canViewLotteryData)
-            Toggle("Can View Reports", isOn: $canViewReports)
-        } header: {
-            Text("Supervisor Permissions")
-        } footer: {
-            Text("Controls what this supervisor can do from their Supervisor tab.")
+        Section("Supervisor Permissions") {
+            Toggle("View Employee Data", isOn: $canViewEmployeeData)
+            Toggle("Manage Tasks", isOn: $canManageTasks)
+            Toggle("Manage Documents", isOn: $canManageDocuments)
+            Toggle("Edit Schedules", isOn: $canEditSchedules)
+            Toggle("View Register Data", isOn: $canViewRegisterData)
+            Toggle("View Lottery Data", isOn: $canViewLotteryData)
+            Toggle("View Reports", isOn: $canViewReports)
+            Toggle("Manage Payroll", isOn: $canManagePayroll)
         }
-    }
-
-    @ViewBuilder
-    private var loginCredentialsSection: some View {
-        Section("Login Credentials") {
-            HStack {
-                Text("Username")
-                Spacer()
-                Text(employee.username)
-                    .foregroundColor(.secondary)
-                    .font(.caption)
-            }
-            HStack {
-                Text("Email")
-                Spacer()
-                Text(generatedEmail)
-                    .foregroundColor(.secondary)
-                    .font(.caption)
-            }
-            Button(action: { showingChangePassword = true }) {
-                HStack {
-                    Image(systemName: "lock.fill")
-                        .foregroundColor(Theme.cloudBlue)
-                    Text(passwordButtonLabel)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-    }
-
-    private var passwordButtonLabel: String {
-        let stored = employee.password
-        let hasPassword = !(stored == nil || stored?.isEmpty == true)
-        return hasPassword ? "Change Password" : "Set Password"
     }
     
     private func loadEmployeeData() {
@@ -685,6 +704,7 @@ struct EditManagerEmployeeView: View {
             updatedEmployee.workingHoursEnd = endTime
             updatedEmployee.is24Hours = is24Hours // Save 24/7 status
             updatedEmployee.hourlyRate = rate
+            updatedEmployee.loans = loans.isEmpty ? nil : loans.map { EmployeeLoan.preparedForSave($0) }
             updatedEmployee.canTakeRegister = canTakeRegister
             updatedEmployee.canSubmitLottery = canSubmitLottery
 
@@ -703,6 +723,7 @@ struct EditManagerEmployeeView: View {
                 updatedEmployee.canViewRegisterData = canViewRegisterData
                 updatedEmployee.canViewLotteryData = canViewLotteryData
                 updatedEmployee.canViewReports = canViewReports
+                updatedEmployee.canManagePayroll = canManagePayroll
             } else {
                 updatedEmployee.canViewEmployeeData = false
                 updatedEmployee.canManageTasks = false
@@ -711,6 +732,7 @@ struct EditManagerEmployeeView: View {
                 updatedEmployee.canViewRegisterData = false
                 updatedEmployee.canViewLotteryData = false
                 updatedEmployee.canViewReports = false
+                updatedEmployee.canManagePayroll = false
             }
 
             print("🔵 Saving employee with is24Hours: \(is24Hours)")
@@ -735,7 +757,7 @@ struct EditManagerEmployeeView: View {
                 try await viewModel.updateEmployeePassword(employeeId: employee.id, newPassword: password)
             }
 
-            showingSuccess = true
+            dismiss()
         } catch {
             errorMessage = error.localizedDescription
             showingError = true
@@ -744,125 +766,109 @@ struct EditManagerEmployeeView: View {
     
     @ViewBuilder
     private func locationScheduleRow(for location: Location) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Location Toggle
+        VStack(alignment: .leading, spacing: 6) {
             Toggle(location.name, isOn: locationSelectionBinding(for: location))
-            
-            // Schedule Editor (shown when location is selected)
-            VStack(alignment: .leading, spacing: 12) {
-                Divider()
-                    .padding(.vertical, 4)
-                
-                HStack {
-                    Text("Schedule for \(location.name)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fontWeight(.medium)
-                    
-                    Spacer()
-                    
-                    // Show conflict warning
+
+            if selectedLocationIds.contains(location.id) {
+                VStack(alignment: .leading, spacing: 6) {
                     if !is24Hours,
                        let locationConflicts = scheduleConflicts[location.id],
                        !locationConflicts.isEmpty {
-                        HStack(spacing: 4) {
+                        Label {
+                            Text("Conflicts with \(locationConflicts.joined(separator: ", "))")
+                                .font(.caption2)
+                        } icon: {
                             Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
                                 .font(.caption2)
-                            Text("Conflicts with: \(locationConflicts.joined(separator: ", "))")
-                                .font(.caption2)
-                                .foregroundColor(.orange)
                         }
+                        .foregroundColor(.orange)
                     }
-                }
-                
-                Toggle("Set Weekly Schedule", isOn: Binding(
-                    get: { locationUseWeeklySchedule[location.id] ?? true },
-                    set: {
-                        locationUseWeeklySchedule[location.id] = $0
-                        // When weekly schedule is enabled, disable 24/7
-                        if $0 {
-                            is24Hours = false
-                        }
-                        checkConflicts(for: location.id)
-                    }
-                ))
-                .disabled(is24Hours)
-                .foregroundColor(is24Hours ? Theme.darkGray : .primary)
-                
-                if locationUseWeeklySchedule[location.id] ?? true && !is24Hours {
-                    WeeklyScheduleEditor(schedule: Binding(
-                        get: { locationSchedules[location.id] ?? WeeklySchedule() },
+
+                    Toggle("Weekly schedule", isOn: Binding(
+                        get: { locationUseWeeklySchedule[location.id] ?? true },
                         set: {
-                            locationSchedules[location.id] = $0
+                            locationUseWeeklySchedule[location.id] = $0
+                            if $0 { is24Hours = false }
                             checkConflicts(for: location.id)
                         }
                     ))
+                    .font(.subheadline)
                     .disabled(is24Hours)
-                    .opacity(is24Hours ? 0.5 : 1.0)
-                } else if !is24Hours {
-                    Toggle("Set Working Hours", isOn: Binding(
-                        get: { locationHasWorkingHours[location.id] ?? false },
-                        set: {
-                            locationHasWorkingHours[location.id] = $0
-                            // Initialize default times if not already set when toggling on
-                            if $0 {
-                                if locationWorkingHoursStart[location.id] == nil {
-                                    var components = DateComponents()
-                                    components.hour = 9
-                                    components.minute = 0
-                                    locationWorkingHoursStart[location.id] = Calendar.current.date(from: components) ?? Date()
-                                }
-                                if locationWorkingHoursEnd[location.id] == nil {
-                                    var components = DateComponents()
-                                    components.hour = 17
-                                    components.minute = 0
-                                    locationWorkingHoursEnd[location.id] = Calendar.current.date(from: components) ?? Date()
-                                }
+
+                    if locationUseWeeklySchedule[location.id] ?? true && !is24Hours {
+                        WeeklyScheduleEditor(schedule: Binding(
+                            get: { locationSchedules[location.id] ?? WeeklySchedule() },
+                            set: {
+                                locationSchedules[location.id] = $0
+                                checkConflicts(for: location.id)
                             }
-                            checkConflicts(for: location.id)
+                        ))
+                        .disabled(is24Hours)
+                        .opacity(is24Hours ? 0.5 : 1.0)
+                    } else if !is24Hours {
+                        Toggle("Working hours", isOn: Binding(
+                            get: { locationHasWorkingHours[location.id] ?? false },
+                            set: {
+                                locationHasWorkingHours[location.id] = $0
+                                if $0 {
+                                    if locationWorkingHoursStart[location.id] == nil {
+                                        var components = DateComponents()
+                                        components.hour = 9
+                                        components.minute = 0
+                                        locationWorkingHoursStart[location.id] = Calendar.current.date(from: components) ?? Date()
+                                    }
+                                    if locationWorkingHoursEnd[location.id] == nil {
+                                        var components = DateComponents()
+                                        components.hour = 17
+                                        components.minute = 0
+                                        locationWorkingHoursEnd[location.id] = Calendar.current.date(from: components) ?? Date()
+                                    }
+                                }
+                                checkConflicts(for: location.id)
+                            }
+                        ))
+                        .font(.subheadline)
+
+                        if locationHasWorkingHours[location.id] ?? false {
+                            DatePicker("Start", selection: Binding(
+                                get: {
+                                    locationWorkingHoursStart[location.id] ?? {
+                                        var components = DateComponents()
+                                        components.hour = 9
+                                        components.minute = 0
+                                        return Calendar.current.date(from: components) ?? Date()
+                                    }()
+                                },
+                                set: {
+                                    locationWorkingHoursStart[location.id] = $0
+                                    checkConflicts(for: location.id)
+                                }
+                            ), displayedComponents: .hourAndMinute)
+                            .font(.subheadline)
+
+                            DatePicker("End", selection: Binding(
+                                get: {
+                                    locationWorkingHoursEnd[location.id] ?? {
+                                        var components = DateComponents()
+                                        components.hour = 17
+                                        components.minute = 0
+                                        return Calendar.current.date(from: components) ?? Date()
+                                    }()
+                                },
+                                set: {
+                                    locationWorkingHoursEnd[location.id] = $0
+                                    checkConflicts(for: location.id)
+                                }
+                            ), displayedComponents: .hourAndMinute)
+                            .font(.subheadline)
                         }
-                    ))
-                    
-                    if locationHasWorkingHours[location.id] ?? false {
-                        DatePicker("Start Time", selection: Binding(
-                            get: {
-                                if let date = locationWorkingHoursStart[location.id] {
-                                    return date
-                                }
-                                var components = DateComponents()
-                                components.hour = 9
-                                components.minute = 0
-                                return Calendar.current.date(from: components) ?? Date()
-                            },
-                            set: {
-                                locationWorkingHoursStart[location.id] = $0
-                                checkConflicts(for: location.id)
-                            }
-                        ), displayedComponents: .hourAndMinute)
-                        
-                        DatePicker("End Time", selection: Binding(
-                            get: {
-                                if let date = locationWorkingHoursEnd[location.id] {
-                                    return date
-                                }
-                                var components = DateComponents()
-                                components.hour = 17
-                                components.minute = 0
-                                return Calendar.current.date(from: components) ?? Date()
-                            },
-                            set: {
-                                locationWorkingHoursEnd[location.id] = $0
-                                checkConflicts(for: location.id)
-                            }
-                        ), displayedComponents: .hourAndMinute)
                     }
                 }
+                .padding(.leading, 8)
+                .padding(.vertical, 4)
+                .background(Color.gray.opacity(0.08))
+                .cornerRadius(6)
             }
-            .padding(.leading, 20)
-            .padding(.vertical, 8)
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(8)
         }
     }
     

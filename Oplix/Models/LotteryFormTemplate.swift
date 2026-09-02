@@ -21,13 +21,18 @@ struct LotteryFormTemplate: Codable {
     /// `terminalNumber` set to 1, 2, 3, …
     var terminalNumber: Int?
 
+    /// When set, lottery shift close on this terminal is blocked until
+    /// the reorganize session is saved or cancelled in Pack inventory.
+    var rackReorganizeLock: LotteryRackReorganizeLock?
+
     init(
         locationId: String,
         rows: [LotteryFormTemplateRow] = [],
         lastUpdated: Date = Date(),
         lotteryRegisterAmount: String = "",
         reverseOrder: Bool = false,
-        terminalNumber: Int? = nil
+        terminalNumber: Int? = nil,
+        rackReorganizeLock: LotteryRackReorganizeLock? = nil
     ) {
         self.locationId = locationId
         self.rows = rows
@@ -35,6 +40,7 @@ struct LotteryFormTemplate: Codable {
         self.lotteryRegisterAmount = lotteryRegisterAmount
         self.reverseOrder = reverseOrder
         self.terminalNumber = terminalNumber
+        self.rackReorganizeLock = rackReorganizeLock
     }
 
     /// Effective terminal number for storage / display, treating a

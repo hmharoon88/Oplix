@@ -118,17 +118,34 @@ struct LocationDetailView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Button {
-                            showingEditLocation = true
-                        } label: {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(Theme.cloudBlue)
-                                .frame(width: 36, height: 36)
-                                .background(Theme.cloudBlue.opacity(0.12))
-                                .clipShape(Circle())
+                        HStack(spacing: 8) {
+                            NavigationLink {
+                                LocationNotificationSettingsView(viewModel: viewModel)
+                                    .onDisappear {
+                                        Task { await alertsViewModel.loadAlerts() }
+                                    }
+                            } label: {
+                                Image(systemName: "bell.badge")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(Theme.cloudBlue)
+                                    .frame(width: 36, height: 36)
+                                    .background(Theme.cloudBlue.opacity(0.12))
+                                    .clipShape(Circle())
+                            }
+                            .accessibilityLabel("Notification settings")
+
+                            Button {
+                                showingEditLocation = true
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(Theme.cloudBlue)
+                                    .frame(width: 36, height: 36)
+                                    .background(Theme.cloudBlue.opacity(0.12))
+                                    .clipShape(Circle())
+                            }
+                            .accessibilityLabel("Edit location")
                         }
-                        .accessibilityLabel("Edit location")
                     }
                     .padding()
                     .background(Theme.cloudWhite)
@@ -594,6 +611,8 @@ struct LocationDetailView: View {
             section = .tasks
         case .overduePayables:
             section = .payables
+        case .overdueReceivables:
+            section = .receivables
         case .expiringDocs:
             section = .documents
         case .scheduleGaps:

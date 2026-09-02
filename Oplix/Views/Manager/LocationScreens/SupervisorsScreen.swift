@@ -113,6 +113,7 @@ struct AddSupervisorView: View {
     @State private var canEditSchedules = true // Default: supervisors can edit employee schedules
     @State private var canManageTasks = true // Default: supervisors can add and check tasks
     @State private var canManageDocuments = true // Default: supervisors can add and manage documents
+    @State private var canManagePayroll = false
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var showingSuccess = false
@@ -163,6 +164,8 @@ struct AddSupervisorView: View {
                             .help("Allows supervisor to add and check tasks for this location")
                         Toggle("Can Manage Documents", isOn: $canManageDocuments)
                             .help("Allows supervisor to add and manage documents for this location")
+                        Toggle("Can Manage Payroll", isOn: $canManagePayroll)
+                            .help("Allows supervisor to run payroll and view past pay runs for this location")
                     }
                     
                     Section("Auto-Generated") {
@@ -256,7 +259,8 @@ struct AddSupervisorView: View {
                 canSubmitLottery: canSubmitLottery,
                 canEditSchedules: canEditSchedules,
                 canManageTasks: canManageTasks,
-                canManageDocuments: canManageDocuments
+                canManageDocuments: canManageDocuments,
+                canManagePayroll: canManagePayroll
             )
             createdSupervisorInfo = info
             viewModel.errorMessage = nil

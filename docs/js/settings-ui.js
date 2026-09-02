@@ -127,6 +127,9 @@
                     ${toggleRow("Location & role changes", null, f.assignment, "notif_assignment")}
                     ${toggleRow("Shift end summary (email)", null, f.shiftSummary, "notif_shiftSummary")}
                     ${toggleRow("Cash variance alert", null, f.cashAlert, "notif_cashAlert")}
+                    ${toggleRow("Overdue payables & receivables", null, f.financeAlert, "notif_financeAlert")}
+                    ${toggleRow("Compliance & license expiry", null, f.complianceAlert, "notif_complianceAlert")}
+                    ${toggleRow("Due date reminders", "Per-item reminders you set on payables, to-dos, etc.", f.dueReminder, "notif_dueReminder")}
                     ${toggleRow("Daily digest (email)", "Off by default — opt in", f.dailyDigest, "notif_dailyDigest")}
                 </div>
             </div>
@@ -283,6 +286,9 @@
             assignment: !!q("notif_assignment")?.checked,
             shiftSummary: !!q("notif_shiftSummary")?.checked,
             cashAlert: !!q("notif_cashAlert")?.checked,
+            financeAlert: !!q("notif_financeAlert")?.checked,
+            complianceAlert: !!q("notif_complianceAlert")?.checked,
+            dueReminder: !!q("notif_dueReminder")?.checked,
             dailyDigest: !!q("notif_dailyDigest")?.checked,
             quietHoursEnabled: !!q("notif_quietEnabled")?.checked,
             quietStart: q("notif_quietStart")?.value || "22:00",

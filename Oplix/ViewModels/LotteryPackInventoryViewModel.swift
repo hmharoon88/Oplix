@@ -66,12 +66,13 @@ enum LotteryPackAssignError: LocalizedError {
     case templateSaveFailed(String)
     case packNotFound
     case packNotActive
-    case destinationBinOccupied
     case returnSaveFailed(String)
     case gameSaveFailed(String)
     case alreadyInStock
     case alreadyOnRack
     case stockSaveFailed(String)
+    case reorganizeLockedByOther(displayName: String?)
+    case reorganizeUnassignedRemaining(count: Int)
 
     var errorDescription: String? {
         switch self {
@@ -83,12 +84,18 @@ enum LotteryPackAssignError: LocalizedError {
         case .templateSaveFailed(let msg): return msg
         case .packNotFound: return "No active pack with that serial on this terminal."
         case .packNotActive: return "That pack isn't active on the rack."
-        case .destinationBinOccupied: return "That bin already has a pack. Move it somewhere empty, or return/replace first."
         case .returnSaveFailed(let msg): return msg
         case .gameSaveFailed(let msg): return msg
         case .alreadyInStock: return "That pack is already in stock."
-        case .alreadyOnRack: return "That pack is already on a bin. Use Move if you need to relocate it."
+        case .alreadyOnRack: return "That pack is already on a bin. Use Reorganize rack if you need to relocate it."
         case .stockSaveFailed(let msg): return msg
+        case .reorganizeLockedByOther(let name):
+            if let name, !name.isEmpty {
+                return "Rack reorganize is in progress by \(name). Finish or cancel there before starting another."
+            }
+            return "Rack reorganize is already in progress on this terminal. Finish or cancel it first."
+        case .reorganizeUnassignedRemaining(let count):
+            return "Assign \(count) unassigned pack(s) to bins before saving."
         }
     }
 }
@@ -106,8 +113,16 @@ final class LotteryPackInventoryViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var successMessage: String?
 
+    // MARK: - Rack reorganize draft (manager / supervisor)
+
+    @Published private(set) var isReorganizing = false
+    @Published private(set) var draftRows: [LotteryFormTemplateRow] = []
+    @Published var unassignedPacks: [UnassignedRackPack] = []
+    @Published private(set) var hasUnsavedReorganizeChanges = false
+
     let managerUserId: String
     let location: Location
+    let canReorganizeRack: Bool
 
     private let firebaseService = FirebaseService.shared
     private var templatesByTerminal: [Int: LotteryFormTemplate] = [:]
@@ -131,9 +146,10 @@ final class LotteryPackInventoryViewModel: ObservableObject {
         LotteryGameTicketDefaults.suggestionUsesCatalog(value: value, from: gameDatabase)
     }
 
-    init(managerUserId: String, location: Location) {
+    init(managerUserId: String, location: Location, canReorganizeRack: Bool = false) {
         self.managerUserId = managerUserId
         self.location = location
+        self.canReorganizeRack = canReorganizeRack
         self.selectedTerminal = 1
     }
 
@@ -167,60 +183,6 @@ final class LotteryPackInventoryViewModel: ObservableObject {
         ) {
             templatesByTerminal[selectedTerminal] = fresh
             rebuildRackRows()
-        }
-    }
-
-    /// Move an existing pack to an empty bin — no sales or return math.
-    func movePack(fromRowId: String, toRowId: String) async throws {
-        await refreshSelectedTemplateFromServer()
-        guard var template = templatesByTerminal[selectedTerminal] else {
-            throw LotteryPackAssignError.noMatchingBin
-        }
-        guard let fromIndex = template.rows.firstIndex(where: { $0.id == fromRowId }),
-              let toIndex = template.rows.firstIndex(where: { $0.id == toRowId }) else {
-            throw LotteryPackAssignError.noMatchingBin
-        }
-        guard fromIndex != toIndex else { return }
-
-        let source = template.rows[fromIndex]
-        guard rowHasActivePack(source), let serial = source.packSerial, !serial.isEmpty else {
-            throw LotteryPackAssignError.packNotActive
-        }
-        guard !rowHasActivePack(template.rows[toIndex]) else {
-            throw LotteryPackAssignError.destinationBinOccupied
-        }
-
-        template.rows[toIndex].gameNumber = source.gameNumber
-        template.rows[toIndex].value = source.value
-        template.rows[toIndex].tickets = source.tickets
-        template.rows[toIndex].packSerial = source.packSerial
-        template.rows[toIndex].packStatus = source.packStatus ?? .active
-        template.rows[toIndex].beginningNumber = source.beginningNumber
-        template.rows[toIndex].endingNumber = source.endingNumber
-        template.rows[toIndex].sold = source.sold
-        template.rows[toIndex].dollar = source.dollar
-        template.rows[toIndex].books = source.books
-
-        clearBinRow(&template.rows[fromIndex])
-
-        isSaving = true
-        errorMessage = nil
-        successMessage = nil
-        defer { isSaving = false }
-
-        do {
-            try await firebaseService.saveLotteryFormTemplate(
-                userId: managerUserId,
-                locationId: location.id,
-                template: template
-            )
-            templatesByTerminal[selectedTerminal] = template
-            rebuildRackRows()
-            let fromBin = displayBinNumber(for: source, at: fromIndex)
-            let toBin = displayBinNumber(for: template.rows[toIndex], at: toIndex)
-            successMessage = "Moved pack \(serial) from bin \(fromBin) to bin \(toBin) (no sales change)."
-        } catch {
-            throw LotteryPackAssignError.templateSaveFailed(error.localizedDescription)
         }
     }
 
@@ -567,7 +529,7 @@ final class LotteryPackInventoryViewModel: ObservableObject {
         }
 
         let dollars = formatCurrency(preview.soldDollars)
-        return "Bin \(row.binNumber) pack \(preview.packSerial) will be recorded as finished: Begin \(preview.beginningNumber) → 00 = \(preview.soldTickets) tickets (\(dollars)). That sale is added at the next shift close. Then pack \(barcode.packSerial) will be assigned with Begin \(barcode.ticketNumber.isEmpty ? "—" : barcode.ticketNumber)."
+        return "Bin \(row.binNumber) pack \(preview.packSerial) will be recorded as finished: Begin \(preview.beginningNumber) → 00 = \(preview.soldTickets) tickets (\(dollars)). That sale is added at the next shift close. Then pack \(barcode.packSerial) will be assigned to the bin (Begin/End unchanged)."
     }
 
     /// True when barcode is an open (non-sealed) pack — Begin will not be 00.
@@ -654,8 +616,8 @@ final class LotteryPackInventoryViewModel: ObservableObject {
             }
             message += ".\n\n"
         }
-        message += "Begin # will be set to \(top). At shift close, sales are counted from that Begin → the End # you scan — so tickets sold while this pack is on the rack are included.\n\n"
-        message += "Tickets sold before this assign are not added automatically. Only continue if that Begin # is correct."
+        message += "This pack will be assigned without changing Begin/End on the bin. At shift close, sales count from the bin's Begin → the End # you scan.\n\n"
+        message += "Tickets sold before this assign are not added automatically. Only continue if the bin's Begin # is already correct."
         return message
     }
 
@@ -745,7 +707,6 @@ final class LotteryPackInventoryViewModel: ObservableObject {
             OhioLotteryBarcodeParser.packSerialsMatch($0.packSerial, barcode.packSerial)
         })
         let isMove = sourceIndex != nil && sourceIndex != index
-        let preservedEnding = sourceIndex.map { template.rows[$0].endingNumber } ?? ""
 
         let existingRow = template.rows[index]
         let isReplacingDifferentPack = rowHasActivePack(existingRow)
@@ -756,8 +717,9 @@ final class LotteryPackInventoryViewModel: ObservableObject {
             && OhioLotteryBarcodeParser.gameNumbersMatch(existingRow.gameNumber, gameData.gameNumber)
 
         var closeoutToSave: LotteryPackCloseout?
-        // Same-game mid-shift swap: keep shift Begin and count Begin→End at close
-        // (no sold-out closeout). Different game still credits the old pack finished.
+        // Different-game replace: credit the old pack finished (Begin → 00) at next close.
+        // Same-game mid-shift: no closeout — shift still counts from the bin's existing Begin.
+        // Assign never writes Begin/End on the bin; those stay shift/close concerns.
         if isReplacingDifferentPack && !isSameGameReplace {
             let begin = existingRow.beginningNumber
             let tickets = existingRow.tickets
@@ -799,10 +761,7 @@ final class LotteryPackInventoryViewModel: ObservableObject {
             }
         }
 
-        let preservedBeginning = isSameGameReplace ? existingRow.beginningNumber : nil
-
         if !OhioLotteryBarcodeParser.packSerialsMatch(template.rows[index].packSerial, barcode.packSerial) {
-            template.rows[index].endingNumber = ""
             template.rows[index].sold = ""
             template.rows[index].dollar = ""
             template.rows[index].books = ""
@@ -814,18 +773,9 @@ final class LotteryPackInventoryViewModel: ObservableObject {
         template.rows[index].packSerial = barcode.packSerial
         template.rows[index].packStatus = .active
 
-        if let preservedBeginning, !preservedBeginning.isEmpty {
-            template.rows[index].beginningNumber = preservedBeginning
-        } else if !barcode.ticketNumber.isEmpty {
-            template.rows[index].beginningNumber = barcode.ticketNumber
-        }
-
-        if isMove, !preservedEnding.isEmpty {
-            template.rows[index].endingNumber = preservedEnding
-        }
-
         if let sourceIndex, sourceIndex != index {
-            clearBinRow(&template.rows[sourceIndex])
+            // Pack left this bin — keep that bin's Begin/End for the shift.
+            clearPackIdentityKeepingBeginEnd(&template.rows[sourceIndex])
         }
 
         let stockToConsume = stockPacks.first {
@@ -865,14 +815,17 @@ final class LotteryPackInventoryViewModel: ObservableObject {
             await reloadPendingReturns()
             rebuildRackRows()
             let binLabel = displayBinNumber(for: template.rows[index], at: index)
+            let beginLabel = template.rows[index].beginningNumber.isEmpty
+                ? "—"
+                : template.rows[index].beginningNumber
             if let closeoutToSave {
-                successMessage = "Finished pack \(closeoutToSave.packSerial) credited (\(closeoutToSave.soldTickets) tk). Pack \(barcode.packSerial) assigned to bin \(binLabel)."
+                successMessage = "Finished pack \(closeoutToSave.packSerial) credited (\(closeoutToSave.soldTickets) tk). Pack \(barcode.packSerial) assigned to bin \(binLabel). Begin/End unchanged."
             } else if isSameGameReplace {
-                successMessage = "Same-game pack \(barcode.packSerial) on bin \(binLabel). Shift still counts from Begin \(preservedBeginning ?? "—")."
+                successMessage = "Same-game pack \(barcode.packSerial) on bin \(binLabel). Begin \(beginLabel) unchanged — scan End at close."
             } else if isMove {
-                successMessage = "Pack \(barcode.packSerial) moved to bin \(binLabel)."
+                successMessage = "Pack \(barcode.packSerial) moved to bin \(binLabel). Begin/End on each bin unchanged."
             } else {
-                successMessage = "Pack \(barcode.packSerial) assigned to bin \(binLabel)."
+                successMessage = "Pack \(barcode.packSerial) assigned to bin \(binLabel). Begin/End unchanged."
             }
         } catch {
             throw LotteryPackAssignError.templateSaveFailed(error.localizedDescription)
@@ -1059,6 +1012,18 @@ final class LotteryPackInventoryViewModel: ObservableObject {
         row.books = ""
     }
 
+    /// Removes pack identity from a bin but leaves Begin/End for the shift.
+    private func clearPackIdentityKeepingBeginEnd(_ row: inout LotteryFormTemplateRow) {
+        row.packSerial = nil
+        row.packStatus = nil
+        row.gameNumber = ""
+        row.value = ""
+        row.tickets = ""
+        row.sold = ""
+        row.dollar = ""
+        row.books = ""
+    }
+
     private func formatCurrency(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
@@ -1157,6 +1122,213 @@ final class LotteryPackInventoryViewModel: ObservableObject {
         gameDatabase.append(game)
         gameDatabase.sort { $0.gameNumber.localizedStandardCompare($1.gameNumber) == .orderedAscending }
         return game
+    }
+
+    // MARK: - Rack reorganize draft
+
+    var canSaveReorganize: Bool {
+        isReorganizing && unassignedPacks.isEmpty && hasUnsavedReorganizeChanges
+    }
+
+    func draftRackRows(for terminal: Int) -> [LotteryPackRackRow] {
+        let rows = isReorganizing ? draftRows : (templatesByTerminal[terminal]?.rows ?? [])
+        guard let template = templatesByTerminal[terminal] else {
+            return rows.enumerated().map { index, row in
+                rackRow(from: row, terminal: terminal, index: index)
+            }
+        }
+        return rows.enumerated().map { index, row in
+            rackRow(from: row, terminal: terminal, in: template, index: index)
+        }
+    }
+
+    func startReorganize(userId: String, displayName: String?) async throws {
+        guard canReorganizeRack else { return }
+        await refreshSelectedTemplateFromServer()
+        guard var template = templatesByTerminal[selectedTerminal] else {
+            throw LotteryPackAssignError.noMatchingBin
+        }
+
+        if let lock = template.rackReorganizeLock {
+            if lock.userId != userId && !lock.isStale {
+                throw LotteryPackAssignError.reorganizeLockedByOther(displayName: lock.userDisplayName)
+            }
+        }
+
+        template.rackReorganizeLock = LotteryRackReorganizeLock(
+            userId: userId,
+            userDisplayName: displayName,
+            startedAt: Date(),
+            terminalNumber: selectedTerminal
+        )
+
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            try await firebaseService.saveLotteryFormTemplate(
+                userId: managerUserId,
+                locationId: location.id,
+                template: template
+            )
+            templatesByTerminal[selectedTerminal] = template
+            draftRows = template.rows
+            unassignedPacks = []
+            hasUnsavedReorganizeChanges = false
+            isReorganizing = true
+            errorMessage = nil
+        } catch {
+            throw LotteryPackAssignError.templateSaveFailed(error.localizedDescription)
+        }
+    }
+
+    func cancelReorganize(userId: String) async throws {
+        guard isReorganizing else { return }
+        await refreshSelectedTemplateFromServer()
+        guard var template = templatesByTerminal[selectedTerminal] else {
+            resetReorganizeDraft()
+            return
+        }
+
+        if let lock = template.rackReorganizeLock, lock.userId == userId || lock.isStale {
+            template.rackReorganizeLock = nil
+            isSaving = true
+            defer { isSaving = false }
+            try await firebaseService.saveLotteryFormTemplate(
+                userId: managerUserId,
+                locationId: location.id,
+                template: template
+            )
+            templatesByTerminal[selectedTerminal] = template
+        }
+
+        resetReorganizeDraft()
+        rebuildRackRows()
+    }
+
+    func draftMovePack(fromRowId: String, toRowId: String) {
+        guard isReorganizing, fromRowId != toRowId else { return }
+        guard let fromIndex = draftRows.firstIndex(where: { $0.id == fromRowId }),
+              let toIndex = draftRows.firstIndex(where: { $0.id == toRowId }) else { return }
+
+        let source = draftRows[fromIndex]
+        guard rowHasActivePack(source), let serial = source.packSerial, !serial.isEmpty else { return }
+
+        let fromBin = displayBinNumber(for: source, at: fromIndex)
+        let toBin = displayBinNumber(for: draftRows[toIndex], at: toIndex)
+
+        if rowHasActivePack(draftRows[toIndex]) {
+            unassignedPacks.append(unassignedPack(from: draftRows[toIndex], binLabel: toBin))
+        }
+
+        copyActivePack(from: source, to: &draftRows[toIndex])
+        clearBinRow(&draftRows[fromIndex])
+        hasUnsavedReorganizeChanges = true
+        successMessage = "Draft: moved pack \(serial) from bin \(fromBin) → bin \(toBin)."
+    }
+
+    func assignUnassignedPack(_ packId: String, toRowId: String) {
+        guard isReorganizing,
+              let packIndex = unassignedPacks.firstIndex(where: { $0.id == packId }),
+              let toIndex = draftRows.firstIndex(where: { $0.id == toRowId }) else { return }
+
+        let pack = unassignedPacks[packIndex]
+        let toBin = displayBinNumber(for: draftRows[toIndex], at: toIndex)
+
+        if rowHasActivePack(draftRows[toIndex]) {
+            unassignedPacks.append(unassignedPack(from: draftRows[toIndex], binLabel: toBin))
+        }
+
+        applyUnassignedPack(pack, to: &draftRows[toIndex])
+        unassignedPacks.remove(at: packIndex)
+        hasUnsavedReorganizeChanges = true
+        successMessage = "Draft: assigned Game \(pack.gameNumber) to bin \(toBin)."
+    }
+
+    func saveReorganize(userId: String) async throws {
+        guard isReorganizing else { return }
+        guard unassignedPacks.isEmpty else {
+            throw LotteryPackAssignError.reorganizeUnassignedRemaining(count: unassignedPacks.count)
+        }
+        guard hasUnsavedReorganizeChanges else {
+            try await cancelReorganize(userId: userId)
+            return
+        }
+
+        guard var template = templatesByTerminal[selectedTerminal] else {
+            throw LotteryPackAssignError.noMatchingBin
+        }
+
+        template.rows = draftRows
+        template.rackReorganizeLock = nil
+
+        isSaving = true
+        errorMessage = nil
+        successMessage = nil
+        defer { isSaving = false }
+
+        do {
+            try await firebaseService.saveLotteryFormTemplate(
+                userId: managerUserId,
+                locationId: location.id,
+                template: template
+            )
+            templatesByTerminal[selectedTerminal] = template
+            resetReorganizeDraft()
+            rebuildRackRows()
+            successMessage = "Rack layout saved. No sales change."
+        } catch {
+            throw LotteryPackAssignError.templateSaveFailed(error.localizedDescription)
+        }
+    }
+
+    private func resetReorganizeDraft() {
+        isReorganizing = false
+        draftRows = []
+        unassignedPacks = []
+        hasUnsavedReorganizeChanges = false
+    }
+
+    private func copyActivePack(from source: LotteryFormTemplateRow, to dest: inout LotteryFormTemplateRow) {
+        dest.gameNumber = source.gameNumber
+        dest.value = source.value
+        dest.tickets = source.tickets
+        dest.packSerial = source.packSerial
+        dest.packStatus = source.packStatus ?? .active
+        dest.beginningNumber = source.beginningNumber
+        dest.endingNumber = source.endingNumber
+        dest.sold = source.sold
+        dest.dollar = source.dollar
+        dest.books = source.books
+    }
+
+    private func unassignedPack(from row: LotteryFormTemplateRow, binLabel: String) -> UnassignedRackPack {
+        UnassignedRackPack(
+            id: UUID().uuidString,
+            gameNumber: row.gameNumber,
+            value: row.value,
+            tickets: row.tickets,
+            packSerial: row.packSerial ?? "",
+            packStatus: row.packStatus,
+            beginningNumber: row.beginningNumber,
+            endingNumber: row.endingNumber,
+            sold: row.sold,
+            dollar: row.dollar,
+            books: row.books,
+            fromBinLabel: binLabel
+        )
+    }
+
+    private func applyUnassignedPack(_ pack: UnassignedRackPack, to row: inout LotteryFormTemplateRow) {
+        row.gameNumber = pack.gameNumber
+        row.value = pack.value
+        row.tickets = pack.tickets
+        row.packSerial = pack.packSerial
+        row.packStatus = pack.packStatus ?? .active
+        row.beginningNumber = pack.beginningNumber
+        row.endingNumber = pack.endingNumber
+        row.sold = pack.sold
+        row.dollar = pack.dollar
+        row.books = pack.books
     }
 }
 

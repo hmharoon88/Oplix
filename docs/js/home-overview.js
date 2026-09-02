@@ -373,10 +373,11 @@
                 payables: [],
                 receivables: [],
                 documents: [],
+                complianceItems: [],
             };
         }
 
-        const [shifts, lotteryForms, payables, receivables, locationEmployees, documents] =
+        const [shifts, lotteryForms, payables, receivables, locationEmployees, documents, complianceItems] =
             await Promise.all([
                 fetchSubcollection(userId, locationId, "shifts"),
                 fetchSubcollection(userId, locationId, "lotteryForms"),
@@ -384,8 +385,9 @@
                 fetchSubcollection(userId, locationId, "receivables"),
                 fetchSubcollection(userId, locationId, "employees"),
                 fetchSubcollection(userId, locationId, "documents"),
+                fetchSubcollection(userId, locationId, "complianceItems"),
             ]);
-        return { shifts, lotteryForms, payables, receivables, locationEmployees, documents };
+        return { shifts, lotteryForms, payables, receivables, locationEmployees, documents, complianceItems };
     }
 
     function buildAlertsForLocation(location, bundle, nameLookup, managerTasks) {
@@ -397,8 +399,10 @@
             shifts: bundle.shifts || [],
             forms: bundle.lotteryForms || [],
             payables: bundle.payables || [],
+            receivables: bundle.receivables || [],
             employees: bundle.locationEmployees || [],
             documents: bundle.documents || [],
+            complianceItems: bundle.complianceItems || [],
             managerTasks: (managerTasks || []).filter((t) => t.locationId === location.id),
             facilityProfile: location.facilityProfile,
             profileSlotConfig: location.profileSlotConfig,
@@ -463,6 +467,13 @@
             completedAt:
                 patch.completedAt !== undefined ? patch.completedAt : base.completedAt,
         };
+        if (patch.dueReminder !== undefined) payload.dueReminder = patch.dueReminder;
+        if (!payload.dueDate) {
+            payload.dueReminder = firebase.firestore.FieldValue.delete();
+        }
+        if (patch.resetDueReminderSent) {
+            payload.dueReminderSentOn = firebase.firestore.FieldValue.delete();
+        }
         if (base.createdAt) payload.createdAt = base.createdAt;
         await OplixSaveBusy.run(async () => {
             await Store.save(userId, id, payload);
@@ -498,11 +509,16 @@
                 <label class="books-label">Notes
                     <textarea class="books-input" name="notes" rows="2" maxlength="500">${escapeHtml(v.notes)}</textarea>
                 </label>
+                ${window.OplixDueDateReminderModel ? OplixDueDateReminderModel.renderDueReminderFields(v.dueReminder) : ""}
                 <div class="dir-form-actions">
                     <button type="submit" class="btn">Save</button>
                     <button type="button" class="btn btn-nav-outline" data-todo-edit-cancel>Cancel</button>
                 </div>
             </form>`;
+        const form = slot.querySelector("[data-todo-edit-form]");
+        if (form && window.OplixDueDateReminderModel) {
+            OplixDueDateReminderModel.wireDueReminderForm(form);
+        }
         slot.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
 
@@ -577,10 +593,24 @@
                 const fd = new FormData(e.target);
                 const title = String(fd.get("title") || "").trim();
                 if (!title) return;
+                const dueDate = String(fd.get("dueDate") || "").trim();
+                const dueReminder = dueDate && window.OplixDueDateReminderModel
+                    ? OplixDueDateReminderModel.readDueReminderFromForm(e.target)
+                    : null;
+                const resetDueReminderSent = window.OplixDueDateReminderModel
+                    ? OplixDueDateReminderModel.shouldClearSentFlag(
+                          item.dueDate,
+                          dueDate,
+                          item.dueReminder,
+                          dueReminder
+                      )
+                    : false;
                 await persistOrgTodo(userId, id, {
                     title,
                     notes: String(fd.get("notes") || "").trim(),
-                    dueDate: String(fd.get("dueDate") || "").trim(),
+                    dueDate,
+                    dueReminder: dueDate ? dueReminder : null,
+                    resetDueReminderSent,
                 }, item);
                 const slot = card.querySelector("[data-todo-form-slot]");
                 if (slot) {

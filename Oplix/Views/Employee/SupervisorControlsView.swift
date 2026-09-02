@@ -80,6 +80,17 @@ struct SupervisorControlsView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+
+                            if employee.canManagePayroll == true {
+                                NavigationLink(value: SupervisorControl.payroll) {
+                                    SupervisorControlTile(
+                                        icon: "dollarsign.circle.fill",
+                                        title: "Payroll",
+                                        color: .green
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
                             
                             NavigationLink(value: SupervisorControl.payables) {
                                 SupervisorControlTile(
@@ -163,6 +174,12 @@ struct SupervisorControlsView: View {
                 } else {
                     Text("Error: Location not found")
                 }
+            case .payroll:
+                if let location = viewModel.location, let employee = viewModel.employee {
+                    SupervisorPayrollWrapperView(managerUserId: employee.managerUserId, locationId: location.id, currentUserRole: authViewModel.currentUser?.role)
+                } else {
+                    Text("Error: Location not found")
+                }
             case .payables:
                 if let location = viewModel.location, let employee = viewModel.employee {
                     PayablesView(userId: employee.managerUserId, locationId: location.id)
@@ -181,7 +198,7 @@ struct SupervisorControlsView: View {
 }
 
 enum SupervisorControl: String, Identifiable, Hashable {
-    case editSchedules, taskCheck, manageTasks, manageDocuments, payables, receivables
+    case editSchedules, taskCheck, manageTasks, manageDocuments, payroll, payables, receivables
 
     var id: String { rawValue }
 }
@@ -908,6 +925,29 @@ struct SupervisorTaskRow: View {
             Spacer()
         }
         .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Supervisor Payroll Wrapper View
+struct SupervisorPayrollWrapperView: View {
+    let managerUserId: String
+    let locationId: String
+    let currentUserRole: User.UserRole?
+    @StateObject private var viewModel: LocationDetailViewModel
+
+    init(managerUserId: String, locationId: String, currentUserRole: User.UserRole?) {
+        self.managerUserId = managerUserId
+        self.locationId = locationId
+        self.currentUserRole = currentUserRole
+        _viewModel = StateObject(wrappedValue: LocationDetailViewModel(userId: managerUserId, locationId: locationId, currentUserRole: currentUserRole))
+    }
+
+    var body: some View {
+        PayrollScreen(viewModel: viewModel)
+            .task(id: locationId) {
+                guard viewModel.location == nil else { return }
+                await viewModel.loadData()
+            }
     }
 }
 

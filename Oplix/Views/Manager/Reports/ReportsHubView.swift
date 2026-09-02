@@ -63,7 +63,7 @@ struct ReportsHubView: View {
                         .foregroundColor(.secondary)
                 }
             } else if viewModel.locations.isEmpty {
-                Text("No locations found. Add a location first.")
+                Text("No locations found. Add a facility on the Oplix web dashboard first.")
                     .foregroundColor(.secondary)
             } else {
                 Picker("Location", selection: Binding(
@@ -110,7 +110,7 @@ struct ReportsHubView: View {
         case .payroll:
             return "Hours and pay by employee for completed shifts at this location."
         case .register:
-            return "Sales, expenses, and register over/short from shift register data."
+            return "Daily sales and expenses from Daily books (web). Shift register data is included when employees enter it on shifts."
         }
     }
 

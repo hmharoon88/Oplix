@@ -104,6 +104,9 @@
                     Expiry date
                     <input class="books-input" name="expiryDate" type="date">
                 </label>
+                <div class="doc-reminder-slot" data-doc-reminder-slot hidden>
+                    ${window.OplixDueDateReminderModel ? OplixDueDateReminderModel.renderDueReminderFields(null) : ""}
+                </div>
                 <div class="dir-form-actions">
                     <button type="submit" class="btn">Upload</button>
                     <button type="button" class="btn btn-nav-outline" data-doc-cancel>Cancel</button>
@@ -157,9 +160,17 @@
 
             const form = slot.querySelector("[data-doc-form]");
             const expiryWrap = form?.querySelector("[data-doc-expiry-wrap]");
+            const reminderSlot = form?.querySelector("[data-doc-reminder-slot]");
+            const syncExpiry = (checked) => {
+                if (expiryWrap) expiryWrap.hidden = !checked;
+                if (reminderSlot) reminderSlot.hidden = !checked;
+            };
             form?.querySelector("[data-doc-has-expiry]")?.addEventListener("change", (e) => {
-                if (expiryWrap) expiryWrap.hidden = !e.target.checked;
+                syncExpiry(e.target.checked);
             });
+            if (form && window.OplixDueDateReminderModel) {
+                OplixDueDateReminderModel.wireDueReminderForm(form);
+            }
             form?.querySelector("[data-doc-cancel]")?.addEventListener("click", closeForm);
 
             form?.addEventListener("submit", async (e) => {
@@ -181,6 +192,7 @@
                 }
 
                 let expiryDate = null;
+                let dueReminder = null;
                 if (hasExpiry) {
                     if (!expiryStr) {
                         if (st) st.textContent = "Choose an expiry date or turn off expiry.";
@@ -190,6 +202,9 @@
                     if (Number.isNaN(expiryDate.getTime())) {
                         if (st) st.textContent = "Invalid expiry date.";
                         return;
+                    }
+                    if (window.OplixDueDateReminderModel) {
+                        dueReminder = OplixDueDateReminderModel.readDueReminderFromForm(form);
                     }
                 }
 
@@ -204,6 +219,7 @@
                             name,
                             file,
                             expiryDate,
+                            dueReminder,
                             uploadedBy: ctx.userId,
                             profileSlot: matchedSlot?.id,
                         });

@@ -33,8 +33,13 @@ struct Payable: Identifiable, Codable {
     var isPaid: Bool // Whether this payable has been paid
     var paidAt: Date? // Date when it was marked as paid
     var originalPayableId: String? // For recurring items, reference to the original
-    
-    init(id: String = UUID().uuidString, locationId: String, payTo: String, amount: Double, dueDate: Date? = nil, createdAt: Date = Date(), notes: String? = nil, frequency: RecurringFrequency = .none, isPaid: Bool = false, paidAt: Date? = nil, originalPayableId: String? = nil) {
+    /// Where this row was first created — `"ios"` or `"web"`. Used to scope push alerts.
+    var createdSource: String?
+    var dueReminder: DueDateReminder?
+    /// Set by Cloud Functions after a reminder push fires (`YYYY-MM-DD`).
+    var dueReminderSentOn: String?
+
+    init(id: String = UUID().uuidString, locationId: String, payTo: String, amount: Double, dueDate: Date? = nil, createdAt: Date = Date(), notes: String? = nil, frequency: RecurringFrequency = .none, isPaid: Bool = false, paidAt: Date? = nil, originalPayableId: String? = nil, createdSource: String? = nil, dueReminder: DueDateReminder? = nil, dueReminderSentOn: String? = nil) {
         self.id = id
         self.locationId = locationId
         self.payTo = payTo
@@ -46,11 +51,14 @@ struct Payable: Identifiable, Codable {
         self.isPaid = isPaid
         self.paidAt = paidAt
         self.originalPayableId = originalPayableId
+        self.createdSource = createdSource
+        self.dueReminder = dueReminder
+        self.dueReminderSentOn = dueReminderSentOn
     }
     
     enum CodingKeys: String, CodingKey {
         case id, locationId, payTo, amount, dueDate, createdAt, notes, frequency
-        case isPaid, paidAt, originalPayableId
+        case isPaid, paidAt, originalPayableId, createdSource, dueReminder, dueReminderSentOn
     }
     
     init(from decoder: Decoder) throws {
@@ -67,6 +75,9 @@ struct Payable: Identifiable, Codable {
         isPaid = try container.decodeIfPresent(Bool.self, forKey: .isPaid) ?? false
         paidAt = try container.decodeIfPresent(Date.self, forKey: .paidAt)
         originalPayableId = try container.decodeIfPresent(String.self, forKey: .originalPayableId)
+        createdSource = try container.decodeIfPresent(String.self, forKey: .createdSource)
+        dueReminder = try container.decodeIfPresent(DueDateReminder.self, forKey: .dueReminder)
+        dueReminderSentOn = try container.decodeIfPresent(String.self, forKey: .dueReminderSentOn)
     }
 }
 
@@ -82,8 +93,11 @@ struct Receivable: Identifiable, Codable {
     var isReceived: Bool // Whether this receivable has been received
     var receivedAt: Date? // Date when it was marked as received
     var originalReceivableId: String? // For recurring items, reference to the original
-    
-    init(id: String = UUID().uuidString, locationId: String, receiveFrom: String, amount: Double, dueDate: Date? = nil, createdAt: Date = Date(), notes: String? = nil, frequency: RecurringFrequency = .none, isReceived: Bool = false, receivedAt: Date? = nil, originalReceivableId: String? = nil) {
+    var createdSource: String?
+    var dueReminder: DueDateReminder?
+    var dueReminderSentOn: String?
+
+    init(id: String = UUID().uuidString, locationId: String, receiveFrom: String, amount: Double, dueDate: Date? = nil, createdAt: Date = Date(), notes: String? = nil, frequency: RecurringFrequency = .none, isReceived: Bool = false, receivedAt: Date? = nil, originalReceivableId: String? = nil, createdSource: String? = nil, dueReminder: DueDateReminder? = nil, dueReminderSentOn: String? = nil) {
         self.id = id
         self.locationId = locationId
         self.receiveFrom = receiveFrom
@@ -95,11 +109,14 @@ struct Receivable: Identifiable, Codable {
         self.isReceived = isReceived
         self.receivedAt = receivedAt
         self.originalReceivableId = originalReceivableId
+        self.createdSource = createdSource
+        self.dueReminder = dueReminder
+        self.dueReminderSentOn = dueReminderSentOn
     }
     
     enum CodingKeys: String, CodingKey {
         case id, locationId, receiveFrom, amount, dueDate, createdAt, notes, frequency
-        case isReceived, receivedAt, originalReceivableId
+        case isReceived, receivedAt, originalReceivableId, createdSource, dueReminder, dueReminderSentOn
     }
     
     init(from decoder: Decoder) throws {
@@ -116,6 +133,36 @@ struct Receivable: Identifiable, Codable {
         isReceived = try container.decodeIfPresent(Bool.self, forKey: .isReceived) ?? false
         receivedAt = try container.decodeIfPresent(Date.self, forKey: .receivedAt)
         originalReceivableId = try container.decodeIfPresent(String.self, forKey: .originalReceivableId)
+        createdSource = try container.decodeIfPresent(String.self, forKey: .createdSource)
+        dueReminder = try container.decodeIfPresent(DueDateReminder.self, forKey: .dueReminder)
+        dueReminderSentOn = try container.decodeIfPresent(String.self, forKey: .dueReminderSentOn)
+    }
+}
+
+// MARK: - App vs web source
+
+extension Payable {
+    /// Rows created on the web dashboard (books flow) are hidden on iOS.
+    var isAppManaged: Bool {
+        createdSource != "web"
+    }
+}
+
+extension Receivable {
+    var isAppManaged: Bool {
+        createdSource != "web"
+    }
+}
+
+extension Array where Element == Payable {
+    func appManagedOnly() -> [Payable] {
+        filter { $0.isAppManaged }
+    }
+}
+
+extension Array where Element == Receivable {
+    func appManagedOnly() -> [Receivable] {
+        filter { $0.isAppManaged }
     }
 }
 

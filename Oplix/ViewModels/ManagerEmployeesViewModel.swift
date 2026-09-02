@@ -88,6 +88,46 @@ class ManagerEmployeesViewModel: ObservableObject {
     func role(for employeeId: String) -> User.UserRole {
         userRoles[employeeId] ?? .employee
     }
+
+    /// Employees grouped under each location heading (and Unassigned).
+    /// Someone assigned to multiple stores appears under each of those stores.
+    struct EmployeeLocationSection: Identifiable {
+        let id: String
+        let title: String
+        let employees: [Employee]
+    }
+
+    var employeeSections: [EmployeeLocationSection] {
+        let sortedLocations = locations.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        var sections: [EmployeeLocationSection] = []
+
+        for location in sortedLocations {
+            let inLocation = employees
+                .filter { $0.assignedLocationIds.contains(location.id) }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            guard !inLocation.isEmpty else { continue }
+            sections.append(EmployeeLocationSection(
+                id: location.id,
+                title: location.name,
+                employees: inLocation
+            ))
+        }
+
+        let unassigned = employees
+            .filter { $0.assignedLocationIds.isEmpty }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        if !unassigned.isEmpty {
+            sections.append(EmployeeLocationSection(
+                id: "__unassigned__",
+                title: "Unassigned",
+                employees: unassigned
+            ))
+        }
+
+        return sections
+    }
     
     func createEmployee(name: String, password: String, workingHoursStart: String? = nil, workingHoursEnd: String? = nil, weeklySchedule: WeeklySchedule? = nil, is24Hours: Bool? = nil, assignedLocationIds: [String] = [], hourlyRate: Double? = nil, canTakeRegister: Bool = false, canSubmitLottery: Bool = false) async throws -> (username: String, email: String, password: String) {
         // Auto-generate username from name

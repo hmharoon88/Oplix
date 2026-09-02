@@ -97,8 +97,10 @@
         shifts,
         forms,
         payables,
+        receivables,
         employees,
         documents,
+        complianceItems,
         managerTasks,
         facilityProfile,
         profileSlotConfig,
@@ -110,6 +112,8 @@
         const alertOn = (typeId) => !NM || NM.isEnabled(settings, typeId);
         const profileLeadDays = NM?.leadDays(settings, "profile_expiry") ?? 60;
         const docLeadDays = NM?.leadDays(settings, "document_expiry") ?? 30;
+        const complianceLeadDays = NM?.leadDays(settings, "compliance_expiry") ?? 60;
+        const CM = window.OplixComplianceModel;
         const profileEntries = PM
             ? PM.normalizeProfileEntries(facilityProfile, profileSlotConfig)
             : {};
@@ -250,6 +254,22 @@
             });
         }
 
+        const overdueReceivables = (receivables || []).filter((r) => {
+            if (r.isReceived) return false;
+            const due = toDate(r.dueDate);
+            return due && startOfDay(due) < todayStart;
+        });
+        if (alertOn("receivables_overdue") && overdueReceivables.length) {
+            const total = overdueReceivables.reduce((s, r) => s + (r.amount || 0), 0);
+            alerts.push({
+                id: `receivables_${locationId}`,
+                severity: 2,
+                title: `${overdueReceivables.length} receivable${overdueReceivables.length === 1 ? "" : "s"} overdue · ${formatCurrency(total)}`,
+                subtitle: "",
+                sortKey: 20,
+            });
+        }
+
         if (alertOn("document_expiry")) {
         const docCutoff = addDays(now, docLeadDays);
         for (const doc of documents) {
@@ -287,6 +307,24 @@
                     sortKey: status.tone === "expired" ? 3 : 22,
                 });
             });
+        }
+
+        if (alertOn("compliance_expiry") && CM) {
+            const attention = (complianceItems || []).filter((item) => {
+                if (item.active === false) return false;
+                if (CM.isExpired(item)) return true;
+                if (CM.isRenewalOverdue && CM.isRenewalOverdue(item)) return true;
+                return CM.isExpiringSoon(item, complianceLeadDays);
+            });
+            if (attention.length) {
+                alerts.push({
+                    id: `compliance_${locationId}`,
+                    severity: attention.some((item) => CM.isExpired(item)) ? 0 : 2,
+                    title: `${attention.length} compliance record${attention.length === 1 ? "" : "s"} need attention`,
+                    subtitle: "",
+                    sortKey: 21,
+                });
+            }
         }
 
         const weekStart = (() => {

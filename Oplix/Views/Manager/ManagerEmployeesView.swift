@@ -10,6 +10,8 @@ import SwiftUI
 struct ManagerEmployeesView: View {
     let userId: String
     @StateObject private var viewModel: ManagerEmployeesViewModel
+    @State private var employeeToDelete: Employee?
+    @State private var showingDeleteConfirmation = false
     
     init(userId: String) {
         self.userId = userId
@@ -70,35 +72,59 @@ struct ManagerEmployeesView: View {
                         Spacer()
                     } else {
                         List {
-                            ForEach(viewModel.employees) { employee in
-                                NavigationLink(value: employee) {
-                                    ManagerEmployeeRow(employee: employee, viewModel: viewModel)
-                                }
-                                .listRowBackground(Color.clear)
-                            }
-                            .onDelete { indexSet in
-                                if let index = indexSet.first {
-                                    let employee = viewModel.employees[index]
-                                    Task {
-                                        await viewModel.deleteEmployee(employee)
+                            ForEach(viewModel.employeeSections) { section in
+                                Section {
+                                    ForEach(section.employees) { employee in
+                                        NavigationLink(value: employee) {
+                                            ManagerEmployeeRow(employee: employee, viewModel: viewModel)
+                                        }
+                                        .listRowBackground(Color.clear)
+                                        .listRowSeparator(.hidden)
+                                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                            Button(role: .destructive) {
+                                                employeeToDelete = employee
+                                                showingDeleteConfirmation = true
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                        }
                                     }
+                                } header: {
+                                    Text(section.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(Theme.darkGray)
+                                        .textCase(nil)
                                 }
                             }
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
                         .navigationDestination(for: Employee.self) { employee in
-                            print("🔵 ManagerEmployeesView - NavigationDestination triggered")
-                            print("   Employee: \(employee.name) (ID: \(employee.id))")
-                            print("   ViewModel employees count: \(viewModel.employees.count)")
-                            print("   ViewModel locations count: \(viewModel.locations.count)")
-                            return EditManagerEmployeeView(employee: employee, viewModel: viewModel)
+                            EditManagerEmployeeView(employee: employee, viewModel: viewModel)
                         }
                     }
                 }
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .alert("Delete Employee", isPresented: $showingDeleteConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    employeeToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    if let employee = employeeToDelete {
+                        Task {
+                            await viewModel.deleteEmployee(employee)
+                            employeeToDelete = nil
+                        }
+                    }
+                }
+            } message: {
+                if let employee = employeeToDelete {
+                    Text("Delete \(employee.name)? This removes their login and all facility assignments. This cannot be undone.")
+                }
+            }
             .task {
                 await viewModel.loadData()
             }
@@ -125,48 +151,37 @@ struct ManagerEmployeeRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text(employee.name)
-                    .font(.headline)
-                    .foregroundColor(.black)
-                if let role = resolvedRole {
-                    roleChip(for: role)
-                }
-                Spacer()
-                if let progress = progress {
-                    taskProgressBadge(completed: progress.completed, total: progress.assigned)
-                }
-                if !employee.assignedLocationIds.isEmpty {
-                    Text("\(employee.assignedLocationIds.count) location\(employee.assignedLocationIds.count == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundColor(Theme.cloudBlue)
-                } else {
-                    Text("Unassigned")
-                        .font(.caption)
-                        .foregroundColor(Theme.darkGray)
-                }
+        HStack(spacing: 8) {
+            Text(employee.name)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.black)
+                .lineLimit(1)
+            if let role = resolvedRole {
+                roleChip(for: role)
             }
-            
-            Text("Username: \(employee.username)")
-                .font(.subheadline)
-                .foregroundColor(Theme.darkGray)
-            
-            if !employee.assignedLocationIds.isEmpty {
-                let locationNames = employee.assignedLocationIds.compactMap { locationId in
-                    viewModel.locations.first(where: { $0.id == locationId })?.name
-                }
-                if !locationNames.isEmpty {
-                    Text("Locations: \(locationNames.joined(separator: ", "))")
-                        .font(.caption)
-                        .foregroundColor(Theme.cloudBlue)
-                }
+            Spacer(minLength: 4)
+            if let rate = employee.hourlyRate {
+                Text("\(formatHourlyRate(rate))/hr")
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(Theme.darkGray)
+            }
+            if let progress = progress {
+                taskProgressBadge(completed: progress.completed, total: progress.assigned)
             }
         }
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(Theme.cloudWhite)
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+        .cornerRadius(10)
+        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
+    }
+
+    private func formatHourlyRate(_ rate: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.maximumFractionDigits = rate.truncatingRemainder(dividingBy: 1) == 0 ? 0 : 2
+        return formatter.string(from: NSNumber(value: rate)) ?? String(format: "$%.2f", rate)
     }
 
     /// Small inline pill that surfaces the employee's User.role next to

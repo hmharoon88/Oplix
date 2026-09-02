@@ -15,6 +15,8 @@ struct OrgTodo: Identifiable, Equatable {
     var notes: String
     /// `YYYY-MM-DD` string — empty when no due date (matches web).
     var dueDate: String
+    var dueReminder: DueDateReminder?
+    var dueReminderSentOn: String?
     var isCompleted: Bool
     var completedAt: Date?
     var createdAt: Date?
@@ -25,6 +27,8 @@ struct OrgTodo: Identifiable, Equatable {
         title: String,
         notes: String = "",
         dueDate: String = "",
+        dueReminder: DueDateReminder? = nil,
+        dueReminderSentOn: String? = nil,
         isCompleted: Bool = false,
         completedAt: Date? = nil,
         createdAt: Date? = nil,
@@ -34,6 +38,8 @@ struct OrgTodo: Identifiable, Equatable {
         self.title = title
         self.notes = notes
         self.dueDate = dueDate
+        self.dueReminder = dueReminder
+        self.dueReminderSentOn = dueReminderSentOn
         self.isCompleted = isCompleted
         self.completedAt = completedAt
         self.createdAt = createdAt
@@ -50,6 +56,8 @@ struct OrgTodo: Identifiable, Equatable {
             title: title,
             notes: (data["notes"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
             dueDate: normalizeDueDate(data["dueDate"]),
+            dueReminder: parseDueReminder(data["dueReminder"]),
+            dueReminderSentOn: data["dueReminderSentOn"] as? String,
             isCompleted: data["isCompleted"] as? Bool ?? false,
             completedAt: parseFlexibleDate(data["completedAt"]),
             createdAt: parseFlexibleDate(data["createdAt"]),
@@ -60,6 +68,16 @@ struct OrgTodo: Identifiable, Equatable {
     private static func normalizeDueDate(_ value: Any?) -> String {
         guard let raw = value as? String, !raw.isEmpty else { return "" }
         return String(raw.prefix(10))
+    }
+
+    private static func parseDueReminder(_ value: Any?) -> DueDateReminder? {
+        guard let dict = value as? [String: Any] else { return nil }
+        let days = dict["daysBefore"] as? Int ?? (dict["daysBefore"] as? NSNumber)?.intValue ?? 0
+        return DueDateReminder.normalized(DueDateReminder(
+            enabled: dict["enabled"] as? Bool ?? false,
+            daysBefore: days,
+            push: dict["push"] as? Bool ?? true
+        ))
     }
 
     private static func parseFlexibleDate(_ value: Any?) -> Date? {

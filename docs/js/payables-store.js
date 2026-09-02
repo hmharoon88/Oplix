@@ -22,6 +22,7 @@
 
     async function save(userId, locationId, payable) {
         const p = M().normalizePayable(payable, locationId);
+        const isNew = !payable.createdAt;
         const id = p.id || newId();
         const payload = {
             id,
@@ -47,6 +48,12 @@
             payload.createdAt = p.createdAt;
         } else {
             payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+        }
+
+        if (p.createdSource) {
+            payload.createdSource = p.createdSource;
+        } else if (isNew) {
+            payload.createdSource = "web";
         }
 
         await colRef(userId, locationId).doc(id).set(payload, { merge: true });

@@ -75,6 +75,12 @@ struct NotificationPrefs: Codable, Equatable {
         var shiftSummary: Bool?
         /// Manager-only: cash variance / over-short alerts.
         var cashAlert: Bool?
+        /// Manager-only: overdue payables and receivables (push).
+        var financeAlert: Bool?
+        /// Manager-only: compliance, lease/license, and document expiry (push).
+        var complianceAlert: Bool?
+        /// Per-item due-date reminders (payables, to-dos, etc.).
+        var dueReminder: Bool?
         /// Email-only / manager-only: end-of-day digest.
         /// Default-off (opposite of the rest) since digests are opt-in.
         var dailyDigest: Bool?
@@ -84,6 +90,9 @@ struct NotificationPrefs: Codable, Equatable {
         var resolvedAssignment: Bool { assignment ?? true }
         var resolvedShiftSummary: Bool { shiftSummary ?? true }
         var resolvedCashAlert: Bool { cashAlert ?? true }
+        var resolvedFinanceAlert: Bool { financeAlert ?? true }
+        var resolvedComplianceAlert: Bool { complianceAlert ?? true }
+        var resolvedDueReminder: Bool { dueReminder ?? true }
         var resolvedDailyDigest: Bool { dailyDigest ?? false }
     }
 

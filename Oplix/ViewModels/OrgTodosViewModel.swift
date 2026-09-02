@@ -55,9 +55,14 @@ final class OrgTodosViewModel: ObservableObject {
         }
     }
 
-    func update(_ todo: OrgTodo) async {
+    func update(_ todo: OrgTodo, resetDueReminderSent: Bool = false) async {
         do {
-            try await firebaseService.saveOrgTodo(userId: userId, todo: todo, isNew: false)
+            try await firebaseService.saveOrgTodo(
+                userId: userId,
+                todo: todo,
+                isNew: false,
+                resetDueReminderSent: resetDueReminderSent
+            )
         } catch {
             errorMessage = error.localizedDescription
         }

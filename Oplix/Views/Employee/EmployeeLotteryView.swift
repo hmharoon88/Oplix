@@ -57,7 +57,8 @@ struct EmployeeLotteryView: View {
                         NavigationLink {
                             LotteryPackInventoryView(
                                 managerUserId: employee.managerUserId,
-                                location: location
+                                location: location,
+                                canReorganizeRack: isSupervisor
                             )
                         } label: {
                             LotterySelectionCard(

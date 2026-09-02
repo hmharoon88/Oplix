@@ -43,7 +43,15 @@
             isPaid: false,
             paidAt: null,
             originalPayableId: null,
+            dueReminder: null,
+            dueReminderSentOn: null,
         };
+    }
+
+    function normalizeDueReminder(raw) {
+        return window.OplixDueDateReminderModel
+            ? OplixDueDateReminderModel.normalizeDueReminder(raw)
+            : { enabled: false, daysBefore: 0, push: true };
     }
 
     function normalizePayable(raw, locationId) {
@@ -63,6 +71,9 @@
             paidAt: p.paidAt || null,
             createdAt: p.createdAt || null,
             originalPayableId: p.originalPayableId || null,
+            createdSource: p.createdSource || null,
+            dueReminder: p.dueDate ? normalizeDueReminder(p.dueReminder) : null,
+            dueReminderSentOn: p.dueReminderSentOn || null,
         };
     }
 

@@ -15,6 +15,8 @@ struct Document: Identifiable, Codable {
     let fileType: String // e.g., "pdf", "jpeg", "png", etc.
     let uploadedAt: Date
     var expiryDate: Date? // Optional expiry date
+    var dueReminder: DueDateReminder?
+    var dueReminderSentOn: String?
     let uploadedBy: String // User ID who uploaded it
     
     enum CodingKeys: String, CodingKey {
@@ -25,11 +27,13 @@ struct Document: Identifiable, Codable {
         case fileType
         case uploadedAt
         case expiryDate
+        case dueReminder
+        case dueReminderSentOn
         case uploadedBy
     }
     
     // Regular initializer for creating documents in code
-    init(id: String, locationId: String, name: String, fileURL: String, fileType: String, uploadedAt: Date, expiryDate: Date?, uploadedBy: String) {
+    init(id: String, locationId: String, name: String, fileURL: String, fileType: String, uploadedAt: Date, expiryDate: Date?, uploadedBy: String, dueReminder: DueDateReminder? = nil, dueReminderSentOn: String? = nil) {
         self.id = id
         self.locationId = locationId
         self.name = name
@@ -37,6 +41,8 @@ struct Document: Identifiable, Codable {
         self.fileType = fileType
         self.uploadedAt = uploadedAt
         self.expiryDate = expiryDate
+        self.dueReminder = dueReminder
+        self.dueReminderSentOn = dueReminderSentOn
         self.uploadedBy = uploadedBy
     }
     
@@ -49,6 +55,8 @@ struct Document: Identifiable, Codable {
         fileType = try container.decode(String.self, forKey: .fileType)
         uploadedAt = try container.decode(Date.self, forKey: .uploadedAt)
         expiryDate = try container.decodeIfPresent(Date.self, forKey: .expiryDate)
+        dueReminder = try container.decodeIfPresent(DueDateReminder.self, forKey: .dueReminder)
+        dueReminderSentOn = try container.decodeIfPresent(String.self, forKey: .dueReminderSentOn)
         uploadedBy = try container.decode(String.self, forKey: .uploadedBy)
     }
     
@@ -61,6 +69,8 @@ struct Document: Identifiable, Codable {
         try container.encode(fileType, forKey: .fileType)
         try container.encode(uploadedAt, forKey: .uploadedAt)
         try container.encodeIfPresent(expiryDate, forKey: .expiryDate)
+        try container.encodeIfPresent(dueReminder, forKey: .dueReminder)
+        try container.encodeIfPresent(dueReminderSentOn, forKey: .dueReminderSentOn)
         try container.encode(uploadedBy, forKey: .uploadedBy)
     }
     

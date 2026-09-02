@@ -78,7 +78,7 @@
         }
     }
 
-    async function create(userId, locationId, { name, file, expiryDate, uploadedBy, profileSlot }) {
+    async function create(userId, locationId, { name, file, expiryDate, dueReminder, uploadedBy, profileSlot }) {
         const trimmed = String(name || "").trim();
         if (!trimmed) throw new Error("Document name is required.");
         if (!file) throw new Error("Please choose a file to upload.");
@@ -98,6 +98,9 @@
         };
         if (expiryDate) {
             payload.expiryDate = firebase.firestore.Timestamp.fromDate(expiryDate);
+            if (dueReminder && window.OplixDueDateReminderModel) {
+                payload.dueReminder = OplixDueDateReminderModel.normalizeDueReminder(dueReminder);
+            }
         }
         if (profileSlot) {
             payload.profileSlot = String(profileSlot);

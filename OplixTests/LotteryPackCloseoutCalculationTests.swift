@@ -49,6 +49,33 @@ struct LotteryPackCloseoutCalculationTests {
         #expect(result.books == 0)
     }
 
+    @Test func nextBeginAfterFinishedEndIsSealedStartReverse() {
+        let next = LotteryCalculationService.nextBeginAfterClose(
+            ending: "00",
+            ticketsInBook: "25",
+            reverseOrder: true
+        )
+        #expect(next == "24")
+    }
+
+    @Test func nextBeginAfterFinishedEndIsSealedStartForward() {
+        let next = LotteryCalculationService.nextBeginAfterClose(
+            ending: "00",
+            ticketsInBook: "30",
+            reverseOrder: false
+        )
+        #expect(next == "00")
+    }
+
+    @Test func nextBeginAfterMidPackEndKeepsThatTicket() {
+        let next = LotteryCalculationService.nextBeginAfterClose(
+            ending: "18",
+            ticketsInBook: "25",
+            reverseOrder: true
+        )
+        #expect(next == "18")
+    }
+
     @Test func shiftSummaryAddsCloseoutAndSubtractsReturn() {
         let summary = LotteryCalculationService.calculateShiftSummary(
             templateTotals: (totalSold: 8, totalDollars: 240, totalBooks: 0),

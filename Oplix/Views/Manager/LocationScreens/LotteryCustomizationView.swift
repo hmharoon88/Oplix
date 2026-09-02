@@ -50,6 +50,9 @@ struct LotteryCustomizationView: View {
     @State private var archivedTerminals: [Int] = []
     @State private var terminalDrafts: [Int: TerminalDraft] = [:]
     @State private var didReduceTerminals: Bool = false
+    /// Location-level: employees must scan End # (no keypad). Saved with template.
+    @State private var lotteryScanOnly: Bool = false
+    @State private var originalLotteryScanOnly: Bool = false
     
     var body: some View {
         ZStack {
@@ -138,6 +141,9 @@ struct LotteryCustomizationView: View {
                             }
                             markCurrentTerminalDirty()
                         }
+
+                    Toggle("Scan only for End #", isOn: $lotteryScanOnly)
+                        .padding(.horizontal)
                 }
                 .padding(.vertical, 12)
                 .background(Theme.cloudWhite)
@@ -507,6 +513,8 @@ struct LotteryCustomizationView: View {
         let location = viewModel.location
         terminalCount = location?.effectiveLotteryTerminalCount ?? 1
         archivedTerminals = location?.lotteryArchivedTerminals ?? []
+        lotteryScanOnly = location?.isLotteryScanOnly ?? false
+        originalLotteryScanOnly = lotteryScanOnly
         selectedTerminal = 1
 
         let draft = await loadDraft(for: 1)
@@ -658,6 +666,11 @@ struct LotteryCustomizationView: View {
                     newCount: terminalCount,
                     archived: archivedTerminals
                 )
+            }
+
+            if lotteryScanOnly != originalLotteryScanOnly {
+                try await viewModel.updateLotteryScanOnly(lotteryScanOnly)
+                originalLotteryScanOnly = lotteryScanOnly
             }
 
             isSaving = false

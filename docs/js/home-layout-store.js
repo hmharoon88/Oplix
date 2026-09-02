@@ -80,6 +80,11 @@
             title: "Overdue payables",
             subtitle: "Unpaid payables past due date",
         },
+        overdueReceivables: {
+            id: "overdueReceivables",
+            title: "Overdue receivables",
+            subtitle: "Unreceived receivables past due date",
+        },
         expiringDocs: {
             id: "expiringDocs",
             title: "Expiring documents",
@@ -238,7 +243,8 @@
         if (id.startsWith("lotteryclose_")) return "lotteryNotClosed";
         if (id.startsWith("lotvar_")) return "lotteryVariance";
         if (id.startsWith("disapp_")) return "disapprovedTasks";
-        if (id.startsWith("payable_")) return "overduePayables";
+        if (id.startsWith("payables_")) return "overduePayables";
+        if (id.startsWith("receivables_")) return "overdueReceivables";
         if (id.startsWith("doc_")) return "expiringDocs";
         if (id.startsWith("schedgap_")) return "scheduleGaps";
         return alert.category || null;

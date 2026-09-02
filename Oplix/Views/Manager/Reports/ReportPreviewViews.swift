@@ -43,7 +43,7 @@ struct ReportGeneratedPreview: View {
                 if let content = report.register {
                     if !content.dailyRows.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Daily totals")
+                            Text(content.shiftRows.isEmpty ? "Daily totals (Daily books)" : "Daily totals")
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                             ForEach(content.dailyRows.prefix(5)) { day in
@@ -60,7 +60,13 @@ struct ReportGeneratedPreview: View {
                     employeeSectionsBlock(
                         title: "By employee",
                         isEmpty: content.employeeSections.isEmpty,
-                        emptyMessage: { emptyEmployeeMessage("No register shifts in this period.") },
+                        emptyMessage: {
+                            if !content.dailyRows.isEmpty {
+                                emptyEmployeeMessage("Totals above are from Daily books. No shift register entries in this period.")
+                            } else {
+                                emptyEmployeeMessage("No sales or expense data in this period.")
+                            }
+                        },
                         content: {
                             ForEach(content.employeeSections) { section in
                                 RegisterEmployeePreviewSection(section: section)

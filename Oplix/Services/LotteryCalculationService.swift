@@ -317,6 +317,21 @@ struct LotteryCalculationService {
         return "00"
     }
 
+    /// After close, End rolls into next Begin. When End is `00` (book finished),
+    /// next Begin is the sealed start for a new pack — `00` forward, top ticket
+    /// (e.g. 24) reverse — not a literal finished `00` on reverse racks.
+    static func nextBeginAfterClose(
+        ending: String,
+        ticketsInBook tickets: String,
+        reverseOrder: Bool
+    ) -> String {
+        let normalized = (ending == "0") ? "00" : ending
+        if normalized == "00" {
+            return sealedBeginTicket(ticketsInBook: tickets, reverseOrder: reverseOrder)
+        }
+        return ending
+    }
+
     /// Tickets returned on a pack from the scanned ticket position back to `00`.
     static func calculateReturnedTickets(
         fromTicket ticket: String,

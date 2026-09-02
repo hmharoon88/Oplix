@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import UIKit
 import FirebaseFirestore
 
 @MainActor
@@ -33,6 +34,9 @@ class EmployeeHomeViewModel: ObservableObject {
     /// client-side so the employee only sees what was sent to them.
     @Published var myAnnouncements: [Announcement] = []
     private var announcementsListener: ListenerRegistration?
+
+    /// Most recent saved payroll line for this person at the active location.
+    @Published var latestPayroll: LatestPayrollSummary?
     
     private let firebaseService = FirebaseService.shared
     let employeeId: String
@@ -41,29 +45,6 @@ class EmployeeHomeViewModel: ObservableObject {
     private var isLoadDataInProgress = false // Prevent concurrent loadData calls
     private var hasLoadedData = false // Track if data has been successfully loaded
     
-    // Computed properties for weekly stats
-    var thisWeekHours: Double {
-        let calendar = Calendar.current
-        let now = Date()
-        let currentWeek = calendar.component(.weekOfYear, from: now)
-        let currentYear = calendar.component(.year, from: now)
-        
-        return allShifts
-            .filter { shift in
-                guard let clockOutTime = shift.clockOutTime else { return false }
-                let week = calendar.component(.weekOfYear, from: clockOutTime)
-                let year = calendar.component(.year, from: clockOutTime)
-                return week == currentWeek && year == currentYear && shift.employeeId == employeeId
-            }
-            .compactMap { $0.hoursWorked }
-            .reduce(0, +)
-    }
-    
-    var thisWeekPay: Double {
-        guard let hourlyRate = employee?.hourlyRate, hourlyRate > 0 else { return 0.0 }
-        return thisWeekHours * hourlyRate
-    }
-
     // MARK: - Task scores (home-screen performance card)
 
     /// How many of *this* employee's tasks are done in the current cycle vs
@@ -109,6 +90,17 @@ class EmployeeHomeViewModel: ObservableObject {
     var locationPastWeekScore: LocationScoreSegment? {
         TaskProgress.locationSevenDay(tasks: allTasks)
     }
+
+    struct LatestPayrollSummary: Equatable {
+        let periodStart: Date
+        let periodEnd: Date
+        let hours: Double
+        let grossPay: Double
+        let loanDeductions: [PayrollLoanDeduction]
+        let otherDeductionAmount: Double
+        let otherDeductionDescription: String
+        let pay: Double
+    }
     
     init(employeeId: String, locationId: String) {
         self.employeeId = employeeId
@@ -153,7 +145,7 @@ class EmployeeHomeViewModel: ObservableObject {
             // lottery data, just minus the Lottery Today card.
             async let lotteryFormsTask = firebaseService.fetchLotteryForms(userId: managerUserId, locationId: locationId)
             
-            employee = try await employeeTask
+            employee = await enrichEmployeeLoans(try await employeeTask, managerUserId: managerUserId)
             location = try await locationTask
             let fetchedTasks = try await tasksTask
             // Keep both views in sync: `tasks` is what the employee personally
@@ -187,6 +179,8 @@ class EmployeeHomeViewModel: ObservableObject {
             
             // Find the last closed register for this location (from any employee)
             await loadLastLocationRegisterClose(managerUserId: managerUserId, locationId: locationId)
+
+            await refreshLatestPayroll()
             
             // Check for shifts that need auto clock out
             await checkAndAutoClockOut()
@@ -197,6 +191,66 @@ class EmployeeHomeViewModel: ObservableObject {
         }
         isLoading = false
         isLoadDataInProgress = false
+    }
+
+    /// Reload the latest saved payroll run for this employee at the current location.
+    func refreshLatestPayroll() async {
+        guard let managerUserId else { return }
+        do {
+            let runs = try await firebaseService.fetchPayrollRuns(
+                userId: managerUserId,
+                locationId: locationId
+            )
+            latestPayroll = Self.latestPayroll(for: employeeId, from: runs)
+            if let updated = try? await firebaseService.fetchEmployee(
+                userId: managerUserId,
+                locationId: locationId,
+                employeeId: employeeId
+            ) {
+                employee = await enrichEmployeeLoans(updated, managerUserId: managerUserId)
+            }
+        } catch {
+            latestPayroll = nil
+        }
+    }
+
+    /// Loans are edited on the manager employee record. Location copies can
+    /// lag with remainingBalance still 0 — prefer manager loans and normalize.
+    private func enrichEmployeeLoans(_ employee: Employee, managerUserId: String) async -> Employee {
+        var merged = employee
+        do {
+            let managerEmployee = try await firebaseService.fetchManagerEmployee(
+                userId: managerUserId,
+                employeeId: employee.id
+            )
+            if let loans = managerEmployee.loans, !loans.isEmpty {
+                merged.loans = loans.map { EmployeeLoan.preparedForPayroll($0) }
+            } else if let loans = merged.loans, !loans.isEmpty {
+                merged.loans = loans.map { EmployeeLoan.preparedForPayroll($0) }
+            }
+        } catch {
+            if let loans = merged.loans, !loans.isEmpty {
+                merged.loans = loans.map { EmployeeLoan.preparedForPayroll($0) }
+            }
+        }
+        return merged
+    }
+
+    static func latestPayroll(for employeeId: String, from runs: [LocationPayrollRun]) -> LatestPayrollSummary? {
+        for run in runs {
+            guard let line = run.lines.first(where: { $0.id == employeeId }) else { continue }
+            return LatestPayrollSummary(
+                periodStart: run.periodStart,
+                periodEnd: run.periodEnd,
+                hours: line.hours,
+                grossPay: line.resolvedGrossPay,
+                loanDeductions: line.resolvedLoanDeductions,
+                otherDeductionAmount: line.resolvedOtherDeductionAmount,
+                otherDeductionDescription: line.resolvedOtherDeductionDescription,
+                pay: line.pay
+            )
+        }
+        return nil
     }
     
     func clockIn() async {
@@ -732,6 +786,13 @@ class EmployeeHomeViewModel: ObservableObject {
         endingNumber: String,
         terminalNumber: Int? = nil
     ) async throws {
+        if location?.isLotteryScanOnly == true {
+            throw NSError(
+                domain: "Oplix",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This location requires scanning. Use the camera or Bluetooth scanner to enter End #."]
+            )
+        }
         _ = try await updateLotteryRowEndingFromScan(
             rowId: rowId,
             endingNumber: endingNumber,
@@ -882,23 +943,30 @@ class EmployeeHomeViewModel: ObservableObject {
 
         let oldRow = template.rows[index]
         let oldSerial = oldRow.packSerial ?? ""
-        guard !oldSerial.isEmpty else {
-            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Selected bin has no pack to replace."])
-        }
-
         let binLabel = oldRow.binNumber.isEmpty ? String(index + 1) : oldRow.binNumber
         let resolvedTerminal = terminalNumber ?? template.effectiveTerminalNumber
-        let sameGame = OhioLotteryBarcodeParser.gameNumbersMatch(oldRow.gameNumber, barcode.gameNumber)
+        let sameGame = oldRow.gameNumber.isEmpty
+            || OhioLotteryBarcodeParser.gameNumbersMatch(oldRow.gameNumber, barcode.gameNumber)
 
-        // Same game mid-shift swap: keep shift Begin, set End from scan, no sold-out
-        // closeout. Wrap math at close covers finished old + new pack from sealed.
-        // Works whether the pack was pre-received into stock or scanned first at close.
+        // Same game (or bin has Begin but no pack yet): keep shift Begin, set End from
+        // scan, attach new pack serial. No sold-out closeout — wrap math at close covers
+        // finished old pack + new pack from sealed when End wraps past end-of-book.
         if sameGame {
             let end = LotteryShiftCloseScanMatcher.normalizedTicketNumber(endingNumber)
             guard !end.isEmpty else {
                 throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Couldn't read End # from the scan."])
             }
+            guard !oldRow.beginningNumber.isEmpty else {
+                throw NSError(
+                    domain: "Oplix",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Bin #\(binLabel) has no Begin #. Set Begin from the backend/template before closing."]
+                )
+            }
 
+            if oldRow.gameNumber.isEmpty {
+                template.rows[index].gameNumber = OhioLotteryBarcodeParser.canonicalGameNumber(barcode.gameNumber)
+            }
             template.rows[index].packSerial = barcode.packSerial
             template.rows[index].packStatus = .active
             // Keep beginningNumber from the shift.
@@ -914,14 +982,20 @@ class EmployeeHomeViewModel: ObservableObject {
             )
             setTemplate(template, for: terminalNumber)
 
+            let value = template.rows[index].value.isEmpty ? oldRow.value : template.rows[index].value
+            let tickets = template.rows[index].tickets.isEmpty ? oldRow.tickets : template.rows[index].tickets
             return await registerCloseScanPackInInventoryIfNeeded(
                 barcode: barcode,
-                value: oldRow.value,
-                tickets: oldRow.tickets,
+                value: value,
+                tickets: tickets,
                 rowId: oldRow.id,
                 binLabel: binLabel,
                 managerUserId: managerUserId
             )
+        }
+
+        guard !oldSerial.isEmpty else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Selected bin has no pack to replace."])
         }
 
         switch scenario {
@@ -1076,6 +1150,59 @@ class EmployeeHomeViewModel: ObservableObject {
         )
     }
 
+    /// Mark unscanned bins as sold out during the close flow (End = `00`).
+    ///
+    /// Used when scan-only (or a skipped End #) leaves a finished pack with
+    /// nothing left to scan. Remaining tickets this shift are Begin → `00`
+    /// via the normal rack math at close.
+    func markBinsSoldOutAtClose(rowIds: [String], terminalNumber: Int? = nil) async throws {
+        guard !rowIds.isEmpty else { return }
+        guard let managerUserId = managerUserId else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager user ID not found"])
+        }
+
+        let freshTemplate = try? await firebaseService.fetchLotteryFormTemplate(
+            userId: managerUserId,
+            locationId: locationId,
+            terminalNumber: terminalNumber
+        )
+        guard var template = freshTemplate ?? template(for: terminalNumber) else {
+            throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
+        }
+
+        var changedAnything = false
+        for rowId in rowIds {
+            guard let index = template.rows.firstIndex(where: { $0.id == rowId }) else { continue }
+            let row = template.rows[index]
+            guard !row.beginningNumber.isEmpty,
+                  !row.tickets.isEmpty,
+                  !row.value.isEmpty else { continue }
+
+            template.rows[index].endingNumber = "00"
+            let (sold, books) = LotteryCalculationService.calculateSoldAndBooks(
+                beginning: row.beginningNumber,
+                ending: "00",
+                tickets: row.tickets,
+                reverseOrder: template.reverseOrder
+            )
+            template.rows[index].sold = String(sold)
+            template.rows[index].dollar = String(
+                LotteryCalculationService.calculateDollars(sold: sold, value: row.value)
+            )
+            template.rows[index].books = String(books)
+            changedAnything = true
+        }
+
+        if changedAnything {
+            try await firebaseService.saveLotteryFormTemplate(
+                userId: managerUserId,
+                locationId: locationId,
+                template: template
+            )
+            setTemplate(template, for: terminalNumber)
+        }
+    }
+
     /// Mark unscanned bins as returned packs during the close flow.
     ///
     /// Used from the incomplete-bins warning: a pack that a rep took back
@@ -1172,11 +1299,47 @@ class EmployeeHomeViewModel: ObservableObject {
             let binNumber: String
             let gameNumber: String
             let missingFields: [String]
+            let beginningNumber: String
+            let value: String
+            let tickets: String
+            let reverseOrder: Bool
+            /// Active pack + Begin + tickets/value — can credit Begin → `00`.
+            let canMarkSoldOut: Bool
             /// Bin has an active pack with a known Begin — the employee can
             /// mark it "returned" at close instead of leaving it unscanned.
             let canMarkReturned: Bool
 
             var id: String { rowId }
+
+            var canResolveAtClose: Bool { canMarkSoldOut || canMarkReturned }
+
+            /// Tickets credited if the employee marks this bin sold out.
+            var soldOutTickets: Int {
+                guard canMarkSoldOut else { return 0 }
+                let (sold, _) = LotteryCalculationService.calculateSoldAndBooks(
+                    beginning: beginningNumber,
+                    ending: "00",
+                    tickets: tickets,
+                    reverseOrder: reverseOrder
+                )
+                return sold
+            }
+
+            /// Dollars credited if the employee marks this bin sold out.
+            var soldOutDollars: Int {
+                guard canMarkSoldOut else { return 0 }
+                return LotteryCalculationService.calculateDollars(sold: soldOutTickets, value: value)
+            }
+
+            /// Begin # after this close if marked sold out (sealed start for a new pack).
+            var nextBeginAfterSoldOut: String {
+                guard canMarkSoldOut else { return "" }
+                return LotteryCalculationService.nextBeginAfterClose(
+                    ending: "00",
+                    ticketsInBook: tickets,
+                    reverseOrder: reverseOrder
+                )
+            }
         }
     }
     
@@ -1192,13 +1355,9 @@ class EmployeeHomeViewModel: ObservableObject {
         var incompleteRows: [ValidationResult.IncompleteRow] = []
         
         for (index, row) in template.rows.enumerated() {
-            // A completely empty bin (no game, no pack, no numbers) has
-            // nothing to scan and nothing to return — don't flag it.
-            let isEmptyBin = row.gameNumber.isEmpty
-                && (row.packSerial?.isEmpty != false)
-                && row.beginningNumber.isEmpty
-                && row.endingNumber.isEmpty
-            if isEmptyBin { continue }
+            // Empty Value = no ticket on this bin (unused / pulled). Don't
+            // block close for missing Begin/End/Tickets or a leftover End #.
+            if row.value.isEmpty { continue }
 
             var missingFields: [String] = []
             
@@ -1209,9 +1368,6 @@ class EmployeeHomeViewModel: ObservableObject {
             if row.endingNumber.isEmpty {
                 missingFields.append("Ending #")
             }
-            if row.value.isEmpty {
-                missingFields.append("Value")
-            }
             if row.tickets.isEmpty {
                 missingFields.append("Tickets")
             }
@@ -1221,12 +1377,28 @@ class EmployeeHomeViewModel: ObservableObject {
                 let hasActivePack = (row.packSerial?.isEmpty == false)
                     && row.packStatus != .returned
                     && row.packStatus != .empty
+                let hasBegin = !row.beginningNumber.isEmpty
+                // Sold out only needs Begin + tickets/value + missing End.
+                // Pack serial is optional — many racks (e.g. Saveway) still
+                // have game/Begin/Value without a scanned pack barcode, and
+                // those were stuck on "go back and fix" with no Sold out pick.
+                let canSoldOut = hasBegin
+                    && !row.tickets.isEmpty
+                    && !row.value.isEmpty
+                    && missingFields.contains("Ending #")
+                    && !missingFields.contains("Beginning #")
+                    && !missingFields.contains("Tickets")
                 incompleteRows.append(ValidationResult.IncompleteRow(
                     rowId: row.id,
-                    binNumber: String(index + 1),
+                    binNumber: row.binNumber.isEmpty ? String(index + 1) : row.binNumber,
                     gameNumber: row.gameNumber.isEmpty ? "N/A" : row.gameNumber,
                     missingFields: missingFields,
-                    canMarkReturned: hasActivePack && !row.beginningNumber.isEmpty
+                    beginningNumber: row.beginningNumber,
+                    value: row.value,
+                    tickets: row.tickets,
+                    reverseOrder: template.reverseOrder,
+                    canMarkSoldOut: canSoldOut,
+                    canMarkReturned: hasActivePack && hasBegin
                 ))
             }
         }
@@ -1330,6 +1502,17 @@ class EmployeeHomeViewModel: ObservableObject {
             throw NSError(domain: "Oplix", code: 1, userInfo: [NSLocalizedDescriptionKey: "Lottery template not loaded"])
         }
 
+        if let lock = template.rackReorganizeLock, !lock.isStale {
+            let who = lock.userDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let whoText = (who?.isEmpty == false) ? who! : "Someone"
+            let terminalLabel = lock.terminalNumber
+            throw NSError(
+                domain: "Oplix",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Rack reorganize is in progress on Terminal \(terminalLabel) (\(whoText)). Save or cancel in Pack inventory before closing lottery."]
+            )
+        }
+
         // 0b. Begin verification — the last line of defense against
         // stale Begin numbers (see LotteryBeginVerificationService).
         // If any Begin skipped the latest close, correct it on the
@@ -1376,7 +1559,7 @@ class EmployeeHomeViewModel: ObservableObject {
                     }
                     errorMessage += ": Missing \(incompleteRow.missingFields.joined(separator: ", "))\n"
                 }
-                errorMessage += "\nYou can still close the shift, but these rows will not be included in calculations."
+                errorMessage += "\nChoose Sold out or Returned for each bin, or go back and scan."
 
                 // Throw a validation error that can be caught and handled
                 throw NSError(
@@ -1492,11 +1675,15 @@ class EmployeeHomeViewModel: ObservableObject {
         }
         
         // 5. Move ending numbers to beginning numbers in template, then clear ending numbers
-        // Only move if ending number is not empty - keep beginning number if ending is empty
+        // Only move if ending number is not empty - keep beginning number if ending is empty.
+        // End `00` (finished book) → next Begin = sealed start (00 forward / top ticket reverse).
         for index in template.rows.indices {
-            // Only move ending to beginning if ending number is not empty
             if !template.rows[index].endingNumber.isEmpty {
-                template.rows[index].beginningNumber = template.rows[index].endingNumber
+                template.rows[index].beginningNumber = LotteryCalculationService.nextBeginAfterClose(
+                    ending: template.rows[index].endingNumber,
+                    ticketsInBook: template.rows[index].tickets,
+                    reverseOrder: reverseOrder
+                )
                 template.rows[index].endingNumber = "" // Clear ending column for next shift
             }
             // If ending number is empty, keep the beginning number as is (don't move it)
@@ -1577,15 +1764,37 @@ class EmployeeHomeViewModel: ObservableObject {
             )
         }
         
-        // Upload image in background and update form after (non-blocking)
-        // Capture values needed for background task
+        // Upload receipt in background — close stays fast. Request a brief
+        // OS background execution window so leaving the screen doesn't kill
+        // the upload (that became common after cash moved onto the close
+        // screen and employees dismissed the summary immediately).
         if let imageData = imageData {
             let backgroundManagerUserId = managerUserId
             let backgroundLocationId = locationId
             let backgroundFormId = formId
             let backgroundFirebaseService = firebaseService
             
-            Task.detached(priority: .background) {
+            Task {
+                final class BackgroundTaskBox: @unchecked Sendable {
+                    var id = UIBackgroundTaskIdentifier.invalid
+                }
+                let box = BackgroundTaskBox()
+                box.id = await MainActor.run {
+                    UIApplication.shared.beginBackgroundTask(withName: "lotteryReceiptUpload") {
+                        let id = box.id
+                        guard id != .invalid else { return }
+                        box.id = .invalid
+                        UIApplication.shared.endBackgroundTask(id)
+                    }
+                }
+                defer {
+                    Task { @MainActor in
+                        let id = box.id
+                        guard id != .invalid else { return }
+                        box.id = .invalid
+                        UIApplication.shared.endBackgroundTask(id)
+                    }
+                }
                 do {
                     let imageURL = try await backgroundFirebaseService.uploadLotteryFormImage(
                         imageData: imageData,
@@ -1594,7 +1803,6 @@ class EmployeeHomeViewModel: ObservableObject {
                         locationId: backgroundLocationId
                     )
                     
-                    // Update form with image URL using Firestore merge
                     let db = Firestore.firestore()
                     try await db.collection("users")
                         .document(backgroundManagerUserId)
@@ -1607,7 +1815,6 @@ class EmployeeHomeViewModel: ObservableObject {
                     print("✅ Image uploaded and form updated successfully")
                 } catch {
                     print("⚠️ Failed to upload image in background: \(error.localizedDescription)")
-                    // Image upload failure doesn't prevent form submission
                 }
             }
         }

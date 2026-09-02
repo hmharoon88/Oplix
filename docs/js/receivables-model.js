@@ -43,7 +43,15 @@
             isReceived: false,
             receivedAt: null,
             originalReceivableId: null,
+            dueReminder: null,
+            dueReminderSentOn: null,
         };
+    }
+
+    function normalizeDueReminder(raw) {
+        return window.OplixDueDateReminderModel
+            ? OplixDueDateReminderModel.normalizeDueReminder(raw)
+            : { enabled: false, daysBefore: 0, push: true };
     }
 
     function normalizeReceivable(raw, locationId) {
@@ -63,6 +71,9 @@
             receivedAt: r.receivedAt || null,
             createdAt: r.createdAt || null,
             originalReceivableId: r.originalReceivableId || null,
+            createdSource: r.createdSource || null,
+            dueReminder: r.dueDate ? normalizeDueReminder(r.dueReminder) : null,
+            dueReminderSentOn: r.dueReminderSentOn || null,
         };
     }
 

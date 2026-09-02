@@ -81,21 +81,32 @@ final class ReportsViewModel: ObservableObject {
         defer { isGenerating = false }
 
         do {
+            let reportType = selectedType
             async let shiftsTask = firebaseService.fetchShifts(userId: userId, locationId: location.id)
             async let employeesTask = firebaseService.fetchEmployees(userId: userId, locationId: location.id)
             async let lotteryTask = firebaseService.fetchLotteryForms(userId: userId, locationId: location.id)
+            async let booksTask: [BooksMonthPayload] = {
+                guard reportType == .register else { return [] }
+                return (try? await BooksService.shared.loadAllMonths(
+                    userId: userId,
+                    locationId: location.id
+                )) ?? []
+            }()
 
             let shifts = try await shiftsTask
             let employees = try await employeesTask
             let lotteryForms = try await lotteryTask
+            let booksPayloads = await booksTask
 
             let report = buildGeneratedReport(
-                type: selectedType,
+                type: reportType,
                 locationName: location.name,
                 interval: interval,
                 shifts: shifts,
                 employees: employees,
-                lotteryForms: lotteryForms
+                lotteryForms: lotteryForms,
+                booksPayloads: booksPayloads,
+                hasGasStation: location.hasGasStation
             )
 
             generatedReport = report
@@ -116,7 +127,9 @@ final class ReportsViewModel: ObservableObject {
         interval: ReportDateInterval,
         shifts: [Shift],
         employees: [Employee],
-        lotteryForms: [LotteryForm]
+        lotteryForms: [LotteryForm],
+        booksPayloads: [BooksMonthPayload] = [],
+        hasGasStation: Bool = false
     ) -> GeneratedReport {
         var lottery: LotteryReportContent?
         var payroll: PayrollReportContent?
@@ -137,11 +150,17 @@ final class ReportsViewModel: ObservableObject {
                 interval: interval
             )
         case .register:
-            register = ReportDataBuilder.buildRegisterReport(
+            let shiftReport = ReportDataBuilder.buildRegisterReport(
                 shifts: shifts,
                 employees: employees,
                 interval: interval
             )
+            let booksReport = ReportDataBuilder.buildRegisterReportFromBooks(
+                payloads: booksPayloads,
+                interval: interval,
+                hasGasStation: hasGasStation
+            )
+            register = ReportDataBuilder.mergeRegisterReports(books: booksReport, shifts: shiftReport)
         }
 
         let briefSummary = ReportBriefSummaryBuilder.build(

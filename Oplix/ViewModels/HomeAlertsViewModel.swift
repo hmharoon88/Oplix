@@ -59,6 +59,7 @@ enum ManagerAlertCategory: String, CaseIterable, Identifiable, Codable {
     case lotteryVariance
     case disapprovedTasks
     case overduePayables
+    case overdueReceivables
     case expiringDocs
     case scheduleGaps
 
@@ -73,6 +74,7 @@ enum ManagerAlertCategory: String, CaseIterable, Identifiable, Codable {
         case .lotteryVariance:  return "Lottery over / short"
         case .disapprovedTasks: return "Tasks need rework"
         case .overduePayables:  return "Overdue payables"
+        case .overdueReceivables: return "Overdue receivables"
         case .expiringDocs:     return "Expiring documents"
         case .scheduleGaps:     return "Schedule gaps"
         }
@@ -87,6 +89,7 @@ enum ManagerAlertCategory: String, CaseIterable, Identifiable, Codable {
         case .lotteryVariance:  return "Lottery shift over/short ≥ $5 in last 7 days"
         case .disapprovedTasks: return "Tasks the manager kicked back to redo"
         case .overduePayables:  return "Unpaid payables past due date"
+        case .overdueReceivables: return "Unreceived receivables past due date"
         case .expiringDocs:     return "Documents expiring within 30 days"
         case .scheduleGaps:     return "Employees with no shifts this week"
         }
@@ -101,6 +104,7 @@ enum ManagerAlertCategory: String, CaseIterable, Identifiable, Codable {
         case .lotteryVariance:  return "ticket.fill"
         case .disapprovedTasks: return "arrow.uturn.backward.circle.fill"
         case .overduePayables:  return "creditcard.trianglebadge.exclamationmark"
+        case .overdueReceivables: return "arrow.down.circle.fill"
         case .expiringDocs:     return "doc.text.fill"
         case .scheduleGaps:     return "calendar.badge.exclamationmark"
         }
@@ -316,7 +320,9 @@ final class HomeAlertsViewModel: ObservableObject {
 
         var collected = perLocationAlerts
         collected.append(contentsOf: expiringDocAlerts(docs: docs, locations: locations))
-        collected.append(contentsOf: scheduleGapAlerts(employees: employees))
+        if locations.contains(where: { $0.isNotificationEnabled(.scheduleGaps) }) {
+            collected.append(contentsOf: scheduleGapAlerts(employees: employees))
+        }
         collected.append(contentsOf: disapprovedTaskAlerts(tasks: tasks, locations: locations))
 
         // Sort: severity first (critical > warning > info), then stable sortKey.
@@ -372,12 +378,27 @@ final class HomeAlertsViewModel: ObservableObject {
         for e in locEmployees { nameLookup[e.id] = e.name }
 
         var out: [ActionAlert] = []
-        out.append(contentsOf: clockOutAlerts(shifts: shifts, location: location, names: nameLookup))
-        out.append(contentsOf: missingRegisterAlerts(shifts: shifts, location: location, names: nameLookup))
-        out.append(contentsOf: registerVarianceAlerts(shifts: shifts, location: location))
-        out.append(contentsOf: lotteryNotClosedAlerts(forms: forms, location: location))
-        out.append(contentsOf: lotteryVarianceAlerts(forms: forms, location: location))
-        out.append(contentsOf: overduePayableAlerts(payables: payables, location: location))
+        if location.isNotificationEnabled(.clockOut) {
+            out.append(contentsOf: clockOutAlerts(shifts: shifts, location: location, names: nameLookup))
+        }
+        if location.isNotificationEnabled(.missingRegister) {
+            out.append(contentsOf: missingRegisterAlerts(shifts: shifts, location: location, names: nameLookup))
+        }
+        if location.isNotificationEnabled(.registerVariance) {
+            out.append(contentsOf: registerVarianceAlerts(shifts: shifts, location: location))
+        }
+        if location.isNotificationEnabled(.lotteryNotClosed) {
+            out.append(contentsOf: lotteryNotClosedAlerts(forms: forms, location: location))
+        }
+        if location.isNotificationEnabled(.lotteryVariance) {
+            out.append(contentsOf: lotteryVarianceAlerts(forms: forms, location: location))
+        }
+        if location.isNotificationEnabled(.payablesOverdue) {
+            out.append(contentsOf: overduePayableAlerts(payables: payables, location: location))
+        }
+        if location.isNotificationEnabled(.receivablesOverdue) {
+            out.append(contentsOf: overdueReceivableAlerts(receivables: receivables, location: location))
+        }
         
         let pulse = computePulse(
             location: location,
@@ -608,13 +629,37 @@ final class HomeAlertsViewModel: ObservableObject {
         )]
     }
 
+    private func overdueReceivableAlerts(receivables: [Receivable], location: Location) -> [ActionAlert] {
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let overdue = receivables.filter { r in
+            guard !r.isReceived, let due = r.dueDate else { return false }
+            return Calendar.current.startOfDay(for: due) < todayStart
+        }
+        guard !overdue.isEmpty else { return [] }
+        let total = overdue.reduce(0.0) { $0 + $1.amount }
+        let s = overdue.count == 1 ? "" : "s"
+        return [ActionAlert(
+            id: "receivables_\(location.id)",
+            severity: .info,
+            title: "\(overdue.count) receivable\(s) overdue · \(formatCurrency(total))",
+            subtitle: location.name,
+            route: .location(id: location.id),
+            sortKey: 20,
+            category: .overdueReceivables
+        )]
+    }
+
     private func expiringDocAlerts(docs: [Document], locations: [Location]) -> [ActionAlert] {
         let calendar = Calendar.current
         let now = Date()
-        let cutoff = calendar.date(byAdding: .day, value: docExpiryWindowDays, to: now) ?? now
         let nameById = Dictionary(uniqueKeysWithValues: locations.map { ($0.id, $0.name) })
+        let settingsByLocation = Dictionary(uniqueKeysWithValues: locations.map { ($0.id, $0.effectiveNotificationSettings) })
 
         return docs.compactMap { doc in
+            guard let settings = settingsByLocation[doc.locationId],
+                  settings.isEnabled(.documentExpiry) else { return nil }
+            let leadDays = settings.leadDays(for: .documentExpiry) ?? docExpiryWindowDays
+            let cutoff = calendar.date(byAdding: .day, value: leadDays, to: now) ?? now
             guard let exp = doc.expiryDate, exp >= now, exp <= cutoff else { return nil }
             let days = max(0, calendar.dateComponents([.day], from: now, to: exp).day ?? 0)
             let severity: AlertSeverity = days <= 7 ? .warning : .info
@@ -678,7 +723,9 @@ final class HomeAlertsViewModel: ObservableObject {
         }
         guard !byLocation.isEmpty else { return [] }
         let nameById = Dictionary(uniqueKeysWithValues: locations.map { ($0.id, $0.name) })
-        return byLocation.map { locId, count in
+        let settingsByLocation = Dictionary(uniqueKeysWithValues: locations.map { ($0.id, $0.effectiveNotificationSettings) })
+        return byLocation.compactMap { locId, count in
+            guard settingsByLocation[locId]?.isEnabled(.tasksRework) != false else { return nil }
             let s = count == 1 ? "" : "s"
             return ActionAlert(
                 id: "disapp_\(locId)",

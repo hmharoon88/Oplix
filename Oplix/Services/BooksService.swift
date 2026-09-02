@@ -2,7 +2,7 @@
 //  BooksService.swift
 //  Oplix
 //
-//  Firestore read access for web Daily books (iOS manager reports). Writes are web-only.
+//  Firestore access for web Daily books (reads for reports; payroll run sync writes month payroll fields).
 //
 
 import Foundation
@@ -90,5 +90,66 @@ final class BooksService {
         let snap = try await dayRef(userId: userId, locationId: locationId, monthId: monthId, dayId: dayId).getDocument()
         guard snap.exists, let data = snap.data() else { return nil }
         return BooksFirestoreParser.parseDay(dayId: dayId, data: data)
+    }
+
+    /// Merge-write month-level fields (preserves days subcollection and other month fields).
+    func mergeMonthFields(
+        userId: String,
+        locationId: String,
+        monthId: String,
+        fields: [String: Any]
+    ) async throws {
+        let ref = monthRef(userId: userId, locationId: locationId, monthId: monthId)
+        let snap = try await ref.getDocument()
+        if snap.exists, snap.data()?["closed"] as? Bool == true {
+            throw BooksServiceError.monthClosed
+        }
+
+        var payload = fields
+        payload["updatedAt"] = FieldValue.serverTimestamp()
+        try await ref.setData(payload, merge: true)
+    }
+
+    /// Push net pay from an iOS payroll run into Daily books for the pay-through month.
+    func syncPayrollRunToBooks(
+        userId: String,
+        locationId: String,
+        run: LocationPayrollRun,
+        calendar: Calendar = .current
+    ) async throws {
+        let monthId = Self.monthId(from: run.periodEnd, calendar: calendar)
+        let ref = monthRef(userId: userId, locationId: locationId, monthId: monthId)
+        let snap = try await ref.getDocument()
+        let existingData = snap.data() ?? BooksFirestoreEncoder.defaultMonthPayload()
+
+        var mergedFields = BooksPayrollSync.mergedMonthPayrollFields(
+            existingMonthData: existingData,
+            run: run,
+            calendar: calendar
+        )
+        if var syncs = mergedFields["payrollRunSyncs"] as? [String: [String: Any]],
+           var record = syncs[run.id] {
+            record["syncedAt"] = FieldValue.serverTimestamp()
+            syncs[run.id] = record
+            mergedFields["payrollRunSyncs"] = syncs
+        }
+
+        try await mergeMonthFields(
+            userId: userId,
+            locationId: locationId,
+            monthId: monthId,
+            fields: mergedFields
+        )
+    }
+}
+
+enum BooksServiceError: LocalizedError {
+    case monthClosed
+
+    var errorDescription: String? {
+        switch self {
+        case .monthClosed:
+            return "Daily books for this month are closed. Reopen the month on web before syncing payroll."
+        }
     }
 }

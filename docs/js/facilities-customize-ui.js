@@ -245,7 +245,7 @@
         return `
             <section class="fac-customize-section" id="fac-customize-notifications">
                 <h3 class="fac-customize-section-title">Notifications</h3>
-                <p class="books-hint">Choose which alerts appear under <strong>Needs attention</strong> for this facility (Home and facility overview). Lead time applies to expiry-based alerts. Scroll down and click <strong>Save all changes</strong> to apply.</p>
+                <p class="books-hint">Choose which alerts appear under <strong>Needs attention</strong> and as <strong>push notifications</strong> for this facility (Home and facility overview). Lead time applies to expiry-based alerts. Scroll down and click <strong>Save all changes</strong> to apply.</p>
                 ${blocks}
             </section>`;
     }
@@ -266,6 +266,10 @@
                 </div>
                 <label class="books-label">Address *
                     <textarea class="books-input fac-create-address" name="address" rows="2" required>${escapeHtml(loc.address || "")}</textarea>
+                </label>
+                <label class="lottery-check fac-customize-scan-only">
+                    <input type="checkbox" name="lotteryScanOnly" ${loc.lotteryScanOnly ? "checked" : ""} />
+                    Scan only for End #
                 </label>
                 <h4 class="fac-customize-subtitle">Contact person</h4>
                 <div class="books-grid-3">
@@ -415,6 +419,7 @@
             facilityProfile: readProfileFromForm(form, location.facilityProfile),
             notificationSettings: readNotificationsFromForm(form),
             booksFieldConfig: BooksUI().readBooksConfigFromDom(booksRoot, gas),
+            lotteryScanOnly: !!form.querySelector('[name="lotteryScanOnly"]')?.checked,
         };
     }
 

@@ -47,6 +47,12 @@
             hasLeadDays: false,
         },
         {
+            id: "receivables_overdue",
+            label: "Overdue receivables",
+            group: "Finance",
+            hasLeadDays: false,
+        },
+        {
             id: "document_expiry",
             label: "Document expiring soon",
             group: "Compliance",
@@ -56,6 +62,13 @@
         {
             id: "profile_expiry",
             label: "Lease & license expiry",
+            group: "Compliance",
+            hasLeadDays: true,
+            defaultLeadDays: 60,
+        },
+        {
+            id: "compliance_expiry",
+            label: "Compliance licenses & permits",
             group: "Compliance",
             hasLeadDays: true,
             defaultLeadDays: 60,

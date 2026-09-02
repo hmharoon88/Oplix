@@ -162,6 +162,40 @@ enum ReportDataBuilder {
 
     // MARK: - Register / sales & expenses
 
+    static func isDayInRange(_ day: Date, interval: ReportDateInterval, calendar: Calendar = .current) -> Bool {
+        let normalized = calendar.startOfDay(for: day)
+        let start = calendar.startOfDay(for: interval.start)
+        let end = calendar.startOfDay(for: interval.end)
+        return normalized >= start && normalized <= end
+    }
+
+    /// Sales, expenses, and over/short for one shift (supports multi-register shifts).
+    static func shiftRegisterTotals(_ shift: Shift) -> (sales: Double, expenses: Double, overShort: Double?) {
+        var sales = 0.0
+        var expenses = shift.expenses.reduce(0) { $0 + $1.amount }
+        var overShortSum = 0.0
+        var hasOverShort = false
+
+        if !shift.registers.isEmpty {
+            for register in shift.registers {
+                sales += (register.cashSale ?? 0) + (register.creditCard ?? 0)
+                if let amounts = register.cashExpenseAmounts {
+                    expenses += amounts.reduce(0, +)
+                } else if let amount = register.cashExpense {
+                    expenses += amount
+                }
+                if let overShort = register.overShort {
+                    overShortSum += overShort
+                    hasOverShort = true
+                }
+            }
+            return (sales, expenses, hasOverShort ? overShortSum : shift.overShort)
+        }
+
+        sales = (shift.cashSale ?? 0) + (shift.creditCard ?? 0)
+        return (sales, expenses, shift.overShort)
+    }
+
     static func buildRegisterReport(
         shifts: [Shift],
         employees: [Employee],
@@ -183,11 +217,10 @@ enum ReportDataBuilder {
         var shiftRows: [RegisterShiftRow] = []
 
         for shift in filtered.sorted(by: { ($0.clockOutTime ?? .distantPast) > ($1.clockOutTime ?? .distantPast) }) {
-            let sales = (shift.cashSale ?? 0) + (shift.creditCard ?? 0)
-            let expenses = shift.expenses.reduce(0) { $0 + $1.amount }
-            totalSales += sales
-            totalExpenses += expenses
-            if let overShort = shift.overShort {
+            let totals = shiftRegisterTotals(shift)
+            totalSales += totals.sales
+            totalExpenses += totals.expenses
+            if let overShort = totals.overShort {
                 totalOverShort += overShort
             }
 
@@ -195,9 +228,9 @@ enum ReportDataBuilder {
                 id: shift.id,
                 clockOut: shift.clockOutTime ?? shift.clockInTime ?? Date(),
                 employeeName: employeeById[shift.employeeId]?.name ?? "—",
-                sales: sales,
-                expenses: expenses,
-                overShort: shift.overShort
+                sales: totals.sales,
+                expenses: totals.expenses,
+                overShort: totals.overShort
             ))
         }
 
@@ -206,8 +239,13 @@ enum ReportDataBuilder {
         }
 
         let dailyRows: [RegisterDailyRow] = byDay.map { day, dayShifts in
-            let sales = dayShifts.compactMap { ($0.cashSale ?? 0) + ($0.creditCard ?? 0) }.reduce(0, +)
-            let expenses = dayShifts.flatMap(\.expenses).reduce(0) { $0 + $1.amount }
+            var sales = 0.0
+            var expenses = 0.0
+            for shift in dayShifts {
+                let totals = shiftRegisterTotals(shift)
+                sales += totals.sales
+                expenses += totals.expenses
+            }
             return RegisterDailyRow(
                 id: ISO8601DateFormatter().string(from: day),
                 date: day,
@@ -252,5 +290,85 @@ enum ReportDataBuilder {
             )
         }
         .sorted { $0.totalSales > $1.totalSales }
+    }
+
+    /// Daily totals from web Daily books for the selected date range.
+    static func buildRegisterReportFromBooks(
+        payloads: [BooksMonthPayload],
+        interval: ReportDateInterval,
+        hasGasStation: Bool,
+        calendar: Calendar = .current
+    ) -> RegisterReportContent? {
+        var dailyRows: [RegisterDailyRow] = []
+        var totalSales = 0.0
+        var totalExpenses = 0.0
+
+        for payload in payloads {
+            let aggregate = BooksAggregator.aggregateMonth(
+                monthId: payload.monthId,
+                month: payload.month,
+                daysById: payload.daysById,
+                hasGasStation: hasGasStation
+            )
+
+            for point in aggregate.dailySeries {
+                guard isDayInRange(point.date, interval: interval, calendar: calendar) else { continue }
+                guard point.sales != 0 || point.expenses != 0 else { continue }
+
+                dailyRows.append(
+                    RegisterDailyRow(
+                        id: point.dayId,
+                        date: point.date,
+                        sales: point.sales,
+                        expenses: point.expenses,
+                        shiftCount: 0
+                    )
+                )
+                totalSales += point.sales
+                totalExpenses += point.expenses
+            }
+        }
+
+        guard !dailyRows.isEmpty else { return nil }
+
+        dailyRows.sort { $0.date > $1.date }
+
+        return RegisterReportContent(
+            summary: RegisterReportSummary(
+                totalSales: totalSales,
+                totalExpenses: totalExpenses,
+                netTotal: totalSales - totalExpenses,
+                shiftCount: dailyRows.count,
+                totalOverShort: 0
+            ),
+            dailyRows: dailyRows,
+            shiftRows: [],
+            employeeSections: []
+        )
+    }
+
+    /// Prefer Daily books for location totals; keep shift rows for employee breakdown.
+    static func mergeRegisterReports(
+        books: RegisterReportContent?,
+        shifts: RegisterReportContent
+    ) -> RegisterReportContent {
+        guard let books, !books.dailyRows.isEmpty else {
+            return shifts
+        }
+
+        let summary = RegisterReportSummary(
+            totalSales: books.summary.totalSales,
+            totalExpenses: books.summary.totalExpenses,
+            netTotal: books.summary.totalSales - books.summary.totalExpenses,
+            shiftCount: shifts.summary.shiftCount > 0 ? shifts.summary.shiftCount : books.dailyRows.count,
+            totalOverShort: shifts.summary.totalOverShort
+        )
+
+        return RegisterReportContent(
+            summary: summary,
+            dailyRows: books.dailyRows,
+            shiftRows: shifts.shiftRows,
+            employeeSections: shifts.employeeSections
+        )
     }
 }

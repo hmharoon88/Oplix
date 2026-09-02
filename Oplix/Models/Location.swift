@@ -33,8 +33,14 @@ struct Location: Identifiable, Codable {
     var lotteryTerminalCount: Int? // nil / missing == 1 (single-terminal, legacy behaviour)
     var lotteryArchivedTerminals: [Int]?
 
+    /// When true, staff must enter End # via barcode scanner only (no typing).
+    var lotteryScanOnly: Bool?
+
     /// `"c_store"` (default) or `"c_store_gas"` — controls fuel / gas-sale fields in books and shift close.
     var facilityType: String?
+
+    /// Per-facility Needs Attention toggles (shared with web Customize → Notifications).
+    var notificationSettings: FacilityNotificationSettings?
 
     /// Effective terminal count, defaulting to 1 for legacy records
     /// that were stored before multi-terminal support existed.
@@ -47,6 +53,11 @@ struct Location: Identifiable, Codable {
     /// the original experience byte-for-byte.
     var hasMultipleLotteryTerminals: Bool {
         effectiveLotteryTerminalCount > 1
+    }
+
+    /// Staff must scan End # (camera / Bluetooth); keypad entry is disabled.
+    var isLotteryScanOnly: Bool {
+        lotteryScanOnly == true
     }
 
     /// The terminal numbers an employee can close out today (1...count).

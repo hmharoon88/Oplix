@@ -34,6 +34,7 @@ struct EmployeeDetailView: View {
     @State private var canViewLotteryData: Bool = false
     @State private var canEditSchedules: Bool = false
     @State private var canViewReports: Bool = false
+    @State private var canManagePayroll: Bool = false
 
     /// True when this employee was loaded into the view model's
     /// `supervisors` bucket. The view model populates that bucket by
@@ -372,6 +373,12 @@ struct EmployeeDetailView: View {
                                     title: "Can View Reports",
                                     subtitle: "Access reports and statistics"
                                 )
+                                supervisorPermissionToggle(
+                                    isOn: $canManagePayroll,
+                                    icon: "dollarsign.circle.fill",
+                                    title: "Can Manage Payroll",
+                                    subtitle: "Run payroll, view history, and print pay sheets"
+                                )
                             }
 
                             Button(action: {
@@ -454,6 +461,7 @@ struct EmployeeDetailView: View {
                     canViewLotteryData = employee.canViewLotteryData ?? false
                     canEditSchedules = employee.canEditSchedules ?? false
                     canViewReports = employee.canViewReports ?? false
+                    canManagePayroll = employee.canManagePayroll ?? false
                     // Initialize schedule
                     if let schedule = employee.weeklySchedule {
                         employeeSchedule = schedule
@@ -573,6 +581,7 @@ struct EmployeeDetailView: View {
                 updatedEmployee.canViewRegisterData = canViewRegisterData
                 updatedEmployee.canViewLotteryData = canViewLotteryData
                 updatedEmployee.canViewReports = canViewReports
+                updatedEmployee.canManagePayroll = canManagePayroll
             }
 
             try await viewModel.updateEmployee(updatedEmployee)

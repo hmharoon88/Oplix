@@ -1,10 +1,9 @@
 /**
- * Manual payroll entries (web-first).
- *
- * Firestore: users/{uid}/locations/{locationId}/payrollEntries/{id}
+ * Payroll — `payrollRuns` (canonical, shared with iOS) and legacy `payrollEntries`.
  */
 (function () {
     const COLLECTION = "payrollEntries";
+    const RUNS_COLLECTION = "payrollRuns";
 
     const PERIOD_MODES = [
         { id: "daily", label: "Daily" },
@@ -233,8 +232,191 @@
         };
     }
 
+    function parseFirestoreDate(value) {
+        if (!value) return null;
+        if (value.toDate && typeof value.toDate === "function") return value.toDate();
+        if (value instanceof Date) return value;
+        const str = String(value);
+        if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+            return new Date(str.slice(0, 10) + "T12:00:00");
+        }
+        const parsed = new Date(str);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function isoDateOnly(date) {
+        const d = date instanceof Date ? date : parseFirestoreDate(date);
+        if (!d) return "";
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+    }
+
+    function startOfDay(date) {
+        const d = date instanceof Date ? new Date(date) : parseFirestoreDate(date);
+        if (!d) return new Date();
+        d.setHours(0, 0, 0, 0);
+        return d;
+    }
+
+    function normalizeRunLine(raw) {
+        const line = raw || {};
+        const hours = num(line.hours);
+        const hourlyRate = num(line.hourlyRate);
+        const grossPay = line.grossPay != null && line.grossPay !== "" ? num(line.grossPay) : null;
+        const pay = line.pay != null && line.pay !== "" ? num(line.pay) : grossPay ?? calcPay(hours, hourlyRate);
+        const loanDeductions = Array.isArray(line.loanDeductions)
+            ? line.loanDeductions
+                  .map((d) => ({
+                      id: String(d?.id || ""),
+                      label: String(d?.label || ""),
+                      amount: num(d?.amount),
+                  }))
+                  .filter((d) => d.id && d.amount > 0)
+            : [];
+        const otherDeductionAmount = num(line.otherDeductionAmount);
+        const otherDeductionDescription = String(line.otherDeductionDescription || "").trim();
+        return {
+            id: String(line.id || ""),
+            employeeName: String(line.employeeName || "").trim() || "Employee",
+            hourlyRate,
+            hours,
+            grossPay,
+            loanDeductions: loanDeductions.length ? loanDeductions : undefined,
+            otherDeductionAmount: otherDeductionAmount > 0.005 ? otherDeductionAmount : undefined,
+            otherDeductionDescription:
+                otherDeductionAmount > 0.005 && otherDeductionDescription
+                    ? otherDeductionDescription
+                    : undefined,
+            pay,
+        };
+    }
+
+    function normalizeRun(raw, locationId) {
+        const lines = (raw?.lines || []).map(normalizeRunLine);
+        const totalHours =
+            raw?.totalHours != null ? num(raw.totalHours) : lines.reduce((s, l) => s + num(l.hours), 0);
+        const totalGrossPay =
+            raw?.totalGrossPay != null
+                ? num(raw.totalGrossPay)
+                : lines.reduce((s, l) => s + num(l.grossPay != null ? l.grossPay : l.pay), 0);
+        const totalLoanDeductions =
+            raw?.totalLoanDeductions != null
+                ? num(raw.totalLoanDeductions)
+                : lines.reduce(
+                      (s, l) =>
+                          s +
+                          (l.loanDeductions || []).reduce((n, d) => n + num(d.amount), 0),
+                      0
+                  );
+        const totalPay =
+            raw?.totalPay != null ? num(raw.totalPay) : lines.reduce((s, l) => s + num(l.pay), 0);
+        const periodStart = parseFirestoreDate(raw?.periodStart);
+        const periodEnd = parseFirestoreDate(raw?.periodEnd);
+        const note = String(raw?.note || "").trim();
+        return {
+            id: String(raw?.id || ""),
+            locationId: String(locationId || raw?.locationId || ""),
+            periodStart: periodStart || startOfDay(new Date()),
+            periodEnd: periodEnd || startOfDay(new Date()),
+            note: note || null,
+            lines,
+            totalPay: Math.round(totalPay * 100) / 100,
+            totalHours: Math.round(totalHours * 100) / 100,
+            totalGrossPay: Math.round(totalGrossPay * 100) / 100,
+            totalLoanDeductions:
+                totalLoanDeductions > 0.005 ? Math.round(totalLoanDeductions * 100) / 100 : null,
+            createdAt: parseFirestoreDate(raw?.createdAt),
+            createdSource: String(raw?.createdSource || "web"),
+        };
+    }
+
+    function formatPeriod(start, end) {
+        const fmt = (d) =>
+            d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        const s = start instanceof Date ? start : parseFirestoreDate(start);
+        const e = end instanceof Date ? end : parseFirestoreDate(end);
+        if (!s || !e) return "";
+        if (isoDateOnly(s) === isoDateOnly(e)) return fmt(s);
+        return `${fmt(s)} – ${fmt(e)}`;
+    }
+
+    function suggestPeriodFromLastRun(lastRun) {
+        const today = startOfDay(new Date());
+        if (!lastRun) {
+            return { periodStart: isoDateOnly(today), periodEnd: isoDateOnly(today) };
+        }
+        const lastEnd = startOfDay(lastRun.periodEnd);
+        const nextStart = new Date(lastEnd);
+        nextStart.setDate(nextStart.getDate() + 1);
+        let periodStart = startOfDay(nextStart);
+        let periodEnd = today;
+        if (periodEnd < periodStart) periodEnd = periodStart;
+        return { periodStart: isoDateOnly(periodStart), periodEnd: isoDateOnly(periodEnd) };
+    }
+
+    function buildRunFromDraft({
+        locationId,
+        periodStart,
+        periodEnd,
+        note,
+        lines,
+        createdSource,
+    }) {
+        const normalizedLines = (lines || [])
+            .filter((l) => num(l.hours) > 0)
+            .map((l) => {
+                const hours = num(l.hours);
+                const hourlyRate = num(l.hourlyRate);
+                const grossPay = Math.round(hours * hourlyRate * 100) / 100;
+                const loanDeductions = (l.loanDeductions || []).filter((d) => num(d.amount) > 0);
+                const otherDeductionAmount = Math.max(0, num(l.otherDeductionAmount));
+                const otherDeductionDescription = String(l.otherDeductionDescription || "").trim();
+                const loanTotal = loanDeductions.reduce((s, d) => s + num(d.amount), 0);
+                const netPay = Math.round(
+                    (grossPay - loanTotal - otherDeductionAmount) * 100
+                ) / 100;
+                return normalizeRunLine({
+                    id: l.id,
+                    employeeName: l.employeeName,
+                    hourlyRate,
+                    hours,
+                    grossPay,
+                    loanDeductions,
+                    otherDeductionAmount,
+                    otherDeductionDescription,
+                    pay: netPay,
+                });
+            });
+
+        return normalizeRun(
+            {
+                locationId,
+                periodStart,
+                periodEnd,
+                note,
+                lines: normalizedLines,
+                createdSource: createdSource || "web",
+            },
+            locationId
+        );
+    }
+
+    function runTotals(run) {
+        const r = normalizeRun(run, run?.locationId);
+        return {
+            hours: r.totalHours,
+            gross: r.totalGrossPay,
+            loanDeductions: r.totalLoanDeductions || 0,
+            pay: r.totalPay,
+            count: r.lines.length,
+        };
+    }
+
     window.OplixPayrollModel = {
         COLLECTION,
+        RUNS_COLLECTION,
         PERIOD_MODES,
         defaultEntry,
         normalizeEntry,
@@ -251,5 +433,13 @@
         entryBelongsToMonth,
         buildBooksPayrollFromEntries,
         affectedMonthIds,
+        normalizeRun,
+        normalizeRunLine,
+        buildRunFromDraft,
+        formatPeriod,
+        suggestPeriodFromLastRun,
+        runTotals,
+        isoDateOnly,
+        parseFirestoreDate,
     };
 })();

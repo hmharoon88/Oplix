@@ -75,6 +75,7 @@
                 <label class="books-label">Notes
                     <textarea class="books-input dir-textarea" name="notes" rows="2">${escapeHtml(p.notes)}</textarea>
                 </label>
+                ${window.OplixDueDateReminderModel ? OplixDueDateReminderModel.renderDueReminderFields(p.dueReminder) : ""}
                 ${
                     id
                         ? `<label class="books-label pay-paid-check">
@@ -94,6 +95,19 @@
     function readForm(form, locationId, existing) {
         const fd = new FormData(form);
         const dueStr = String(fd.get("dueDate") || "").trim();
+        const dueDate = M().dueTimestampFromInput(dueStr);
+        const dueReminder = dueDate && window.OplixDueDateReminderModel
+            ? OplixDueDateReminderModel.readDueReminderFromForm(form)
+            : null;
+        const existingNorm = existing ? M().normalizePayable(existing, locationId) : null;
+        const resetSent = existingNorm && window.OplixDueDateReminderModel
+            ? OplixDueDateReminderModel.shouldClearSentFlag(
+                  existingNorm.dueDate,
+                  dueDate,
+                  existingNorm.dueReminder,
+                  dueReminder
+              )
+            : false;
         return M().normalizePayable(
             {
                 ...existing,
@@ -102,10 +116,12 @@
                 amount: window.OplixBooksModel
                     ? OplixBooksModel.num(fd.get("amount"))
                     : parseFloat(fd.get("amount")) || 0,
-                dueDate: M().dueTimestampFromInput(dueStr),
+                dueDate,
                 frequency: fd.get("frequency"),
                 notes: fd.get("notes"),
                 isPaid: form.querySelector('[name="isPaid"]')?.checked || false,
+                dueReminder,
+                dueReminderSentOn: resetSent ? null : existingNorm?.dueReminderSentOn || null,
             },
             locationId
         );
@@ -213,6 +229,9 @@
                 paySaveReady = OplixFormSaveReady.watch(slot, { mode: id ? "edit" : "new" });
             }
             form?.querySelector("[data-pay-cancel]")?.addEventListener("click", closeForm);
+            if (form && window.OplixDueDateReminderModel) {
+                OplixDueDateReminderModel.wireDueReminderForm(form);
+            }
             form?.querySelector("[data-pay-delete]")?.addEventListener("click", async () => {
                 if (!id || !confirm("Delete this payable?")) return;
                 const st = form.querySelector("[data-pay-form-status]");

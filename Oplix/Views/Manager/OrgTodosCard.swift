@@ -40,8 +40,8 @@ struct OrgTodosCard: View {
         .sheet(isPresented: $showingEdit) {
             OrgTodoEditSheet(
                 existing: todoToEdit,
-                onSave: { updated in
-                    Task { await viewModel.update(updated) }
+                onSave: { updated, resetSent in
+                    Task { await viewModel.update(updated, resetDueReminderSent: resetSent) }
                 },
                 onDismiss: {
                     showingEdit = false
@@ -244,7 +244,7 @@ struct OrgTodosCard: View {
 
 private struct OrgTodoEditSheet: View {
     let existing: OrgTodo?
-    var onSave: (OrgTodo) -> Void
+    var onSave: (OrgTodo, Bool) -> Void
     var onDismiss: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -252,6 +252,7 @@ private struct OrgTodoEditSheet: View {
     @State private var notesText = ""
     @State private var hasDueDate = false
     @State private var dueDate = Date()
+    @State private var dueReminder = DueDateReminder()
 
     var body: some View {
         NavigationStack {
@@ -265,6 +266,7 @@ private struct OrgTodoEditSheet: View {
                     Toggle("Due date", isOn: $hasDueDate)
                     if hasDueDate {
                         DatePicker("Due", selection: $dueDate, displayedComponents: [.date])
+                        DueDateReminderFormSection(reminder: $dueReminder)
                     }
                 }
             }
@@ -295,6 +297,7 @@ private struct OrgTodoEditSheet: View {
                     df.timeZone = TimeZone.current
                     dueDate = df.date(from: e.dueDate) ?? Date()
                 }
+                dueReminder = DueDateReminder.normalized(e.dueReminder)
             }
         }
     }
@@ -305,15 +308,30 @@ private struct OrgTodoEditSheet: View {
         guard !trimmed.isEmpty else { return }
         todo.title = trimmed
         todo.notes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let oldDue = todo.dueDate
+        let oldReminder = todo.dueReminder
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.timeZone = TimeZone.current
+        let parsedOldDue = oldDue.isEmpty ? nil : df.date(from: oldDue)
         if hasDueDate {
-            let df = DateFormatter()
-            df.dateFormat = "yyyy-MM-dd"
-            df.timeZone = TimeZone.current
             todo.dueDate = df.string(from: dueDate)
+            todo.dueReminder = DueDateReminder.normalized(dueReminder)
         } else {
             todo.dueDate = ""
+            todo.dueReminder = nil
         }
-        onSave(todo)
+        let newDueValue: Date? = hasDueDate ? dueDate : nil
+        let shouldResetSent = DueDateReminder.shouldClearSentFlag(
+            oldDue: parsedOldDue,
+            newDue: newDueValue,
+            oldReminder: oldReminder,
+            newReminder: todo.dueReminder
+        )
+        if shouldResetSent {
+            todo.dueReminderSentOn = nil
+        }
+        onSave(todo, shouldResetSent)
         onDismiss()
         dismiss()
     }

@@ -17,6 +17,8 @@ struct LocationReminder: Identifiable, Codable, Hashable {
     let createdAt: Date
     var isCompleted: Bool
     var completedAt: Date?
+    var dueReminder: DueDateReminder?
+    var dueReminderSentOn: String?
 
     init(
         id: String = UUID().uuidString,
@@ -26,7 +28,9 @@ struct LocationReminder: Identifiable, Codable, Hashable {
         dueDate: Date? = nil,
         createdAt: Date = Date(),
         isCompleted: Bool = false,
-        completedAt: Date? = nil
+        completedAt: Date? = nil,
+        dueReminder: DueDateReminder? = nil,
+        dueReminderSentOn: String? = nil
     ) {
         self.id = id
         self.locationId = locationId
@@ -36,10 +40,13 @@ struct LocationReminder: Identifiable, Codable, Hashable {
         self.createdAt = createdAt
         self.isCompleted = isCompleted
         self.completedAt = completedAt
+        self.dueReminder = dueReminder
+        self.dueReminderSentOn = dueReminderSentOn
     }
 
     enum CodingKeys: String, CodingKey {
         case id, locationId, title, notes, dueDate, createdAt, isCompleted, completedAt
+        case dueReminder, dueReminderSentOn
     }
 
     init(from decoder: Decoder) throws {
@@ -52,5 +59,7 @@ struct LocationReminder: Identifiable, Codable, Hashable {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         isCompleted = try c.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
+        dueReminder = try c.decodeIfPresent(DueDateReminder.self, forKey: .dueReminder)
+        dueReminderSentOn = try c.decodeIfPresent(String.self, forKey: .dueReminderSentOn)
     }
 }

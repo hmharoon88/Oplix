@@ -32,6 +32,8 @@ struct Employee: Identifiable, Codable, Hashable {
     var canViewLotteryData: Bool? // Permission to view lottery data
     var canEditSchedules: Bool? // Permission to edit employee schedules
     var canViewReports: Bool? // Permission to view reports and statistics
+    var canManagePayroll: Bool? // Permission to run payroll for the location
+    var loans: [EmployeeLoan]? // Company loans repaid through payroll deductions
     
     // Custom decoding to handle missing weeklySchedule in existing documents
     enum CodingKeys: String, CodingKey {
@@ -58,6 +60,8 @@ struct Employee: Identifiable, Codable, Hashable {
         case canViewLotteryData
         case canEditSchedules
         case canViewReports
+        case canManagePayroll
+        case loans
     }
     
     init(from decoder: Decoder) throws {
@@ -85,6 +89,8 @@ struct Employee: Identifiable, Codable, Hashable {
         canViewLotteryData = try container.decodeIfPresent(Bool.self, forKey: .canViewLotteryData)
         canEditSchedules = try container.decodeIfPresent(Bool.self, forKey: .canEditSchedules)
         canViewReports = try container.decodeIfPresent(Bool.self, forKey: .canViewReports)
+        canManagePayroll = try container.decodeIfPresent(Bool.self, forKey: .canManagePayroll)
+        loans = try container.decodeIfPresent([EmployeeLoan].self, forKey: .loans)
     }
     
     // Custom encoding
@@ -113,10 +119,12 @@ struct Employee: Identifiable, Codable, Hashable {
         try container.encodeIfPresent(canViewLotteryData, forKey: .canViewLotteryData)
         try container.encodeIfPresent(canEditSchedules, forKey: .canEditSchedules)
         try container.encodeIfPresent(canViewReports, forKey: .canViewReports)
+        try container.encodeIfPresent(canManagePayroll, forKey: .canManagePayroll)
+        try container.encodeIfPresent(loans, forKey: .loans)
     }
     
     // Initializer for creating new employees
-    init(id: String, name: String, username: String, locationId: String? = nil, managerUserId: String, password: String? = nil, shiftHistory: [String] = [], currentShiftStatus: ShiftStatus = .clockedOut, workingHoursStart: String? = nil, workingHoursEnd: String? = nil, weeklySchedule: WeeklySchedule? = nil, is24Hours: Bool? = nil, assignedLocationIds: [String] = [], hourlyRate: Double? = nil, canTakeRegister: Bool? = nil, canSubmitLottery: Bool? = nil, canViewEmployeeData: Bool? = nil, canManageTasks: Bool? = nil, canManageDocuments: Bool? = nil, canViewRegisterData: Bool? = nil, canViewLotteryData: Bool? = nil, canEditSchedules: Bool? = nil, canViewReports: Bool? = nil) {
+    init(id: String, name: String, username: String, locationId: String? = nil, managerUserId: String, password: String? = nil, shiftHistory: [String] = [], currentShiftStatus: ShiftStatus = .clockedOut, workingHoursStart: String? = nil, workingHoursEnd: String? = nil, weeklySchedule: WeeklySchedule? = nil, is24Hours: Bool? = nil, assignedLocationIds: [String] = [], hourlyRate: Double? = nil, canTakeRegister: Bool? = nil, canSubmitLottery: Bool? = nil, canViewEmployeeData: Bool? = nil, canManageTasks: Bool? = nil, canManageDocuments: Bool? = nil, canViewRegisterData: Bool? = nil, canViewLotteryData: Bool? = nil, canEditSchedules: Bool? = nil, canViewReports: Bool? = nil, canManagePayroll: Bool? = nil, loans: [EmployeeLoan]? = nil) {
         self.id = id
         self.name = name
         self.username = username
@@ -140,6 +148,16 @@ struct Employee: Identifiable, Codable, Hashable {
         self.canViewLotteryData = canViewLotteryData
         self.canEditSchedules = canEditSchedules
         self.canViewReports = canViewReports
+        self.canManagePayroll = canManagePayroll
+        self.loans = loans
+    }
+    
+    var activeLoans: [EmployeeLoan] {
+        (loans ?? []).filter(\.isOpen)
+    }
+
+    var totalOpenLoanBalance: Double {
+        activeLoans.reduce(0) { $0 + $1.amountDue }
     }
     
     // Computed properties for easier access (defaults to false if nil)

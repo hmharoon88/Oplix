@@ -50,9 +50,13 @@
         task: "Task",
         orgTodo: "Home to-do",
         expense: "Vendor expense",
+        payroll: "Payroll",
+        booksMonth: "Monthly books",
         section: "Section",
         page: "Page",
     };
+
+    const MAX_SEARCH_RESULTS = 300;
 
     let userId = null;
     let getContext = () => ({ locations: [], employees: [], tasks: [] });
@@ -64,6 +68,7 @@
     const root = () => document.getElementById("global-search");
     const input = () => document.getElementById("global-search-input");
     const resultsEl = () => document.getElementById("global-search-results");
+    const BooksModel = () => window.OplixBooksModel;
 
     function escapeHtml(text) {
         const div = document.createElement("div");
@@ -218,7 +223,7 @@
         ];
         Object.entries(daysById || {}).forEach(([dayId, day]) => {
             lists.forEach(([key, label]) => {
-                (day?.[key] || []).forEach((row) => {
+                (day?.[key] || []).forEach((row, rowIndex) => {
                     const description = String(row.description || "").trim();
                     const checkNo = String(row.checkNo || "").trim();
                     if (!description && !checkNo) return;
@@ -228,8 +233,60 @@
                         checkNo,
                         amount: parseFloat(row.amount) || 0,
                         category: label,
+                        lineKey: String(row.id || `${key}_${dayId}_${rowIndex}`),
                     });
                 });
+            });
+        });
+        return hits;
+    }
+
+    function collectMonthBooksHits(month, monthId) {
+        const hits = [];
+        (month?.receivables || []).forEach((row, rowIndex) => {
+            const description = String(row.description || "").trim();
+            if (!description) return;
+            hits.push({
+                kind: "Receivable",
+                description,
+                amount: parseFloat(row.amount) || 0,
+                monthId,
+                lineKey: String(row.id || `rec_${rowIndex}`),
+            });
+        });
+        (month?.payrollLines || []).forEach((line, rowIndex) => {
+            const name = String(line.employeeName || "").trim();
+            if (!name) return;
+            hits.push({
+                kind: "Payroll",
+                description: name,
+                amount: parseFloat(line.pay) || 0,
+                hours: parseFloat(line.hours) || 0,
+                monthId,
+                lineKey: String(line.id || line.employeeId || `pay_${rowIndex}`),
+            });
+        });
+        (month?.monthAdjustments || []).forEach((row, rowIndex) => {
+            const description = String(row.label || row.description || "").trim();
+            if (!description) return;
+            hits.push({
+                kind: "Adjustment",
+                description,
+                amount: parseFloat(row.amount) || 0,
+                monthId,
+                lineKey: String(row.id || `adj_${rowIndex}`),
+            });
+        });
+        const utilities = month?.utilities || {};
+        Object.entries(utilities).forEach(([key, amount]) => {
+            const description = String(key || "").trim();
+            if (!description) return;
+            hits.push({
+                kind: "Utility",
+                description,
+                amount: parseFloat(amount) || 0,
+                monthId,
+                lineKey: `util_${description}`,
             });
         });
         return hits;
@@ -242,115 +299,173 @@
             .replace(/\s+/g, " ");
     }
 
-    function loadStoredExpenseNames(uid, locations) {
-        const sources = [];
-        try {
-            const raw = localStorage.getItem(`oplix.expenseDescriptions.${uid || "anon"}`);
-            const parsed = raw ? JSON.parse(raw) : [];
-            if (Array.isArray(parsed)) sources.push(parsed);
-        } catch {
-            /* ignore */
-        }
+    function loadStoredExpenseNamesByLocation(uid, locations) {
+        const byLoc = {};
         (locations || []).forEach((loc) => {
+            const names = [];
             try {
                 const raw = localStorage.getItem(
                     `oplix.expenseDescriptions.${uid || "anon"}.${loc.id}`
                 );
                 const parsed = raw ? JSON.parse(raw) : [];
-                if (Array.isArray(parsed)) sources.push(parsed);
+                if (Array.isArray(parsed)) {
+                    parsed.forEach((n) => {
+                        const name = String(n || "").trim();
+                        if (name) names.push(name);
+                    });
+                }
             } catch {
                 /* ignore */
             }
+            byLoc[loc.id] = names;
         });
-        return sources.flat().map((n) => String(n || "").trim()).filter(Boolean);
+        try {
+            const raw = localStorage.getItem(`oplix.expenseDescriptions.${uid || "anon"}`);
+            const parsed = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(parsed)) {
+                byLoc.__org = parsed.map((n) => String(n || "").trim()).filter(Boolean);
+            }
+        } catch {
+            /* ignore */
+        }
+        return byLoc;
     }
 
-    function globalExpenseNameItems(locations, packsByLoc, extraNames) {
-        const groups = new Map();
-
-        function ensureGroup(name) {
-            const key = expenseNameKey(name);
-            if (!key) return null;
-            if (!groups.has(key)) {
-                groups.set(key, {
-                    description: String(name).trim(),
-                    locationIds: new Set(),
-                    locationNames: [],
-                    checkNos: [],
-                    categories: new Set(),
-                    count: 0,
-                    total: 0,
-                    lastDayId: "",
-                    lastLocationId: "",
-                });
-            }
-            return groups.get(key);
-        }
+    /** One search row per Daily books expense line (not grouped by name). */
+    function booksExpenseSearchItems(locations, packsByLoc, savedNamesByLoc) {
+        const items = [];
+        const indexedSaved = new Set();
 
         (locations || []).forEach((loc) => {
             const locName = loc.name || "Facility";
             (packsByLoc[loc.id] || []).forEach((pack) => {
                 collectBooksExpenseHits(pack.daysById).forEach((hit) => {
-                    const name = hit.description;
-                    if (!name) return;
-                    const group = ensureGroup(name);
-                    if (!group) return;
-                    group.count += 1;
-                    group.total += hit.amount;
-                    group.categories.add(hit.category);
-                    if (!group.locationIds.has(loc.id)) {
-                        group.locationIds.add(loc.id);
-                        group.locationNames.push(locName);
+                    const title = hit.description || hit.checkNo || "Expense";
+                    const dayId = hit.dayId;
+                    const monthId = String(dayId).slice(0, 7);
+                    const subtitleParts = [locName, shortDayLabel(dayId), money(hit.amount), hit.category];
+                    if (hit.checkNo && hit.description) {
+                        subtitleParts.splice(3, 0, `Check ${hit.checkNo}`);
                     }
-                    if (hit.checkNo && !group.checkNos.includes(hit.checkNo)) {
-                        group.checkNos.push(hit.checkNo);
-                    }
-                    if (String(hit.dayId) > String(group.lastDayId || "")) {
-                        group.lastDayId = hit.dayId;
-                        group.lastLocationId = loc.id;
-                    }
+                    indexedSaved.add(`${loc.id}:${expenseNameKey(title)}`);
+                    items.push(
+                        makeItem({
+                            id: `exp:${loc.id}:${dayId}:${hit.lineKey}`,
+                            type: "expense",
+                            title,
+                            subtitle: subtitleParts.join(" · "),
+                            searchText: `${title} ${hit.checkNo} ${hit.category} expense vendor daily books payee ${locName}`,
+                            action: {
+                                panel: "data-input",
+                                locationId: loc.id,
+                                monthId,
+                                dayId,
+                                booksTab: "daily",
+                            },
+                        })
+                    );
                 });
+
+                const monthId = pack.monthId || "";
+                collectMonthBooksHits(pack.month, monthId).forEach((hit) => {
+                    const BM = BooksModel();
+                    const monthLabel =
+                        monthId && BM
+                            ? BM.parseMonthId(monthId).toLocaleDateString("en-US", {
+                                  month: "long",
+                                  year: "numeric",
+                              })
+                            : "Monthly books";
+                    const subtitleParts = [locName, monthLabel, money(hit.amount), hit.kind];
+                    if (hit.hours > 0) subtitleParts.splice(3, 0, `${hit.hours.toFixed(2)} hrs`);
+                    items.push(
+                        makeItem({
+                            id: `bkm:${loc.id}:${monthId}:${hit.lineKey}`,
+                            type: hit.kind === "Payroll" ? "payroll" : "booksMonth",
+                            title: hit.description,
+                            subtitle: subtitleParts.join(" · "),
+                            searchText: `${hit.description} ${hit.kind} monthly books ${locName} ${monthLabel}`,
+                            action: {
+                                panel: "data-input",
+                                locationId: loc.id,
+                                monthId,
+                                booksTab: "monthly",
+                            },
+                        })
+                    );
+                });
+            });
+
+            const savedForLoc = [
+                ...(savedNamesByLoc[loc.id] || []),
+                ...(savedNamesByLoc.__org || []),
+            ];
+            savedForLoc.forEach((name) => {
+                const key = `${loc.id}:${expenseNameKey(name)}`;
+                if (indexedSaved.has(key)) return;
+                indexedSaved.add(key);
+                items.push(
+                    makeItem({
+                        id: `exp:saved:${key}`,
+                        type: "expense",
+                        title: name,
+                        subtitle: `${locName} · Saved name`,
+                        searchText: `${name} expense vendor daily books payee saved ${locName}`,
+                        action: { panel: "data-input", locationId: loc.id, booksTab: "daily" },
+                    })
+                );
             });
         });
 
-        (extraNames || []).forEach((name) => ensureGroup(name));
+        return items;
+    }
 
-        return [...groups.values()]
-            .sort((a, b) => a.description.localeCompare(b.description, undefined, { sensitivity: "base" }))
-            .map((g) => {
-                const locCount = g.locationIds.size;
-                const locLabel =
-                    locCount === 0
-                        ? "All facilities"
-                        : locCount === 1
-                          ? g.locationNames[0]
-                          : `${locCount} facilities`;
-                const bits = [locLabel];
-                if (g.count) {
-                    bits.push(g.count === 1 ? "1 entry" : `${g.count} entries`);
-                    if (g.lastDayId) bits.push(`last ${shortDayLabel(g.lastDayId)}`);
-                    bits.push(money(g.total));
-                } else {
-                    bits.push("Saved name");
-                }
-                const locSearch = g.locationNames.join(" ");
-                return makeItem({
-                    id: `exp:all:${expenseNameKey(g.description)}`,
-                    type: "expense",
-                    title: g.description,
-                    subtitle: bits.join(" · "),
-                    searchText: `${g.description} ${g.checkNos.join(" ")} ${[...g.categories].join(" ")} expense vendor daily books payee ${locSearch} all facilities`,
-                    action: g.lastDayId
-                        ? {
-                              panel: "data-input",
-                              locationId: g.lastLocationId,
-                              monthId: String(g.lastDayId).slice(0, 7),
-                              dayId: g.lastDayId,
-                              booksTab: "daily",
-                          }
-                        : { panel: "vendors" },
-                });
+    function payrollRunLineItems(locName, locId, runs) {
+        const PM = window.OplixPayrollModel;
+        const items = [];
+        (runs || []).forEach((run) => {
+            const normalized = PM ? PM.normalizeRun({ id: run.id, ...run }, locId) : run;
+            const periodLabel = PM
+                ? PM.formatPeriod(normalized.periodStart, normalized.periodEnd)
+                : "";
+            (normalized.lines || run.lines || []).forEach((line, lineIndex) => {
+                const name = line.employeeName || "Employee";
+                const hours = parseFloat(line.hours) || 0;
+                const pay = parseFloat(line.pay) || 0;
+                items.push(
+                    makeItem({
+                        id: `payrun:${locId}:${run.id}:${line.id || lineIndex}`,
+                        type: "payroll",
+                        title: name,
+                        subtitle: `${locName} · ${periodLabel} · ${hours.toFixed(2)} hrs · ${money(pay)} net`,
+                        searchText: `${name} ${line.id || ""} payroll hours pay wages employee ${locName} ${periodLabel}`,
+                        action: { panel: "facilities", locationId: locId, sectionId: "payroll" },
+                    })
+                );
             });
+        });
+        return items;
+    }
+
+    function payrollEntryItems(locName, locId, entries) {
+        const PM = window.OplixPayrollModel;
+        const items = [];
+        (entries || []).forEach((entry) => {
+            const e = PM ? PM.normalizeEntry(entry, locId) : entry;
+            const name = e.employeeName || "Employee";
+            const periodLabel = PM ? PM.periodLabel(e.periodType, e.periodKey) : e.periodKey || "";
+            items.push(
+                makeItem({
+                    id: `payent:${locId}:${entry.id}`,
+                    type: "payroll",
+                    title: name,
+                    subtitle: `${locName} · ${periodLabel} · ${(parseFloat(e.hours) || 0).toFixed(2)} hrs · ${money(e.pay)}`,
+                    searchText: `${name} ${e.employeeId || ""} payroll hours pay wages legacy entry ${locName} ${periodLabel}`,
+                    action: { panel: "facilities", locationId: locId, sectionId: "payroll" },
+                })
+            );
+        });
+        return items;
     }
 
     async function fetchSub(uid, locationId, name) {
@@ -403,6 +518,8 @@
                     complianceItems,
                     directory,
                     booksPacks,
+                    payrollRuns,
+                    payrollEntries,
                 ] = await Promise.all([
                     fetchSub(uid, loc.id, "documents"),
                     fetchSub(uid, loc.id, "payables"),
@@ -417,8 +534,13 @@
                     window.OplixBooksStore
                         ? OplixBooksStore.loadMonthsForCompare(uid, [loc.id], recentMonthIds(12), {})
                         : Promise.resolve([]),
+                    fetchSub(uid, loc.id, "payrollRuns"),
+                    fetchSub(uid, loc.id, "payrollEntries"),
                 ]);
                 packsByLoc[loc.id] = booksPacks || [];
+
+                payrollRunLineItems(locName, loc.id, payrollRuns).forEach((item) => items.push(item));
+                payrollEntryItems(locName, loc.id, payrollEntries).forEach((item) => items.push(item));
 
                 documents.forEach((doc) => {
                     items.push(
@@ -517,11 +639,10 @@
             })
         );
 
-        const extraNames = [
-            ...loadStoredExpenseNames(uid, locations),
-            ...globalVendors.map((v) => v.name),
-        ];
-        globalExpenseNameItems(locations, packsByLoc, extraNames).forEach((item) => items.push(item));
+        const savedNamesByLoc = loadStoredExpenseNamesByLocation(uid, locations);
+        booksExpenseSearchItems(locations, packsByLoc, savedNamesByLoc).forEach((item) =>
+            items.push(item)
+        );
 
         if (window.OplixOrgTodosStore) {
             try {
@@ -597,16 +718,17 @@
 
     function search(query) {
         const queryTokens = tokens(query);
-        if (!queryTokens.length) return [];
+        if (!queryTokens.length) return { results: [], total: 0 };
 
-        const matched = index
+        const all = index
             .filter((item) => queryTokens.every((tok) => item.searchText.includes(tok)))
             .map((item) => ({ item, score: scoreItem(item, queryTokens) }))
-            .sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title))
-            .slice(0, 40)
-            .map((row) => row.item);
+            .sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title));
 
-        return matched;
+        const total = all.length;
+        const results = all.slice(0, MAX_SEARCH_RESULTS).map((row) => row.item);
+
+        return { results, total };
     }
 
     function closeResults() {
@@ -619,9 +741,12 @@
         root()?.classList.remove("global-search--open");
     }
 
-    function renderResults(results) {
+    function renderResults(searchResult) {
         const el = resultsEl();
         if (!el) return;
+
+        const results = searchResult?.results || [];
+        const total = searchResult?.total ?? results.length;
 
         if (!results.length) {
             el.hidden = false;
@@ -631,11 +756,17 @@
             return;
         }
 
+        const more =
+            total > results.length
+                ? `<p class="global-search-more">Showing ${results.length} of ${total} matches — refine your search to narrow results.</p>`
+                : "";
+
         el.hidden = false;
-        el.innerHTML = results
-            .map((item, i) => {
-                const typeLabel = TYPE_LABELS[item.type] || item.type;
-                return `
+        el.innerHTML =
+            results
+                .map((item, i) => {
+                    const typeLabel = TYPE_LABELS[item.type] || item.type;
+                    return `
                     <button type="button" class="global-search-result${i === selectedIndex ? " is-selected" : ""}" data-search-index="${i}">
                         <span class="global-search-result-type">${escapeHtml(typeLabel)}</span>
                         <span class="global-search-result-main">
@@ -643,14 +774,19 @@
                             <span>${escapeHtml(item.subtitle)}</span>
                         </span>
                     </button>`;
-            })
-            .join("");
+                })
+                .join("") + more;
         root()?.classList.add("global-search--open");
     }
 
     function currentResults() {
         const q = input()?.value?.trim();
-        return q ? search(q) : [];
+        return q ? search(q).results : [];
+    }
+
+    function currentSearchResult() {
+        const q = input()?.value?.trim();
+        return q ? search(q) : { results: [], total: 0 };
     }
 
     function highlightSelection() {
@@ -684,6 +820,16 @@
                 locationId: action.locationId,
                 monthId: action.monthId,
                 dayId: action.dayId,
+                tab: action.booksTab,
+            });
+            return;
+        }
+
+        if (action.monthId && action.locationId && window.OplixDataInput?.openDailySheet) {
+            await OplixDataInput.openDailySheet({
+                locationId: action.locationId,
+                monthId: action.monthId,
+                tab: action.booksTab || "monthly",
             });
             return;
         }

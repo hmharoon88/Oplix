@@ -34,6 +34,9 @@ const KNOWN_CATEGORIES = new Set([
   'assignment',
   'shiftSummary',
   'cashAlert',
+  'financeAlert',
+  'complianceAlert',
+  'dueReminder',
   'dailyDigest',
 ]);
 

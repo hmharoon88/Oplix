@@ -7,16 +7,18 @@ import SwiftUI
 
 struct LotteryPackInventoryView: View {
     @StateObject private var viewModel: LotteryPackInventoryViewModel
+    @EnvironmentObject private var authViewModel: AuthViewModel
     @State private var showingAssignSheet = false
     @State private var showingReceiveSheet = false
     @State private var showingReturnSheet = false
-    @State private var showingMoveSheet = false
+    @State private var showingReorganize = false
     @State private var stockPackToAssign: LotteryStockPack?
 
-    init(managerUserId: String, location: Location) {
+    init(managerUserId: String, location: Location, canReorganizeRack: Bool = false) {
         _viewModel = StateObject(wrappedValue: LotteryPackInventoryViewModel(
             managerUserId: managerUserId,
-            location: location
+            location: location,
+            canReorganizeRack: canReorganizeRack
         ))
     }
 
@@ -114,18 +116,20 @@ struct LotteryPackInventoryView: View {
                         .padding(.horizontal)
                         .disabled(viewModel.isSaving)
 
-                        Button {
-                            showingMoveSheet = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "arrow.left.arrow.right")
-                                Text("Move pack")
+                        if viewModel.canReorganizeRack {
+                            Button {
+                                Task { await startReorganizeSession() }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "square.grid.3x3.fill")
+                                    Text("Reorganize rack")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .cloudButton(backgroundColor: .purple)
                             }
-                            .frame(maxWidth: .infinity)
-                            .cloudButton(backgroundColor: .blue)
+                            .padding(.horizontal)
+                            .disabled(viewModel.isSaving || viewModel.isReorganizing)
                         }
-                        .padding(.horizontal)
-                        .disabled(viewModel.isSaving)
                     }
                     .padding(.vertical)
                 }
@@ -148,8 +152,12 @@ struct LotteryPackInventoryView: View {
         .sheet(isPresented: $showingReturnSheet) {
             ReturnLotteryPackSheet(viewModel: viewModel)
         }
-        .sheet(isPresented: $showingMoveSheet) {
-            MoveLotteryPackSheet(viewModel: viewModel)
+        .fullScreenCover(isPresented: $showingReorganize) {
+            ReorganizeRackView(
+                viewModel: viewModel,
+                userId: authViewModel.currentUser?.id ?? "",
+                userDisplayName: authViewModel.currentUser?.username
+            )
         }
         .sheet(item: $stockPackToAssign) { pack in
             AssignStockPackSheet(viewModel: viewModel, pack: pack)
@@ -446,6 +454,19 @@ struct LotteryPackInventoryView: View {
         case .empty: return .secondary
         case nil:
             return row.packSerial == nil ? .secondary : .green
+        }
+    }
+
+    private func startReorganizeSession() async {
+        guard let userId = authViewModel.currentUser?.id else { return }
+        do {
+            try await viewModel.startReorganize(
+                userId: userId,
+                displayName: authViewModel.currentUser?.username
+            )
+            showingReorganize = true
+        } catch {
+            viewModel.errorMessage = error.localizedDescription
         }
     }
 }

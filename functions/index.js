@@ -12,12 +12,18 @@ const {onTaskReviewed} = require('./notifications/onTaskReviewed');
 const {onTaskCompleted} = require('./notifications/onTaskCompleted');
 const {onEmployeeProfileChanged} = require('./notifications/onEmployeeProfileChanged');
 const {onRoleChanged} = require('./notifications/onRoleChanged');
+const {scheduledFinanceAlerts} = require('./notifications/scheduledFinanceAlerts');
+const {scheduledComplianceAlerts} = require('./notifications/scheduledComplianceAlerts');
+const {scheduledDueDateReminders} = require('./notifications/scheduledDueDateReminders');
 
 exports.onTaskAssigned = onTaskAssigned;
 exports.onTaskReviewed = onTaskReviewed;
 exports.onTaskCompleted = onTaskCompleted;
 exports.onEmployeeProfileChanged = onEmployeeProfileChanged;
 exports.onRoleChanged = onRoleChanged;
+exports.scheduledFinanceAlerts = scheduledFinanceAlerts;
+exports.scheduledComplianceAlerts = scheduledComplianceAlerts;
+exports.scheduledDueDateReminders = scheduledDueDateReminders;
 
 // Callable functions invoked directly from the iOS client.
 const {sendAnnouncement} = require('./announcements/sendAnnouncement');

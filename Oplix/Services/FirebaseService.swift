@@ -1260,49 +1260,15 @@ class FirebaseService: ObservableObject {
     }
     
     func updateLotteryFormOverShort(userId: String, locationId: String, formId: String, overShort: Double) async throws {
-        // Fetch the existing form
-        let formRef = db.collection("users")
+        // Only patch overShort — never rewrite the whole form (that used to
+        // wipe formData.imageURL if a background photo upload had already landed).
+        try await db.collection("users")
             .document(userId)
             .collection("locations")
             .document(locationId)
             .collection("lotteryForms")
             .document(formId)
-        
-        let document = try await formRef.getDocument()
-        guard document.exists else {
-            throw NSError(domain: "FirebaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Lottery form not found"])
-        }
-        
-        // Decode the existing form
-        var form = try document.data(as: LotteryForm.self)
-        
-        // Update the overShort in shiftSummary
-        if var summary = form.shiftSummary {
-            // Create a new summary with updated overShort
-            // Since ShiftSummaryData is a struct with let properties, we need to create a new one
-            form.shiftSummary = ShiftSummaryData(
-                totalSold: summary.totalSold,
-                totalDollars: summary.totalDollars,
-                totalBooks: summary.totalBooks,
-                instantTotal: summary.instantTotal,
-                onlineTotal: summary.onlineTotal,
-                totalSoldAmount: summary.totalSoldAmount,
-                registerCash: summary.registerCash,
-                totalCash: summary.totalCash,
-                onlineCashes: summary.onlineCashes,
-                instantCashes: summary.instantCashes,
-                totalCashes: summary.totalCashes,
-                cashInBag: summary.cashInBag,
-                cashInBagNet: summary.cashInBagNet,
-                overShort: overShort,
-                lotteryReturnDeduction: summary.lotteryReturnDeduction,
-                lotteryPackCloseoutAddition: summary.lotteryPackCloseoutAddition,
-                packReturns: summary.packReturns
-            )
-        }
-        
-        // Save the updated form
-        try formRef.setData(from: form, merge: false)
+            .updateData(["shiftSummary.overShort": overShort])
     }
     
     func observeLotteryForms(userId: String, locationId: String, completion: @escaping ([LotteryForm]) -> Void) {
@@ -1345,7 +1311,8 @@ class FirebaseService: ObservableObject {
             lastUpdated: Date(),
             lotteryRegisterAmount: template.lotteryRegisterAmount,
             reverseOrder: template.reverseOrder,
-            terminalNumber: template.terminalNumber
+            terminalNumber: template.terminalNumber,
+            rackReorganizeLock: template.rackReorganizeLock
         )
 
         let docId = lotteryTemplateDocId(for: template.terminalNumber)
@@ -2022,7 +1989,7 @@ class FirebaseService: ObservableObject {
             .getDocuments()
         return try snapshot.documents.compactMap { doc in
             try doc.data(as: Payable.self)
-        }
+        }.appManagedOnly()
     }
     
     func updatePayable(userId: String, locationId: String, payable: Payable) async throws {
@@ -2064,7 +2031,7 @@ class FirebaseService: ObservableObject {
             .getDocuments()
         return try snapshot.documents.compactMap { doc in
             try doc.data(as: Receivable.self)
-        }
+        }.appManagedOnly()
     }
     
     func updateReceivable(userId: String, locationId: String, receivable: Receivable) async throws {
@@ -2085,6 +2052,29 @@ class FirebaseService: ObservableObject {
             .collection("receivables")
             .document(receivableId)
             .delete()
+    }
+
+    // MARK: - Manual payroll runs (location payroll sheet)
+
+    func fetchPayrollRuns(userId: String, locationId: String) async throws -> [LocationPayrollRun] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("payrollRuns")
+            .order(by: "periodEnd", descending: true)
+            .getDocuments()
+        return try snapshot.documents.compactMap { try $0.data(as: LocationPayrollRun.self) }
+    }
+
+    func savePayrollRun(userId: String, locationId: String, run: LocationPayrollRun) async throws {
+        try db.collection("users")
+            .document(userId)
+            .collection("locations")
+            .document(locationId)
+            .collection("payrollRuns")
+            .document(run.id)
+            .setData(from: run)
     }
 
     // MARK: - Location reminders
@@ -2145,7 +2135,7 @@ class FirebaseService: ObservableObject {
     }
 
     /// Writes the same field shapes as `docs/js/org-todos-store.js` so web + app stay in sync.
-    func saveOrgTodo(userId: String, todo: OrgTodo, isNew: Bool) async throws {
+    func saveOrgTodo(userId: String, todo: OrgTodo, isNew: Bool, resetDueReminderSent: Bool = false) async throws {
         var data: [String: Any] = [
             "title": todo.title,
             "notes": todo.notes,
@@ -2153,6 +2143,20 @@ class FirebaseService: ObservableObject {
             "isCompleted": todo.isCompleted,
             "updatedAt": FieldValue.serverTimestamp(),
         ]
+        if let dueReminder = todo.dueReminder, !todo.dueDate.isEmpty {
+            data["dueReminder"] = [
+                "enabled": dueReminder.enabled,
+                "daysBefore": dueReminder.daysBefore,
+                "push": dueReminder.push,
+            ]
+        } else {
+            data["dueReminder"] = FieldValue.delete()
+        }
+        if resetDueReminderSent {
+            data["dueReminderSentOn"] = FieldValue.delete()
+        } else if let sentOn = todo.dueReminderSentOn {
+            data["dueReminderSentOn"] = sentOn
+        }
         if todo.isCompleted, let completedAt = todo.completedAt {
             data["completedAt"] = Self.orgTodoISO8601.string(from: completedAt)
         } else {

@@ -448,7 +448,8 @@ struct PayablesView: View {
                 frequency: payable.frequency,
                 isPaid: true,
                 paidAt: Date(),
-                originalPayableId: payable.originalPayableId
+                originalPayableId: payable.originalPayableId,
+                createdSource: payable.createdSource
             )
             try await FirebaseService.shared.updatePayable(userId: userId, locationId: locationId, payable: updatedPayable)
             
@@ -512,7 +513,8 @@ struct PayablesView: View {
                 dueDate: nextDate,
                 notes: payable.notes,
                 frequency: payable.frequency,
-                originalPayableId: payable.originalPayableId ?? payable.id
+                originalPayableId: payable.originalPayableId ?? payable.id,
+                createdSource: payable.createdSource ?? "ios"
             )
             
             do {
@@ -578,7 +580,8 @@ struct PayablesView: View {
                     dueDate: nextDate,
                     notes: paidPayable.notes,
                     frequency: paidPayable.frequency,
-                    originalPayableId: paidPayable.originalPayableId ?? paidPayable.id
+                    originalPayableId: paidPayable.originalPayableId ?? paidPayable.id,
+                    createdSource: paidPayable.createdSource ?? "ios"
                 )
                 
                 do {
@@ -886,6 +889,7 @@ struct AddPayableView: View {
     @State private var errorMessage: String?
     @State private var didPrefill = false
     @State private var showingRecurringScopePrompt = false
+    @State private var dueReminder = DueDateReminder()
     
     init(
         userId: String,
@@ -953,6 +957,7 @@ struct AddPayableView: View {
                         
                         if hasDueDate {
                             DatePicker("Due Date", selection: $selectedDate, displayedComponents: .date)
+                            DueDateReminderFormSection(reminder: $dueReminder)
                         }
                         
                         TextField("Notes (Optional)", text: $notes, axis: .vertical)
@@ -1019,6 +1024,7 @@ struct AddPayableView: View {
         }
         notes = existing.notes ?? ""
         frequency = existing.frequency
+        dueReminder = DueDateReminder.normalized(existing.dueReminder)
         didPrefill = true
     }
     
@@ -1030,22 +1036,33 @@ struct AddPayableView: View {
         
         isSaving = true
         do {
+            let newDueDate = hasDueDate ? selectedDate : nil
+            let reminderPayload = hasDueDate ? DueDateReminder.normalized(dueReminder) : nil
             if let existing = existing {
                 // EDIT — preserve id, locationId, createdAt, isPaid/paidAt,
                 // originalPayableId so we don't break the recurring chain or
                 // wipe out paid status of a historical entry.
+                let clearSent = DueDateReminder.shouldClearSentFlag(
+                    oldDue: existing.dueDate,
+                    newDue: newDueDate,
+                    oldReminder: existing.dueReminder,
+                    newReminder: reminderPayload
+                )
                 let updated = Payable(
                     id: existing.id,
                     locationId: existing.locationId,
                     payTo: payTo,
                     amount: amountValue,
-                    dueDate: hasDueDate ? selectedDate : nil,
+                    dueDate: newDueDate,
                     createdAt: existing.createdAt,
                     notes: notes.isEmpty ? nil : notes,
                     frequency: frequency,
                     isPaid: existing.isPaid,
                     paidAt: existing.paidAt,
-                    originalPayableId: existing.originalPayableId
+                    originalPayableId: existing.originalPayableId,
+                    createdSource: existing.createdSource,
+                    dueReminder: reminderPayload,
+                    dueReminderSentOn: clearSent ? nil : existing.dueReminderSentOn
                 )
                 try await FirebaseService.shared.updatePayable(userId: userId, locationId: locationId, payable: updated)
                 
@@ -1065,7 +1082,8 @@ struct AddPayableView: View {
                             frequency: frequency,
                             isPaid: sibling.isPaid,
                             paidAt: sibling.paidAt,
-                            originalPayableId: sibling.originalPayableId
+                            originalPayableId: sibling.originalPayableId,
+                            createdSource: sibling.createdSource
                         )
                         try await FirebaseService.shared.updatePayable(userId: userId, locationId: locationId, payable: updatedSibling)
                     }
@@ -1075,9 +1093,11 @@ struct AddPayableView: View {
                     locationId: locationId,
                     payTo: payTo,
                     amount: amountValue,
-                    dueDate: hasDueDate ? selectedDate : nil,
+                    dueDate: newDueDate,
                     notes: notes.isEmpty ? nil : notes,
-                    frequency: frequency
+                    frequency: frequency,
+                    createdSource: "ios",
+                    dueReminder: reminderPayload
                 )
                 try await FirebaseService.shared.savePayable(userId: userId, locationId: locationId, payable: payable)
             }

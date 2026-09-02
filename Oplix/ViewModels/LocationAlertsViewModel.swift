@@ -37,7 +37,6 @@ final class LocationAlertsViewModel: ObservableObject {
     private let varianceLookbackDays: Int = 7
     private let missingRegisterLookbackDays: Int = 7
     private let lotteryActivityWindowDays: Int = 30
-    private let docExpiryWindowDays: Int = 30
 
     init(userId: String, locationId: String) {
         self.userId = userId
@@ -53,6 +52,7 @@ final class LocationAlertsViewModel: ObservableObject {
         async let shiftsT = firebaseService.fetchShifts(userId: userId, locationId: locationId)
         async let formsT = firebaseService.fetchLotteryForms(userId: userId, locationId: locationId)
         async let payablesT = firebaseService.fetchPayables(userId: userId, locationId: locationId)
+        async let receivablesT = firebaseService.fetchReceivables(userId: userId, locationId: locationId)
         async let employeesT = firebaseService.fetchEmployees(userId: userId, locationId: locationId)
         async let docsT = firebaseService.fetchAllDocuments(userId: userId)
         async let tasksT = firebaseService.fetchManagerTasks(userId: userId)
@@ -61,12 +61,11 @@ final class LocationAlertsViewModel: ObservableObject {
         let shifts: [Shift]
         let forms: [LotteryForm]
         let payables: [Payable]
+        let receivables: [Receivable]
         let locEmployees: [Employee]
         let docs: [Document]
         let tasks: [WorkTask]
         do {
-            // Without a location we can't render names in subtitles, so
-            // fall back to a placeholder rather than failing the whole load.
             location = (try? await locationT) ?? Location(
                 id: locationId, name: "This location",
                 address: "", managerId: userId,
@@ -75,6 +74,7 @@ final class LocationAlertsViewModel: ObservableObject {
             shifts = try await shiftsT
             forms = try await formsT
             payables = try await payablesT
+            receivables = try await receivablesT
             locEmployees = try await employeesT
             docs = try await docsT
             tasks = try await tasksT
@@ -87,15 +87,36 @@ final class LocationAlertsViewModel: ObservableObject {
         for e in locEmployees { nameLookup[e.id] = e.name }
 
         var out: [ActionAlert] = []
-        out.append(contentsOf: clockOutAlerts(shifts: shifts, location: location, names: nameLookup))
-        out.append(contentsOf: missingRegisterAlerts(shifts: shifts, location: location, names: nameLookup))
-        out.append(contentsOf: registerVarianceAlerts(shifts: shifts, location: location))
-        out.append(contentsOf: lotteryNotClosedAlerts(forms: forms, location: location))
-        out.append(contentsOf: lotteryVarianceAlerts(forms: forms, location: location))
-        out.append(contentsOf: overduePayableAlerts(payables: payables, location: location))
-        out.append(contentsOf: expiringDocAlerts(docs: docs, location: location))
-        out.append(contentsOf: scheduleGapAlerts(employees: locEmployees))
-        out.append(contentsOf: disapprovedTaskAlerts(tasks: tasks, location: location))
+        if location.isNotificationEnabled(.clockOut) {
+            out.append(contentsOf: clockOutAlerts(shifts: shifts, location: location, names: nameLookup))
+        }
+        if location.isNotificationEnabled(.missingRegister) {
+            out.append(contentsOf: missingRegisterAlerts(shifts: shifts, location: location, names: nameLookup))
+        }
+        if location.isNotificationEnabled(.registerVariance) {
+            out.append(contentsOf: registerVarianceAlerts(shifts: shifts, location: location))
+        }
+        if location.isNotificationEnabled(.lotteryNotClosed) {
+            out.append(contentsOf: lotteryNotClosedAlerts(forms: forms, location: location))
+        }
+        if location.isNotificationEnabled(.lotteryVariance) {
+            out.append(contentsOf: lotteryVarianceAlerts(forms: forms, location: location))
+        }
+        if location.isNotificationEnabled(.payablesOverdue) {
+            out.append(contentsOf: overduePayableAlerts(payables: payables, location: location))
+        }
+        if location.isNotificationEnabled(.receivablesOverdue) {
+            out.append(contentsOf: overdueReceivableAlerts(receivables: receivables, location: location))
+        }
+        if location.isNotificationEnabled(.documentExpiry) {
+            out.append(contentsOf: expiringDocAlerts(docs: docs, location: location))
+        }
+        if location.isNotificationEnabled(.scheduleGaps) {
+            out.append(contentsOf: scheduleGapAlerts(employees: locEmployees))
+        }
+        if location.isNotificationEnabled(.tasksRework) {
+            out.append(contentsOf: disapprovedTaskAlerts(tasks: tasks, location: location))
+        }
 
         out.sort { lhs, rhs in
             if lhs.severity != rhs.severity { return lhs.severity < rhs.severity }
@@ -242,14 +263,33 @@ final class LocationAlertsViewModel: ObservableObject {
         )]
     }
 
+    private func overdueReceivableAlerts(receivables: [Receivable], location: Location) -> [ActionAlert] {
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let overdue = receivables.filter { r in
+            guard !r.isReceived, let due = r.dueDate else { return false }
+            return Calendar.current.startOfDay(for: due) < todayStart
+        }
+        guard !overdue.isEmpty else { return [] }
+        let total = overdue.reduce(0.0) { $0 + $1.amount }
+        let s = overdue.count == 1 ? "" : "s"
+        return [ActionAlert(
+            id: "receivables_\(location.id)",
+            severity: .info,
+            title: "\(overdue.count) receivable\(s) overdue · \(formatCurrency(total))",
+            subtitle: nil,
+            route: .location(id: location.id),
+            sortKey: 20,
+            category: .overdueReceivables
+        )]
+    }
+
     private func expiringDocAlerts(docs: [Document], location: Location) -> [ActionAlert] {
         let calendar = Calendar.current
         let now = Date()
-        let cutoff = calendar.date(byAdding: .day, value: docExpiryWindowDays, to: now) ?? now
+        let leadDays = location.documentExpiryLeadDays()
+        let cutoff = calendar.date(byAdding: .day, value: leadDays, to: now) ?? now
 
         return docs.compactMap { doc in
-            // Filter to this location only — documents are stored
-            // manager-wide, not under the location.
             guard doc.locationId == location.id else { return nil }
             guard let exp = doc.expiryDate, exp >= now, exp <= cutoff else { return nil }
             let days = max(0, calendar.dateComponents([.day], from: now, to: exp).day ?? 0)

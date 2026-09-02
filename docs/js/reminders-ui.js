@@ -48,6 +48,10 @@
             createdAt: r.createdAt || null,
             isCompleted: !!r.isCompleted,
             completedAt: r.completedAt || null,
+            dueReminder: r.dueDate && window.OplixDueDateReminderModel
+                ? OplixDueDateReminderModel.normalizeDueReminder(r.dueReminder)
+                : null,
+            dueReminderSentOn: r.dueReminderSentOn || null,
         };
     }
 
@@ -89,6 +93,16 @@
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         };
         payload.dueDate = r.dueDate || null;
+        if (r.dueReminder) {
+            payload.dueReminder = r.dueReminder;
+        } else {
+            payload.dueReminder = firebase.firestore.FieldValue.delete();
+        }
+        if (r.dueReminderSentOn === null) {
+            payload.dueReminderSentOn = firebase.firestore.FieldValue.delete();
+        } else if (r.dueReminderSentOn) {
+            payload.dueReminderSentOn = r.dueReminderSentOn;
+        }
         if (r.isCompleted) {
             payload.completedAt = r.completedAt || firebase.firestore.FieldValue.serverTimestamp();
         } else {
@@ -172,6 +186,7 @@
                 <label class="books-label">Notes
                     <textarea class="books-input dir-textarea" name="notes" rows="3" maxlength="500">${escapeHtml(r.notes)}</textarea>
                 </label>
+                ${window.OplixDueDateReminderModel ? OplixDueDateReminderModel.renderDueReminderFields(r.dueReminder) : ""}
                 <div class="dir-form-actions">
                     <button type="submit" class="btn">Save reminder</button>
                     <button type="button" class="btn btn-nav-outline" data-rem-cancel>Cancel</button>
@@ -243,6 +258,9 @@
             }
             const form = slot.querySelector("[data-rem-form]");
             form?.querySelector("[data-rem-cancel]")?.addEventListener("click", closeForm);
+            if (form && window.OplixDueDateReminderModel) {
+                OplixDueDateReminderModel.wireDueReminderForm(form);
+            }
             form?.addEventListener("submit", async (e) => {
                 e.preventDefault();
                 const st = form.querySelector("[data-rem-form-status]");
@@ -254,20 +272,36 @@
                 if (st) st.textContent = "Saving…";
                 const fd = new FormData(form);
                 const dueStr = String(fd.get("dueDate") || "").trim();
+                const dueDate = dueTimestampFromInput(dueStr);
+                const dueReminder = dueDate && window.OplixDueDateReminderModel
+                    ? OplixDueDateReminderModel.readDueReminderFromForm(form)
+                    : null;
                 const existing = reminders().find((r) => r.id === id) || {};
+                const existingNorm = normalizeReminder(existing, ctx.locationId);
+                const resetSent = window.OplixDueDateReminderModel
+                    ? OplixDueDateReminderModel.shouldClearSentFlag(
+                          existingNorm.dueDate,
+                          dueDate,
+                          existingNorm.dueReminder,
+                          dueReminder
+                      )
+                    : false;
                 try {
                     await OplixSaveBusy.run(async () => {
-                        await save(ctx.userId, ctx.locationId, {
+                        const payload = {
                             ...existing,
                             id: id || newId(),
                             locationId: ctx.locationId,
                             title,
                             notes: String(fd.get("notes") || "").trim(),
-                            dueDate: dueTimestampFromInput(dueStr),
+                            dueDate,
+                            dueReminder,
+                            dueReminderSentOn: resetSent ? null : existingNorm.dueReminderSentOn,
                             isCompleted: existing.isCompleted || false,
                             completedAt: existing.completedAt || null,
                             createdAt: existing.createdAt,
-                        });
+                        };
+                        await save(ctx.userId, ctx.locationId, payload);
                     }, "Saving…");
                     closeForm();
                     setStatus("Saved.");

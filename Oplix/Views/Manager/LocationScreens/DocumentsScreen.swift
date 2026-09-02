@@ -192,6 +192,7 @@ struct AddDocumentView: View {
     @State private var documentName: String = ""
     @State private var hasExpiry: Bool = false
     @State private var expiryDate: Date = Date()
+    @State private var dueReminder = DueDateReminder()
     @State private var selectedFile: URL?
     @State private var fileData: Data?
     @State private var fileName: String = ""
@@ -260,6 +261,7 @@ struct AddDocumentView: View {
                         if hasExpiry {
                             DatePicker("Expiry Date", selection: $expiryDate, displayedComponents: .date)
                                 .disabled(isUploading)
+                            DueDateReminderFormSection(reminder: $dueReminder)
                         }
                     }
                 }
@@ -378,7 +380,8 @@ struct AddDocumentView: View {
                 fileName: fileName.isEmpty ? "document" : fileName,
                 fileType: fileType.isEmpty ? "pdf" : fileType,
                 expiryDate: hasExpiry ? expiryDate : nil,
-                uploadedBy: userId
+                uploadedBy: userId,
+                dueReminder: hasExpiry ? dueReminder : nil
             )
             dismiss()
         } catch {

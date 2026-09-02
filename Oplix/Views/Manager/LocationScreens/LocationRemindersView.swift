@@ -203,6 +203,7 @@ private struct LocationReminderEditSheet: View {
     @State private var notesText = ""
     @State private var hasDueDate = false
     @State private var dueDate = Date()
+    @State private var dueReminder = DueDateReminder()
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -218,6 +219,7 @@ private struct LocationReminderEditSheet: View {
                     Toggle("Due date", isOn: $hasDueDate)
                     if hasDueDate {
                         DatePicker("Due", selection: $dueDate, displayedComponents: [.date])
+                        DueDateReminderFormSection(reminder: $dueReminder)
                     }
                 }
             }
@@ -245,6 +247,7 @@ private struct LocationReminderEditSheet: View {
                         hasDueDate = true
                         dueDate = d
                     }
+                    dueReminder = DueDateReminder.normalized(e.dueReminder)
                 }
             }
             .alert("Error", isPresented: Binding(
@@ -264,24 +267,35 @@ private struct LocationReminderEditSheet: View {
         isSaving = true
         defer { isSaving = false }
         let notes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newDue = hasDueDate ? dueDate : nil
+        let reminderPayload = hasDueDate ? DueDateReminder.normalized(dueReminder) : nil
         let reminder: LocationReminder
         if let e = existing {
+            let clearSent = DueDateReminder.shouldClearSentFlag(
+                oldDue: e.dueDate,
+                newDue: newDue,
+                oldReminder: e.dueReminder,
+                newReminder: reminderPayload
+            )
             reminder = LocationReminder(
                 id: e.id,
                 locationId: locationId,
                 title: trimmed,
                 notes: notes.isEmpty ? nil : notes,
-                dueDate: hasDueDate ? dueDate : nil,
+                dueDate: newDue,
                 createdAt: e.createdAt,
                 isCompleted: e.isCompleted,
-                completedAt: e.completedAt
+                completedAt: e.completedAt,
+                dueReminder: reminderPayload,
+                dueReminderSentOn: clearSent ? nil : e.dueReminderSentOn
             )
         } else {
             reminder = LocationReminder(
                 locationId: locationId,
                 title: trimmed,
                 notes: notes.isEmpty ? nil : notes,
-                dueDate: hasDueDate ? dueDate : nil
+                dueDate: newDue,
+                dueReminder: reminderPayload
             )
         }
         do {

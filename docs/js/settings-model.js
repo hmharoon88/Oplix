@@ -18,6 +18,9 @@
             assignment: c.assignment !== false,
             shiftSummary: c.shiftSummary !== false,
             cashAlert: c.cashAlert !== false,
+            financeAlert: c.financeAlert !== false,
+            complianceAlert: c.complianceAlert !== false,
+            dueReminder: c.dueReminder !== false,
             dailyDigest: c.dailyDigest === true,
         };
     }
@@ -56,6 +59,9 @@
                 assignment: !!form.assignment,
                 shiftSummary: !!form.shiftSummary,
                 cashAlert: !!form.cashAlert,
+                financeAlert: !!form.financeAlert,
+                complianceAlert: !!form.complianceAlert,
+                dueReminder: !!form.dueReminder,
                 dailyDigest: !!form.dailyDigest,
             },
             quietHours: {
@@ -79,6 +85,9 @@
             assignment: cat.assignment,
             shiftSummary: cat.shiftSummary,
             cashAlert: cat.cashAlert,
+            financeAlert: cat.financeAlert,
+            complianceAlert: cat.complianceAlert,
+            dueReminder: cat.dueReminder,
             dailyDigest: cat.dailyDigest,
             quietHoursEnabled: q.enabled,
             quietStart: minutesToTimeInput(q.startMin),

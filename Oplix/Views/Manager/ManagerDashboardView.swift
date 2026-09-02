@@ -20,7 +20,6 @@ struct ManagerDashboardView: View {
 
     @StateObject private var viewModel = ManagerDashboardViewModel()
     @EnvironmentObject var authViewModel: AuthViewModel
-    @State private var showingAddLocation = false
     @State private var selectedLocation: Location?
     @State private var locationToDelete: Location?
     @State private var showingDeleteConfirmation = false
@@ -78,13 +77,6 @@ struct ManagerDashboardView: View {
                             .font(.system(size: 20, weight: .bold))
                             .foregroundColor(.white)
                         Spacer()
-                        Button(action: {
-                            showingAddLocation = true
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 28))
-                                .foregroundColor(.white)
-                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 20)
@@ -115,10 +107,11 @@ struct ManagerDashboardView: View {
                             Text("No locations yet")
                                 .font(.title2)
                                 .foregroundColor(.gray)
-                            Button("Add First Location") {
-                                showingAddLocation = true
-                            }
-                            .cloudButton()
+                            Text("Add facilities from the Oplix web dashboard, then sign in here to manage them.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
                         }
                         .padding()
                         Spacer()
@@ -156,10 +149,6 @@ struct ManagerDashboardView: View {
             .preferredColorScheme(.light)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showingAddLocation) {
-                AddLocationView(viewModel: viewModel)
-                    .environmentObject(authViewModel)
-            }
             .fullScreenCover(item: $selectedLocation) { location in
                 NavigationStack {
                     if let userId = authViewModel.currentUser?.id {

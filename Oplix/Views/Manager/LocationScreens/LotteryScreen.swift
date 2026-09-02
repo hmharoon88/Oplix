@@ -75,7 +75,11 @@ struct LotteryScreen: View {
                     // Pack inventory
                     if let location = viewModel.location {
                         NavigationLink {
-                            LotteryPackInventoryView(managerUserId: viewModel.userId, location: location)
+                            LotteryPackInventoryView(
+                                managerUserId: viewModel.userId,
+                                location: location,
+                                canReorganizeRack: true
+                            )
                         } label: {
                             VStack(spacing: 12) {
                                 Image(systemName: "shippingbox.fill")

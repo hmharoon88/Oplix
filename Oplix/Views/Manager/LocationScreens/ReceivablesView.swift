@@ -440,7 +440,8 @@ struct ReceivablesView: View {
                 frequency: receivable.frequency,
                 isReceived: true,
                 receivedAt: Date(),
-                originalReceivableId: receivable.originalReceivableId
+                originalReceivableId: receivable.originalReceivableId,
+                createdSource: receivable.createdSource
             )
             try await FirebaseService.shared.updateReceivable(userId: userId, locationId: locationId, receivable: updatedReceivable)
             
@@ -504,7 +505,8 @@ struct ReceivablesView: View {
                 dueDate: nextDate,
                 notes: receivable.notes,
                 frequency: receivable.frequency,
-                originalReceivableId: receivable.originalReceivableId ?? receivable.id
+                originalReceivableId: receivable.originalReceivableId ?? receivable.id,
+                createdSource: receivable.createdSource ?? "ios"
             )
             
             do {
@@ -570,7 +572,8 @@ struct ReceivablesView: View {
                     dueDate: nextDate,
                     notes: receivedReceivable.notes,
                     frequency: receivedReceivable.frequency,
-                    originalReceivableId: receivedReceivable.originalReceivableId ?? receivedReceivable.id
+                    originalReceivableId: receivedReceivable.originalReceivableId ?? receivedReceivable.id,
+                    createdSource: receivedReceivable.createdSource ?? "ios"
                 )
                 
                 do {
@@ -863,6 +866,7 @@ struct AddReceivableView: View {
     @State private var errorMessage: String?
     @State private var didPrefill = false
     @State private var showingRecurringScopePrompt = false
+    @State private var dueReminder = DueDateReminder()
     
     init(
         userId: String,
@@ -927,6 +931,7 @@ struct AddReceivableView: View {
                         
                         if hasDueDate {
                             DatePicker("Due Date", selection: $selectedDate, displayedComponents: .date)
+                            DueDateReminderFormSection(reminder: $dueReminder)
                         }
                         
                         TextField("Notes (Optional)", text: $notes, axis: .vertical)
@@ -993,6 +998,7 @@ struct AddReceivableView: View {
         }
         notes = existing.notes ?? ""
         frequency = existing.frequency
+        dueReminder = DueDateReminder.normalized(existing.dueReminder)
         didPrefill = true
     }
     
@@ -1004,19 +1010,30 @@ struct AddReceivableView: View {
         
         isSaving = true
         do {
+            let newDueDate = hasDueDate ? selectedDate : nil
+            let reminderPayload = hasDueDate ? DueDateReminder.normalized(dueReminder) : nil
             if let existing = existing {
+                let clearSent = DueDateReminder.shouldClearSentFlag(
+                    oldDue: existing.dueDate,
+                    newDue: newDueDate,
+                    oldReminder: existing.dueReminder,
+                    newReminder: reminderPayload
+                )
                 let updated = Receivable(
                     id: existing.id,
                     locationId: existing.locationId,
                     receiveFrom: receiveFrom,
                     amount: amountValue,
-                    dueDate: hasDueDate ? selectedDate : nil,
+                    dueDate: newDueDate,
                     createdAt: existing.createdAt,
                     notes: notes.isEmpty ? nil : notes,
                     frequency: frequency,
                     isReceived: existing.isReceived,
                     receivedAt: existing.receivedAt,
-                    originalReceivableId: existing.originalReceivableId
+                    originalReceivableId: existing.originalReceivableId,
+                    createdSource: existing.createdSource,
+                    dueReminder: reminderPayload,
+                    dueReminderSentOn: clearSent ? nil : existing.dueReminderSentOn
                 )
                 try await FirebaseService.shared.updateReceivable(userId: userId, locationId: locationId, receivable: updated)
                 
@@ -1033,7 +1050,8 @@ struct AddReceivableView: View {
                             frequency: frequency,
                             isReceived: sibling.isReceived,
                             receivedAt: sibling.receivedAt,
-                            originalReceivableId: sibling.originalReceivableId
+                            originalReceivableId: sibling.originalReceivableId,
+                            createdSource: sibling.createdSource
                         )
                         try await FirebaseService.shared.updateReceivable(userId: userId, locationId: locationId, receivable: updatedSibling)
                     }
@@ -1043,9 +1061,11 @@ struct AddReceivableView: View {
                     locationId: locationId,
                     receiveFrom: receiveFrom,
                     amount: amountValue,
-                    dueDate: hasDueDate ? selectedDate : nil,
+                    dueDate: newDueDate,
                     notes: notes.isEmpty ? nil : notes,
-                    frequency: frequency
+                    frequency: frequency,
+                    createdSource: "ios",
+                    dueReminder: reminderPayload
                 )
                 try await FirebaseService.shared.saveReceivable(userId: userId, locationId: locationId, receivable: receivable)
             }

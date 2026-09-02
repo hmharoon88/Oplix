@@ -65,6 +65,14 @@ struct EmployeeLotteryFormView: View {
         scannableBinCount > 0
     }
 
+    private var isLotteryScanOnly: Bool {
+        viewModel.location?.isLotteryScanOnly == true
+    }
+
+    private var showsScanChrome: Bool {
+        hasScannableBins || isLotteryScanOnly
+    }
+
     fileprivate static let endWarningSlotWidth: CGFloat = 20
     fileprivate static let endScanSlotWidth: CGFloat = 28
 
@@ -206,25 +214,41 @@ struct EmployeeLotteryFormView: View {
         .sheet(isPresented: $showingCloseWarning) {
             CloseIncompleteBinsSheet(
                 rows: closeWarningRows,
-                onCancel: {
+                onGoBackToScan: {
                     showingCloseWarning = false
                 },
-                onContinue: { returnedRowIds in
+                onContinue: { soldOutRowIds, returnedRowIds in
                     showingCloseWarning = false
                     Task {
-                        if !returnedRowIds.isEmpty {
-                            do {
+                        do {
+                            if !soldOutRowIds.isEmpty {
+                                try await viewModel.markBinsSoldOutAtClose(
+                                    rowIds: soldOutRowIds,
+                                    terminalNumber: terminalNumber
+                                )
+                                await MainActor.run {
+                                    for id in soldOutRowIds {
+                                        rowValues[id] = "00"
+                                    }
+                                }
+                            }
+                            if !returnedRowIds.isEmpty {
                                 try await viewModel.markBinsReturnedAtClose(
                                     rowIds: returnedRowIds,
                                     terminalNumber: terminalNumber
                                 )
-                            } catch {
                                 await MainActor.run {
-                                    errorMessage = error.localizedDescription
-                                    showingError = true
+                                    for id in returnedRowIds {
+                                        rowValues[id] = ""
+                                    }
                                 }
-                                return
                             }
+                        } catch {
+                            await MainActor.run {
+                                errorMessage = error.localizedDescription
+                                showingError = true
+                            }
+                            return
                         }
                         await closeLotteryShift(skipValidation: true)
                     }
@@ -323,7 +347,9 @@ struct EmployeeLotteryFormView: View {
             }
             .disabled(!hasScannableBins)
 
-            Text("Or tap the scan icon on a row to fill one End #. You can still type manually.")
+            Text(isLotteryScanOnly
+                 ? "Scan only is on — use Scan bins (camera) or External scanner so the session stays open for the whole rack. Typing End # is off. Row scan icons also open continuous mode."
+                 : "Or tap the scan icon on a row to fill one End #. You can still type manually.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -400,8 +426,9 @@ struct EmployeeLotteryFormView: View {
             allRowIds: allRowIds,
             focusedRowId: $focusedRowId,
             isLastRow: index == template.rows.count - 1,
-            showsScanChrome: hasScannableBins,
+            showsScanChrome: showsScanChrome,
             canScanEnding: canScanRow,
+            allowsManualEntry: !isLotteryScanOnly,
             onScanEnding: canScanRow ? {
                 focusedRowId = nil
                 UIApplication.shared.sendAction(
@@ -410,11 +437,18 @@ struct EmployeeLotteryFormView: View {
                     from: nil,
                     for: nil
                 )
-                shiftCloseScanTarget = LotteryShiftCloseScanTarget(
-                    id: row.id,
-                    binNumber: index + 1,
-                    row: row
-                )
+                // Scan-only locations can't type Ends — open continuous rack
+                // walk so the camera stays open between bins (one-shot per-row
+                // scan was closing after each ticket and felt broken).
+                if isLotteryScanOnly {
+                    shiftCloseScanTarget = .continuous(rows: template.rows)
+                } else {
+                    shiftCloseScanTarget = LotteryShiftCloseScanTarget(
+                        id: row.id,
+                        binNumber: index + 1,
+                        row: row
+                    )
+                }
             } : nil,
             onValueChanged: { newValue in
                 handleRowValueChanged(rowId: row.id, newValue: newValue)
@@ -576,14 +610,14 @@ struct EmployeeLotteryFormView: View {
 
     private func endHeaderCell(width: CGFloat) -> some View {
         HStack(spacing: 0) {
-            if hasScannableBins {
+            if showsScanChrome {
                 Color.clear.frame(width: Self.endWarningSlotWidth)
             }
             Text("End #")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(.black)
                 .frame(maxWidth: .infinity)
-            if hasScannableBins {
+            if showsScanChrome {
                 Color.clear.frame(width: Self.endScanSlotWidth)
             }
         }
@@ -756,12 +790,15 @@ struct EmployeeLotteryFormView: View {
             // Close lottery shift with calculations and report creation.
             // `terminalNumber == nil` keeps every existing single-terminal
             // call site behaving exactly as it did before multi-terminal.
+            // Prefer JPEG from imageData; if only the UIImage preview
+            // exists, encode it so the receipt still uploads.
+            let photoData = imageData ?? capturedImage?.jpegData(compressionQuality: 0.8)
             let completedForm = try await viewModel.closeLotteryShift(
                 formData: formData,
                 onlineTotals: onlineTotals.filter { !$0.isEmpty },
                 onlineCashes: onlineCashes.filter { !$0.isEmpty },
                 instantCashes: instantCashes.filter { !$0.isEmpty },
-                imageData: imageData,
+                imageData: photoData,
                 registerCash: registerCash,
                 cashInHand: cashInHand,
                 skipValidation: skipValidation,
@@ -876,6 +913,7 @@ struct LotteryFormRowView: View {
     let isLastRow: Bool
     var showsScanChrome: Bool = false
     var canScanEnding: Bool = false
+    var allowsManualEntry: Bool = true
     var onScanEnding: (() -> Void)?
     let onValueChanged: (String) -> Void
     
@@ -892,6 +930,7 @@ struct LotteryFormRowView: View {
         isLastRow: Bool,
         showsScanChrome: Bool = false,
         canScanEnding: Bool = false,
+        allowsManualEntry: Bool = true,
         onScanEnding: (() -> Void)? = nil,
         onValueChanged: @escaping (String) -> Void
     ) {
@@ -905,6 +944,7 @@ struct LotteryFormRowView: View {
         self.isLastRow = isLastRow
         self.showsScanChrome = showsScanChrome
         self.canScanEnding = canScanEnding
+        self.allowsManualEntry = allowsManualEntry
         self.onScanEnding = onScanEnding
         self.onValueChanged = onValueChanged
         _localValue = State(initialValue: rowValue)
@@ -987,6 +1027,7 @@ struct LotteryFormRowView: View {
                     rowId: row.id,
                     focusedRowId: $focusedRowId,
                     isLastRow: isLastRow,
+                    isEditable: allowsManualEntry,
                     onNext: {
                         moveToNextRow()
                     },
@@ -996,8 +1037,9 @@ struct LotteryFormRowView: View {
                 )
                 .multilineTextAlignment(.center)
                 .font(.system(size: 16, weight: .bold))
-                .foregroundColor(.black)
+                .foregroundColor(allowsManualEntry ? .black : .secondary)
                 .frame(maxWidth: .infinity, minHeight: 44)
+                .opacity(allowsManualEntry ? 1 : 0.85)
 
                 if showsScanChrome {
                     Group {
@@ -1127,6 +1169,7 @@ struct NumberPadTextField: UIViewRepresentable {
     let rowId: String
     @Binding var focusedRowId: String?
     let isLastRow: Bool
+    var isEditable: Bool = true
     let onNext: () -> Void
     let onDone: () -> Void
     
@@ -1147,6 +1190,10 @@ struct NumberPadTextField: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: UITextField, context: Context) {
+        context.coordinator.parent = self
+        uiView.isEnabled = isEditable
+        uiView.isUserInteractionEnabled = isEditable
+
         // Always ensure text color is black
         if uiView.textColor != .black {
             uiView.textColor = .black
@@ -1166,11 +1213,15 @@ struct NumberPadTextField: UIViewRepresentable {
     }
     
     class Coordinator: NSObject, UITextFieldDelegate {
-        let parent: NumberPadTextField
+        var parent: NumberPadTextField
         weak var textField: UITextField?
         
         init(_ parent: NumberPadTextField) {
             self.parent = parent
+        }
+
+        func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
+            parent.isEditable
         }
         
         func textFieldDidChangeSelection(_ textField: UITextField) {
@@ -1183,59 +1234,118 @@ struct NumberPadTextField: UIViewRepresentable {
     }
 }
 
-/// Shown when the employee tries to close with bins missing numbers.
-/// Bins with an active pack can be check-marked as returned (rep took
-/// the pack back mid-shift), which records the return and clears the
-/// bin before the close runs. Unchecked bins are simply left out of
-/// the calculations, same as before.
+/// Shown when the employee tries to close with bins missing End # (or other
+/// required fields). Every resolvable bin must be marked **Sold out** or
+/// **Returned** — no silent skip. Cancel returns them to scan/fix entry.
 struct CloseIncompleteBinsSheet: View {
-    let rows: [EmployeeHomeViewModel.ValidationResult.IncompleteRow]
-    let onCancel: () -> Void
-    let onContinue: ([String]) -> Void
+    enum Disposition: Equatable {
+        case soldOut
+        case returned
+    }
 
-    @State private var returnedRowIds: Set<String> = []
+    let rows: [EmployeeHomeViewModel.ValidationResult.IncompleteRow]
+    let onGoBackToScan: () -> Void
+    /// soldOutRowIds, returnedRowIds
+    let onContinue: ([String], [String]) -> Void
+
+    @State private var dispositions: [String: Disposition] = [:]
+    @State private var showingLargeSoldOutConfirm = false
+
+    private var unresolvableRows: [EmployeeHomeViewModel.ValidationResult.IncompleteRow] {
+        rows.filter { !$0.canResolveAtClose }
+    }
+
+    private var resolvableRows: [EmployeeHomeViewModel.ValidationResult.IncompleteRow] {
+        rows.filter { $0.canResolveAtClose }
+    }
+
+    private var allResolvableChosen: Bool {
+        resolvableRows.allSatisfy { dispositions[$0.rowId] != nil }
+    }
+
+    private var canClose: Bool {
+        unresolvableRows.isEmpty && allResolvableChosen
+    }
+
+    private var soldOutTotalDollars: Int {
+        rows.reduce(0) { partial, row in
+            guard dispositions[row.rowId] == .soldOut else { return partial }
+            return partial + row.soldOutDollars
+        }
+    }
+
+    private var soldOutTotalTickets: Int {
+        rows.reduce(0) { partial, row in
+            guard dispositions[row.rowId] == .soldOut else { return partial }
+            return partial + row.soldOutTickets
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text("These bins are missing numbers and won’t be included in the calculations. If a pack was taken back (returned) during this shift, check-mark its bin so it’s recorded as a return.")
+                    Text("These bins are missing End #. Choose Sold out or Returned for each one, or go back and scan. You can’t skip a bin without a reason.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
-                Section("Incomplete bins") {
-                    ForEach(rows) { row in
-                        if row.canMarkReturned {
-                            Button {
-                                if returnedRowIds.contains(row.rowId) {
-                                    returnedRowIds.remove(row.rowId)
-                                } else {
-                                    returnedRowIds.insert(row.rowId)
-                                }
-                            } label: {
-                                HStack {
-                                    rowDescription(row)
-                                    Spacer()
-                                    Image(systemName: returnedRowIds.contains(row.rowId)
-                                        ? "checkmark.square.fill"
-                                        : "square")
-                                        .font(.title3)
-                                        .foregroundColor(returnedRowIds.contains(row.rowId) ? .green : .secondary)
-                                }
+                if !unresolvableRows.isEmpty {
+                    Section {
+                        ForEach(unresolvableRows) { row in
+                            VStack(alignment: .leading, spacing: 4) {
+                                rowTitle(row)
+                                Text("Missing \(row.missingFields.joined(separator: ", ")). Go back and scan or fix this bin on the form — it can’t be resolved here.")
+                                    .font(.caption)
+                                    .foregroundColor(.red)
                             }
-                            .buttonStyle(.plain)
-                        } else {
-                            rowDescription(row)
                         }
+                    } header: {
+                        Text("Need scan / fix")
                     }
                 }
 
-                if !returnedRowIds.isEmpty {
+                Section {
+                    ForEach(resolvableRows) { row in
+                        VStack(alignment: .leading, spacing: 10) {
+                            rowTitle(row)
+                            Text("Missing \(row.missingFields.joined(separator: ", "))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            if row.canMarkSoldOut {
+                                dispositionButton(
+                                    title: "Sold out",
+                                    subtitle: "Begin \(displayTicket(row.beginningNumber)) → 00 = \(row.soldOutTickets) tickets · $\(row.soldOutDollars). Next Begin \(displayTicket(row.nextBeginAfterSoldOut)).",
+                                    selected: dispositions[row.rowId] == .soldOut,
+                                    tint: .orange
+                                ) {
+                                    dispositions[row.rowId] = .soldOut
+                                }
+                            }
+
+                            if row.canMarkReturned {
+                                dispositionButton(
+                                    title: "Returned",
+                                    subtitle: "$0 this shift — pack cleared from rack",
+                                    selected: dispositions[row.rowId] == .returned,
+                                    tint: .blue
+                                ) {
+                                    dispositions[row.rowId] = .returned
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Text("Incomplete bins")
+                }
+
+                if soldOutTotalDollars > 0 || soldOutTotalTickets > 0 {
                     Section {
-                        Text("\(returnedRowIds.count) bin\(returnedRowIds.count == 1 ? "" : "s") will be recorded as returned packs (no sales counted this shift) and cleared from the rack.")
-                            .font(.caption)
-                            .foregroundColor(.orange)
+                        Text("From sold-out choices: \(soldOutTotalTickets) tickets · $\(soldOutTotalDollars)")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
                     }
                 }
             }
@@ -1243,38 +1353,86 @@ struct CloseIncompleteBinsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
+                    Button("Go back to scan", action: onGoBackToScan)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Close shift") {
-                        onContinue(Array(returnedRowIds))
+                        if soldOutTotalDollars >= 50 {
+                            showingLargeSoldOutConfirm = true
+                        } else {
+                            submit()
+                        }
                     }
+                    .disabled(!canClose)
                 }
+            }
+            .alert("Confirm sold-out credit", isPresented: $showingLargeSoldOutConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Confirm & close") { submit() }
+            } message: {
+                Text("You’re crediting \(soldOutTotalTickets) tickets · $\(soldOutTotalDollars) for finished packs that weren’t scanned. Continue only if those books really sold out.")
             }
         }
     }
 
+    private func submit() {
+        let soldOut = rows.compactMap { dispositions[$0.rowId] == .soldOut ? $0.rowId : nil }
+        let returned = rows.compactMap { dispositions[$0.rowId] == .returned ? $0.rowId : nil }
+        onContinue(soldOut, returned)
+    }
+
+    private func displayTicket(_ value: String) -> String {
+        value == "0" ? "00" : value
+    }
+
     @ViewBuilder
-    private func rowDescription(_ row: EmployeeHomeViewModel.ValidationResult.IncompleteRow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text("Bin #\(row.binNumber)")
-                    .font(.headline)
-                if row.gameNumber != "N/A" {
-                    Text("Game \(row.gameNumber)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-            Text("Missing \(row.missingFields.joined(separator: ", "))")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            if row.canMarkReturned {
-                Text("Check if this pack was returned")
-                    .font(.caption2)
-                    .foregroundColor(.orange)
+    private func rowTitle(_ row: EmployeeHomeViewModel.ValidationResult.IncompleteRow) -> some View {
+        HStack(spacing: 6) {
+            Text("Bin #\(row.binNumber)")
+                .font(.headline)
+            if row.gameNumber != "N/A" {
+                Text("Game \(row.gameNumber)")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
         }
+    }
+
+    private func dispositionButton(
+        title: String,
+        subtitle: String,
+        selected: Bool,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundColor(selected ? tint : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(selected ? tint.opacity(0.12) : Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(selected ? tint.opacity(0.5) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

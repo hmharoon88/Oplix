@@ -67,17 +67,17 @@ struct AssignStockPackSheet: View {
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                         if OhioLotteryBarcodeParser.gameNumbersMatch(row.gameNumber, pack.gameNumber) {
-                                            Text("Same game — keeps Begin \(row.beginningNumber)")
+                                            Text("Same game — Begin \(row.beginningNumber.isEmpty ? "—" : row.beginningNumber) unchanged")
                                                 .font(.caption2)
                                                 .foregroundColor(.green)
                                         } else {
-                                            Text("Different game — old pack credited sold out")
+                                            Text("Different game — old pack credited sold out; Begin/End unchanged")
                                                 .font(.caption2)
                                                 .foregroundColor(.orange)
                                         }
                                     } else {
-                                        Text("Empty")
-                                            .font(.caption)
+                                        Text("Empty — Begin \(row.beginningNumber.isEmpty ? "—" : row.beginningNumber) unchanged")
+                                            .font(.caption2)
                                             .foregroundColor(.green)
                                     }
                                 }

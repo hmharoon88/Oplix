@@ -13,6 +13,14 @@ class LocationDetailViewModel: ObservableObject {
     @Published var location: Location?
     @Published var employees: [Employee] = []
     @Published var supervisors: [Employee] = [] // Supervisors at this location
+
+    /// Employees and supervisors assigned to this location (for payroll sheet).
+    var payrollStaff: [Employee] {
+        (employees + supervisors).sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
     @Published var tasks: [WorkTask] = []
     @Published var shifts: [Shift] = []
     @Published var lotteryForms: [LotteryForm] = []
@@ -27,7 +35,7 @@ class LocationDetailViewModel: ObservableObject {
     
     private let firebaseService = FirebaseService.shared
     let userId: String
-    private let locationId: String
+    let locationId: String
     private var isLoadDataInProgress = false // Prevent concurrent loadData calls
     private var hasLoadedData = false // Track if data has been successfully loaded
     private var currentUserRole: User.UserRole? // Store current user's role to avoid fetching
@@ -205,13 +213,18 @@ class LocationDetailViewModel: ObservableObject {
         hasLoadedData = false
         await loadData()
     }
+
+    /// Fresh employee/supervisor lists (including loans) before opening payroll.
+    func refreshEmployeesForPayroll() async {
+        await reloadData()
+    }
     
     // Method to reset loaded data flag (allows reloading when view reappears)
     func resetLoadedDataFlag() {
         hasLoadedData = false
     }
     
-    func createEmployee(name: String, password: String, role: User.UserRole = .employee, workingHoursStart: String? = nil, workingHoursEnd: String? = nil, weeklySchedule: WeeklySchedule? = nil, is24Hours: Bool? = nil, hourlyRate: Double? = nil, canTakeRegister: Bool = false, canSubmitLottery: Bool = false, canEditSchedules: Bool? = nil, canManageTasks: Bool? = nil, canManageDocuments: Bool? = nil, managerEmail: String? = nil, managerPassword: String? = nil) async throws -> (username: String, email: String, password: String) {
+    func createEmployee(name: String, password: String, role: User.UserRole = .employee, workingHoursStart: String? = nil, workingHoursEnd: String? = nil, weeklySchedule: WeeklySchedule? = nil, is24Hours: Bool? = nil, hourlyRate: Double? = nil, canTakeRegister: Bool = false, canSubmitLottery: Bool = false, canEditSchedules: Bool? = nil, canManageTasks: Bool? = nil, canManageDocuments: Bool? = nil, canManagePayroll: Bool? = nil, managerEmail: String? = nil, managerPassword: String? = nil) async throws -> (username: String, email: String, password: String) {
         // Auto-generate username from name
         let baseUsername = name.lowercased()
             .replacingOccurrences(of: " ", with: "")
@@ -286,6 +299,7 @@ class LocationDetailViewModel: ObservableObject {
         employee.canEditSchedules = canEditSchedules
         employee.canManageTasks = canManageTasks
         employee.canManageDocuments = canManageDocuments
+        employee.canManagePayroll = canManagePayroll
         
         try await firebaseService.createManagerEmployee(userId: userId, employee: employee)
         try await firebaseService.createEmployee(userId: userId, locationId: locationId, employee: employee)
@@ -609,7 +623,7 @@ class LocationDetailViewModel: ObservableObject {
         }
     }
     
-    func createDocument(name: String, fileData: Data, fileName: String, fileType: String, expiryDate: Date?, uploadedBy: String) async throws {
+    func createDocument(name: String, fileData: Data, fileName: String, fileType: String, expiryDate: Date?, uploadedBy: String, dueReminder: DueDateReminder? = nil) async throws {
         // Upload file to Firebase Storage
         let fileURL = try await firebaseService.uploadDocument(
             fileData: fileData,
@@ -628,7 +642,8 @@ class LocationDetailViewModel: ObservableObject {
             fileType: fileType,
             uploadedAt: Date(),
             expiryDate: expiryDate,
-            uploadedBy: uploadedBy
+            uploadedBy: uploadedBy,
+            dueReminder: expiryDate != nil ? DueDateReminder.normalized(dueReminder) : nil
         )
         
         try await firebaseService.createDocument(userId: userId, locationId: locationId, document: document)
@@ -739,6 +754,14 @@ class LocationDetailViewModel: ObservableObject {
         location = updatedLocation
     }
 
+    /// Require barcode scan for End # on lottery close (no keypad typing).
+    func updateLotteryScanOnly(_ enabled: Bool) async throws {
+        guard let current = location else { return }
+        let updated = Location(copying: current, lotteryScanOnly: .some(enabled))
+        try await firebaseService.updateLocation(userId: userId, location: updated)
+        location = updated
+    }
+
     /// Rename the location and/or change its address. We rebuild the
     /// whole `Location` struct (rather than mutating in place) because
     /// `name` and `address` are `let` properties on the model — keeping
@@ -748,19 +771,19 @@ class LocationDetailViewModel: ObservableObject {
     func updateLocationDetails(name: String, address: String) async throws {
         guard let current = location else { return }
         let updated = Location(
-            id: current.id,
+            copying: current,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            address: address.trimmingCharacters(in: .whitespacesAndNewlines),
-            managerId: current.managerId,
-            employees: current.employees,
-            tasks: current.tasks,
-            lotteryForms: current.lotteryForms,
-            lotteryTerminalCount: current.lotteryTerminalCount,
-            lotteryArchivedTerminals: current.lotteryArchivedTerminals
+            address: address.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         try await firebaseService.updateLocation(userId: userId, location: updated)
-        // Optimistic local update so the header re-renders without
-        // waiting for the snapshot listener.
+        location = updated
+    }
+
+    func updateNotificationSettings(_ settings: FacilityNotificationSettings) async throws {
+        guard let current = location else { return }
+        let normalized = FacilityNotificationSettings.normalized(settings)
+        let updated = Location(copying: current, notificationSettings: normalized)
+        try await firebaseService.updateLocation(userId: userId, location: updated)
         location = updated
     }
 }

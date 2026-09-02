@@ -431,6 +431,165 @@
         );
     }
 
+    function weekOfMonthFromDayId(dayId) {
+        const day = parseInt(String(dayId || "").slice(8, 10), 10);
+        if (!Number.isFinite(day) || day < 1) return "week1";
+        if (day <= 7) return "week1";
+        if (day <= 14) return "week2";
+        if (day <= 21) return "week3";
+        return "week4";
+    }
+
+    function roundedMoney(value) {
+        return Math.round(num(value) * 100) / 100;
+    }
+
+    function parsePayrollRunDate(value) {
+        if (!value) return null;
+        if (value.toDate && typeof value.toDate === "function") return value.toDate();
+        if (value instanceof Date) return value;
+        const str = String(value);
+        if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+            return new Date(str.slice(0, 10) + "T12:00:00");
+        }
+        const parsed = new Date(str);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    /** Build `payrollRunSyncs[runId]` payload (matches iOS BooksPayrollSync). */
+    function buildPayrollRunSyncRecord(run) {
+        const periodEnd = parsePayrollRunDate(run?.periodEnd);
+        const dayId = periodEnd ? dayIdFromDate(periodEnd) : "";
+        const weekKey = weekOfMonthFromDayId(dayId);
+        const lines = (run?.lines || []).map((line) => ({
+            id: String(line.id || line.employeeId || ""),
+            employeeId: String(line.id || line.employeeId || ""),
+            employeeName: String(line.employeeName || "").trim() || "Employee",
+            hours: roundedMoney(line.hours),
+            hourlyRate: roundedMoney(line.hourlyRate),
+            pay: roundedMoney(line.pay),
+        }));
+        return {
+            periodEnd: dayId,
+            weekKey,
+            totalPay: roundedMoney(run?.totalPay),
+            lines,
+        };
+    }
+
+    /** Rebuild payroll lines + week buckets from sync map (iOS BooksPayrollSync parity). */
+    function rebuildMonthPayrollFromSyncs(existingMonth, payrollRunSyncs) {
+        const syncs = payrollRunSyncs || {};
+        const previousSyncs = existingMonth?.payrollRunSyncs || {};
+        const syncedEmployeeIds = new Set();
+        const aggregatedByEmployee = new Map();
+
+        Object.values(syncs).forEach((sync) => {
+            (sync?.lines || []).forEach((line) => {
+                const employeeId = String(line?.id || line?.employeeId || "").trim();
+                if (!employeeId) return;
+                syncedEmployeeIds.add(employeeId);
+                const hours = num(line.hours);
+                const pay = num(line.pay);
+                const hourlyRate = num(line.hourlyRate);
+                const employeeName = String(line.employeeName || "").trim() || "Employee";
+                const existing = aggregatedByEmployee.get(employeeId) || {
+                    id: employeeId,
+                    employeeId,
+                    employeeName,
+                    hours: 0,
+                    hourlyRate: 0,
+                    pay: 0,
+                };
+                existing.hours += hours;
+                existing.pay += pay;
+                if (hourlyRate > 0) existing.hourlyRate = hourlyRate;
+                if (employeeName) existing.employeeName = employeeName;
+                aggregatedByEmployee.set(employeeId, existing);
+            });
+        });
+
+        const existingLines = (existingMonth?.payrollLines || []).map(normalizePayrollLine);
+        const preservedLines = existingLines.filter((line) => {
+            const employeeId = String(line.id || line.employeeId || "").trim();
+            return employeeId && !syncedEmployeeIds.has(employeeId);
+        });
+
+        const runLines = [...aggregatedByEmployee.values()]
+            .map((line) => {
+                const hours = roundedMoney(line.hours);
+                const pay = roundedMoney(line.pay);
+                const hourlyRate =
+                    hours > 0 ? roundedMoney(pay / hours) : roundedMoney(line.hourlyRate);
+                return {
+                    id: line.id,
+                    employeeId: line.employeeId,
+                    employeeName: line.employeeName,
+                    hours,
+                    hourlyRate,
+                    pay,
+                    syncedFromPayrollRun: true,
+                };
+            })
+            .filter((l) => l.pay > 0 || l.hours > 0)
+            .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+
+        const existingPayroll = existingMonth?.payroll || defaultPayroll();
+        const mergedWeeks = {
+            week1: num(existingPayroll.week1),
+            week2: num(existingPayroll.week2),
+            week3: num(existingPayroll.week3),
+            week4: num(existingPayroll.week4),
+        };
+
+        Object.values(previousSyncs).forEach((sync) => {
+            const weekKey = sync?.weekKey || "week4";
+            mergedWeeks[weekKey] = (mergedWeeks[weekKey] || 0) - num(sync?.totalPay);
+        });
+        Object.values(syncs).forEach((sync) => {
+            const weekKey = sync?.weekKey || "week4";
+            mergedWeeks[weekKey] = (mergedWeeks[weekKey] || 0) + num(sync?.totalPay);
+        });
+        Object.keys(mergedWeeks).forEach((k) => {
+            mergedWeeks[k] = roundedMoney(mergedWeeks[k]);
+        });
+
+        if (!preservedLines.length && !runLines.length) {
+            return { payrollLines: [], payroll: mergedWeeks };
+        }
+
+        return {
+            payrollLines: [...preservedLines, ...runLines],
+            payroll: mergedWeeks,
+        };
+    }
+
+    /** Merge a saved payroll run into a books month document. */
+    function applyPayrollRunToMonth(month, run) {
+        const syncs = { ...(month?.payrollRunSyncs || {}) };
+        syncs[run.id] = buildPayrollRunSyncRecord(run);
+        const rebuilt = rebuildMonthPayrollFromSyncs(month, syncs);
+        return {
+            ...month,
+            payrollRunSyncs: syncs,
+            payrollLines: rebuilt.payrollLines,
+            payroll: rebuilt.payroll,
+        };
+    }
+
+    /**
+     * Combine legacy payrollEntries totals with payrollRunSyncs on a books month.
+     * Run-synced employees win over entry lines.
+     */
+    function mergePayrollWithRunSyncs(fromEntries, payrollRunSyncs) {
+        const baseMonth = {
+            payrollLines: (fromEntries?.payrollLines || []).map(normalizePayrollLine),
+            payroll: fromEntries?.payroll || defaultPayroll(),
+            payrollRunSyncs: payrollRunSyncs || {},
+        };
+        return rebuildMonthPayrollFromSyncs(baseMonth, payrollRunSyncs || {});
+    }
+
     function defaultMonthDoc() {
         return {
             utilities: defaultUtilities(),
@@ -2438,6 +2597,9 @@
         defaultPayrollLine,
         normalizePayrollLine,
         payrollTotalFrom,
+        mergePayrollWithRunSyncs,
+        applyPayrollRunToMonth,
+        buildPayrollRunSyncRecord,
         defaultMonthDoc,
         normalizeMonthDoc,
         isMonthClosed,

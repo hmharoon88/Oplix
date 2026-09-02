@@ -144,6 +144,7 @@
             canViewLotteryData: isSupervisor ? !!form.canViewLotteryData : false,
             canEditSchedules: isSupervisor ? !!form.canEditSchedules : false,
             canViewReports: isSupervisor ? !!form.canViewReports : false,
+            canManagePayroll: isSupervisor ? !!form.canManagePayroll : false,
         };
 
         await managerCol(managerUserId).doc(uid).set(employee);

@@ -41,6 +41,10 @@
             title: String(item.title || "").trim(),
             notes: String(item.notes || "").trim(),
             dueDate: item.dueDate ? String(item.dueDate).slice(0, 10) : "",
+            dueReminder: item.dueDate && window.OplixDueDateReminderModel
+                ? OplixDueDateReminderModel.normalizeDueReminder(item.dueReminder)
+                : null,
+            dueReminderSentOn: item.dueReminderSentOn || null,
             isCompleted: !!item.isCompleted,
             completedAt: item.completedAt || null,
             createdAt: item.createdAt || null,

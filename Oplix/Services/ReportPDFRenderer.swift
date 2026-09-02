@@ -182,21 +182,30 @@ enum ReportPDFRenderer {
 
         func drawRegister(_ content: RegisterReportContent) {
             if !content.dailyRows.isEmpty {
-                drawSectionTitle("Daily totals (location)")
+                let dailyTitle = content.shiftRows.isEmpty
+                    ? "Daily totals (Daily books)"
+                    : "Daily totals (location)"
+                drawSectionTitle(dailyTitle)
                 for row in content.dailyRows {
                     beginPageIfNeeded(requiredHeight: 4 * lineHeight + 8)
                     y = drawText(ReportFormatting.dateOnly(row.date), font: .boldSystemFont(ofSize: 11))
                     y += 4
                     drawKeyValue("Sales", value: ReportFormatting.currency(row.sales), indent: 8)
                     drawKeyValue("Expenses", value: ReportFormatting.currency(row.expenses), indent: 8)
-                    drawKeyValue("Shifts", value: "\(row.shiftCount)", indent: 8)
+                    if row.shiftCount > 0 {
+                        drawKeyValue("Shifts", value: "\(row.shiftCount)", indent: 8)
+                    }
                     y += 8
                 }
                 y += sectionGap
             }
 
             if content.employeeSections.isEmpty {
-                drawEmptyNote("No register shifts in this period.")
+                if content.dailyRows.isEmpty {
+                    drawEmptyNote("No sales or expense data in this period.")
+                } else {
+                    drawEmptyNote("Totals above are from Daily books. No shift register entries in this period.")
+                }
                 return
             }
 
